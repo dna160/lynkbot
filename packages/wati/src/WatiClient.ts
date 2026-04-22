@@ -64,11 +64,16 @@ export class WatiClient {
       );
     }
     // phone goes in the path; messageText is a query param (WATI API spec)
-    await this.http.post(
+    const res = await this.http.post(
       `/api/v1/sendSessionMessage/${encodeURIComponent(params.phone)}`,
       null,
       { params: { messageText: params.message } },
     );
+    // WATI returns HTTP 200 even on failure — check the body
+    if (res.data?.ok === false) {
+      const detail = res.data?.message?.failedDetail ?? res.data?.error ?? 'Unknown WATI send error';
+      throw new Error(`WATI sendSessionMessage failed: ${detail}`);
+    }
   }
 
   async markAsRead(messageId: string, phone: string): Promise<void> {

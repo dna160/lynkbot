@@ -24,9 +24,15 @@ export const watiWebhookRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const { tenantId } = request.params;
+      const raw = request.body as Record<string, unknown>;
 
-      // Log raw body so we can debug schema mismatches
-      request.log.info({ tenantId, rawBody: request.body }, 'WATI webhook received');
+      // WATI fires webhooks for both inbound (buyer) and outbound (operator) messages.
+      // owner: true = buyer sent it (process it). owner: false = operator sent it (skip).
+      if (raw?.owner === false) {
+        return reply.status(200).send({ received: true, skipped: 'operator_message' });
+      }
+
+      request.log.info({ tenantId, waId: raw?.waId }, 'WATI inbound message received');
 
       // Return 200 immediately — WATI retries on 5xx or timeout
       reply.status(200).send({ received: true });

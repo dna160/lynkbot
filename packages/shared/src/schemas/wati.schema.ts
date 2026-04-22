@@ -57,6 +57,12 @@ export const WatiWebhookSchema = z.object({
   isDeleted: z.boolean().optional(),
   isFailed: z.boolean().optional(),
   isForwarded: z.boolean().optional(),
+  // owner: true = message FROM the buyer (inbound), false = sent BY operator (outbound)
+  owner: z.boolean().optional(),
+  eventType: z.string().optional(),
+  statusString: z.string().optional(),
+  operatorName: z.string().optional(),
+  operatorEmail: z.string().optional(),
 });
 
 export type WatiWebhookPayload = z.infer<typeof WatiWebhookSchema>;
