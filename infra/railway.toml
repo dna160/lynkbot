@@ -1,0 +1,27 @@
+# LynkBot Railway deployment configuration — MVP
+# Two services: API (HTTP) + Worker (background jobs)
+# Database and Redis are Railway managed services
+
+[build]
+builder = "DOCKERFILE"
+
+[[services]]
+name = "lynkbot-api"
+source = "."
+dockerfile = "apps/api/Dockerfile"
+
+[services.deploy]
+startCommand = "node dist/index.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[[services]]
+name = "lynkbot-worker"
+source = "."
+dockerfile = "apps/worker/Dockerfile"
+
+[services.deploy]
+startCommand = "node dist/index.js"
+restartPolicyType = "ALWAYS"
