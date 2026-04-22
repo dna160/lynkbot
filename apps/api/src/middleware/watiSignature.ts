@@ -12,26 +12,21 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { config } from '../config';
 
+// WATI_ALLOWED_IPS: comma-separated list of WATI server IPs for production IP allowlisting.
+// WATI does not send HMAC signatures, so we use IP-based verification when configured.
+const WATI_ALLOWED_IPS = (process.env.WATI_ALLOWED_IPS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+
 export async function verifyWatiSignature(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  // WATI does not send HMAC signatures — skip verification in development.
-  // In production, restrict by IP allowlist (WATI server IPs) instead.
-  if (config.NODE_ENV === 'production' && config.WATI_WEBHOOK_SECRET) {
-    const signature = request.headers['x-wati-signature'] as string | undefined;
-    if (!signature) {
-      return reply.status(401).send({ error: 'Missing WATI signature' });
-    }
-    const body = JSON.stringify(request.body);
-    const expected = createHmac('sha256', config.WATI_WEBHOOK_SECRET)
-      .update(body)
-      .digest('hex');
-    const expectedBuf = Buffer.from(expected, 'hex');
-    const actualBuf = Buffer.from(signature.replace('sha256=', ''), 'hex');
-    if (expectedBuf.length !== actualBuf.length || !timingSafeEqual(expectedBuf, actualBuf)) {
-      request.log.warn({ ip: request.ip, url: request.url }, 'WATI signature verification failed');
-      return reply.status(401).send({ error: 'Invalid WATI signature' });
+  // If IP allowlist is configured, enforce it in production
+  if (config.NODE_ENV === 'production' && WATI_ALLOWED_IPS.length > 0) {
+    const clientIp = request.ip;
+    if (!WATI_ALLOWED_IPS.includes(clientIp)) {
+      request.log.warn({ ip: clientIp, url: request.url }, 'WATI webhook rejected: IP not in allowlist');
+      return reply.status(401).send({ error: 'Unauthorized webhook source' });
     }
   }
+  // No HMAC check — WATI does not send signatures
 }
