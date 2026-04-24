@@ -25,7 +25,12 @@ import {
   query as ragQuery,
 } from '@lynkbot/ai';
 import { CONVERSATION_STATES } from '@lynkbot/shared';
-import { WatiClient } from '@lynkbot/wati';
+import {
+  WatiClient,
+  extractText,
+  extractMessageId,
+  isLocationMessage,
+} from '@lynkbot/wati';
 import { config } from '../config';
 import { CheckoutService } from './checkout.service';
 import { ShippingService } from './shipping.service';
@@ -36,22 +41,6 @@ import type { WatiWebhookPayload, WaLocation } from '@lynkbot/shared';
 
 type ConvRow = typeof conversations.$inferSelect;
 type BuyerRow = typeof buyers.$inferSelect;
-
-function extractText(payload: WatiWebhookPayload): string {
-  return (payload.text ?? payload.caption ?? '').trim();
-}
-
-function extractMessageId(payload: WatiWebhookPayload): string {
-  return payload.id ?? payload.messageId ?? '';
-}
-
-function isLocationMessage(payload: WatiWebhookPayload): boolean {
-  return payload.type === 'location' || !!(payload.location?.latitude);
-}
-
-function isTextMessage(payload: WatiWebhookPayload): boolean {
-  return payload.messageType === 'text' || payload.type === 'text' || !!(payload.text);
-}
 
 function isWithin24HourWindow(lastMessageAt: Date): boolean {
   return Date.now() - lastMessageAt.getTime() < 24 * 60 * 60 * 1000;
@@ -130,7 +119,7 @@ export class ConversationService {
         .where(eq(buyers.id, buyer.id));
     }
 
-    if ((buyer as any).doNotContact) return; // Silently ignore
+    if (buyer.doNotContact) return; // Silently ignore opted-out buyers
 
     // Get or create active conversation
     let conv = await db.query.conversations.findFirst({
@@ -204,13 +193,8 @@ export class ConversationService {
     // STOP detection
     if (containsAny(text, STOP_KEYWORDS)) {
       await db.update(buyers)
-        .set({ updatedAt: new Date() } as any)
+        .set({ doNotContact: true, updatedAt: new Date() })
         .where(eq(buyers.id, buyer.id));
-
-      // Mark doNotContact via raw update (field may be on extended buyer shape)
-      await db.execute(
-        `UPDATE buyers SET do_not_contact = true, updated_at = NOW() WHERE id = '${buyer.id}'` as any,
-      ).catch(() => null);
 
       await db.update(conversations)
         .set({ state: 'CLOSED_LOST', isActive: false, resolvedAt: new Date(), lastMessageAt: new Date() })
@@ -245,8 +229,7 @@ export class ConversationService {
         }).catch(() => null);
       }
 
-      // Notify team via notification service (best-effort)
-      this.notificationService.getWatiClientForTenant(conv.tenantId).catch(() => null);
+      // Operator dashboard shows ESCALATED conversations — no additional push notification configured yet
 
       return true;
     }

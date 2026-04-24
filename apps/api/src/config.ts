@@ -12,6 +12,7 @@ import { z } from 'zod';
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('3000').transform(Number),
+  WORKER_CONCURRENCY: z.string().default('5').transform(Number),
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string(),
   JWT_SECRET: z.string().min(32),
@@ -25,6 +26,7 @@ const envSchema = z.object({
   WATI_BASE_URL: z.string().default('https://live-server.wati.io'),
   WATI_API_KEY: z.string().default(''),
   WATI_CHANNEL_NUMBER: z.string().default(''),
+  WATI_ALLOWED_IPS: z.string().default(''),
   WATI_WEBHOOK_SECRET: z.string().default('dev_wati_secret'),
   WATI_PARTNER_ENABLED: z.string().default('false').transform(v => v === 'true'),
   PAYMENT_PROVIDER: z.enum(['midtrans', 'xendit']).default('midtrans'),
