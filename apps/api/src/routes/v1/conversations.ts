@@ -184,7 +184,11 @@ export const conversationRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Send via WATI — in dev mode we tolerate WATI errors (fake phone numbers)
-      const wati = new WatiClient(config.WATI_API_KEY, config.WATI_BASE_URL);
+      const wati = new WatiClient(
+        config.WATI_API_KEY,
+        config.WATI_BASE_URL,
+        config.WATI_CHANNEL_NUMBER || undefined,
+      );
       try {
         await wati.sendText({
           phone: conv.buyerWaPhone!,

@@ -89,7 +89,11 @@ export class ConversationService {
   private paymentService = new PaymentService();
 
   private getWatiClient(): WatiClient {
-    return new WatiClient(config.WATI_API_KEY, config.WATI_BASE_URL);
+    return new WatiClient(
+      config.WATI_API_KEY,
+      config.WATI_BASE_URL,
+      config.WATI_CHANNEL_NUMBER || undefined,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

@@ -24,6 +24,7 @@ const envSchema = z.object({
   XAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   WATI_BASE_URL: z.string().default('https://live-server.wati.io'),
   WATI_API_KEY: z.string().default(''),
+  WATI_CHANNEL_NUMBER: z.string().default(''),
   WATI_WEBHOOK_SECRET: z.string().default('dev_wati_secret'),
   WATI_PARTNER_ENABLED: z.string().default('false').transform(v => v === 'true'),
   PAYMENT_PROVIDER: z.enum(['midtrans', 'xendit']).default('midtrans'),

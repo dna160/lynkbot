@@ -110,6 +110,9 @@ export function ConversationsPage() {
     queryFn: () => api.get(`/conversations/${selectedId}`).then(r => r.data),
     enabled: !!selectedId,
     refetchInterval: 3000,
+    retry: false,
+    // If the conversation 404s (e.g. belongs to another tenant), clear selection
+    onError: () => setSelectedId(null),
   });
 
   // Auto-scroll to bottom when messages change

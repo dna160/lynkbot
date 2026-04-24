@@ -23,12 +23,17 @@ export interface SendTextParams {
   phone: string;
   message: string;
   isWithin24hrWindow: boolean;
+  /** Pass when the WATI account has multiple numbers — routes the send via the correct channel. */
+  channelPhoneNumber?: string;
 }
 
 export class WatiClient {
   private http: AxiosInstance;
+  /** Default channel number used when the WATI account has multiple numbers. */
+  private defaultChannelNumber?: string;
 
-  constructor(apiKey: string, baseUrl?: string) {
+  constructor(apiKey: string, baseUrl?: string, channelPhoneNumber?: string) {
+    this.defaultChannelNumber = channelPhoneNumber;
     this.http = axios.create({
       baseURL: baseUrl ?? process.env.WATI_BASE_URL ?? 'https://live-server.wati.io',
       headers: {
@@ -64,10 +69,15 @@ export class WatiClient {
       );
     }
     // phone goes in the path; messageText is a query param (WATI API spec)
+    const queryParams: Record<string, string> = { messageText: params.message };
+    const channelNum = params.channelPhoneNumber ?? this.defaultChannelNumber;
+    if (channelNum) {
+      queryParams.channelPhoneNumber = channelNum;
+    }
     const res = await this.http.post(
       `/api/v1/sendSessionMessage/${encodeURIComponent(params.phone)}`,
       null,
-      { params: { messageText: params.message } },
+      { params: queryParams },
     );
     // WATI returns HTTP 200 even on failure — check the body
     if (res.data?.ok === false) {
