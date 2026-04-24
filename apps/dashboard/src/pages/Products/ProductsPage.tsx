@@ -10,6 +10,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, aiApi, type ProductCopy } from '../../lib/api';
 import { Badge } from '../../components/Badge';
 import { Modal } from '../../components/Modal';
+import { SearchInput } from '../../components/SearchInput';
+import { useToast } from '../../components/ToastProvider';
 
 interface Product {
   id: string; name: string; sku?: string; priceIdr: number; weightGrams: number;
@@ -291,13 +293,25 @@ function EditProductModal({ product, inv, open, onClose, onSaved }: {
   );
 }
 
+type ProductFilter = 'all' | 'active' | 'inactive' | 'lowstock';
+
+const FILTER_TABS: { key: ProductFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'inactive', label: 'Inactive' },
+  { key: 'lowstock', label: 'Low Stock' },
+];
+
 export function ProductsPage() {
   const qc = useQueryClient();
+  const { addToast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [aiProduct, setAiProduct] = useState<Product | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ProductFilter>('all');
 
-  const { data: products = [], isLoading: pLoading } = useQuery<Product[]>({
+  const { data: allProducts = [], isLoading: pLoading } = useQuery<Product[]>({
     queryKey: ['products'],
     queryFn: () => api.get('/products').then(r => r.data),
   });
@@ -309,28 +323,77 @@ export function ProductsPage() {
 
   const invMap = Object.fromEntries(inventory.map(i => [i.productId, i]));
 
+  const products = allProducts.filter(p => {
+    const inv = invMap[p.id];
+    const matchesSearch = !search.trim() ||
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.sku?.toLowerCase().includes(search.toLowerCase());
+    const matchesFilter =
+      filter === 'all' ? true :
+      filter === 'active' ? p.isActive :
+      filter === 'inactive' ? !p.isActive :
+      filter === 'lowstock' ? (inv ? inv.quantityAvailable - inv.quantityReserved <= inv.lowStockThreshold : false) :
+      true;
+    return matchesSearch && matchesFilter;
+  });
+
   const toggleActive = useMutation({
     mutationFn: (p: Product) => api.patch(`/products/${p.id}`, { isActive: !p.isActive }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      addToast('Product status updated', 'success');
+    },
   });
 
   const deleteProduct = useMutation({
     mutationFn: (id: string) => api.delete(`/products/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      addToast('Product deleted', 'success');
+    },
   });
 
-  function refetch() { qc.invalidateQueries({ queryKey: ['products'] }); qc.invalidateQueries({ queryKey: ['inventory'] }); }
+  function refetch() {
+    qc.invalidateQueries({ queryKey: ['products'] });
+    qc.invalidateQueries({ queryKey: ['inventory'] });
+    addToast('Product saved', 'success');
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Products</h1>
-          <p className="text-slate-400 text-sm mt-1">{products.length} product{products.length !== 1 ? 's' : ''}</p>
+          <p className="text-slate-400 text-sm mt-1">{allProducts.length} product{allProducts.length !== 1 ? 's' : ''}</p>
         </div>
-        <button onClick={() => setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">
-          + Add Product
-        </button>
+        <div className="flex items-center gap-3">
+          <SearchInput
+            placeholder="Search by name or SKU..."
+            value={search}
+            onChange={setSearch}
+            className="w-64"
+          />
+          <button onClick={() => setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">
+            + Add Product
+          </button>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex gap-1 mb-6 bg-surface border border-border rounded-lg p-1 overflow-x-auto">
+        {FILTER_TABS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setFilter(tab.key)}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
+              filter === tab.key
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {pLoading ? (

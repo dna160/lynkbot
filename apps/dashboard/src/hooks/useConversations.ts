@@ -8,7 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { conversationsApi } from '@/lib/api';
 
-export function useConversations(params?: { status?: string; page?: number }) {
+export function useConversations(params?: { state?: string; isActive?: string; page?: number; limit?: number }) {
   return useQuery({
     queryKey: ['conversations', params],
     queryFn: () => conversationsApi.list(params).then((r) => r.data),

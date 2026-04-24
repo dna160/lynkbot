@@ -7,6 +7,7 @@
  */
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { buyersApi, broadcastsApi, type Buyer, type BroadcastTemplate } from '@/lib/api';
+import { useToast } from '@/components/ToastProvider';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ interface ImportModalProps {
 }
 
 function ImportModal({ onClose, onDone }: ImportModalProps) {
+  const { addToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ imported: number; skipped: number; total: number; errors: string[] } | null>(null);
@@ -52,6 +54,7 @@ function ImportModal({ onClose, onDone }: ImportModalProps) {
     try {
       const res = await buyersApi.import(file);
       setResult(res.data);
+      addToast(`${res.data.imported} contacts imported`, 'success');
       onDone();
     } catch (err: any) {
       setError(err?.response?.data?.error ?? 'Upload failed');
@@ -165,6 +168,7 @@ interface BroadcastModalProps {
 }
 
 function BroadcastModal({ onClose }: BroadcastModalProps) {
+  const { addToast } = useToast();
   const [templates, setTemplates] = useState<BroadcastTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [selectedKey, setSelectedKey] = useState('');
@@ -200,6 +204,7 @@ function BroadcastModal({ onClose }: BroadcastModalProps) {
         : undefined;
       const res = await broadcastsApi.create({ templateKey: selectedKey, parameters: params, audienceFilter });
       setResult(res.data);
+      addToast(`Broadcast queued for ${res.data.recipientCount} recipients`, 'success');
     } catch (err: any) {
       setError(err?.response?.data?.error ?? 'Failed to send broadcast');
     } finally {

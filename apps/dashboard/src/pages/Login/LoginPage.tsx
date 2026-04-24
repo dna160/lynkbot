@@ -33,10 +33,10 @@ export function LoginPage() {
         if (!tenant.onboardingCompleted) {
           navigate('/onboarding');
         } else {
-          navigate('/dashboard/orders');
+          navigate('/dashboard');
         }
       } else {
-        navigate('/dashboard/orders');
+        navigate('/dashboard');
       }
     } catch (err: unknown) {
       const message =

@@ -15,6 +15,7 @@ import { OrdersPage } from './pages/Orders/OrdersPage';
 import { ConversationsPage } from './pages/Conversations/ConversationsPage';
 import { AnalyticsPage } from './pages/Analytics/AnalyticsPage';
 import { BuyersPage } from './pages/Buyers/BuyersPage';
+import { OverviewPage } from './pages/Overview/OverviewPage';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { crashed: boolean; error: string }> {
   state = { crashed: false, error: '' };
@@ -56,7 +57,7 @@ export default function App() {
       <Route path="/dashboard" element={
         <ProtectedRoute><Layout /></ProtectedRoute>
       }>
-        <Route index element={<Navigate to="orders" replace />} />
+        <Route index element={<OverviewPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route path="conversations" element={<ConversationsPage />} />

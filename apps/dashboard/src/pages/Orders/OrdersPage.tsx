@@ -9,6 +9,8 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { ResiModal } from './ResiModal';
+import { SearchInput } from '../../components/SearchInput';
+import { useToast } from '../../components/ToastProvider';
 
 type OrderStatus = 'pending_payment' | 'paid' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
 
@@ -58,10 +60,12 @@ const PAGE_SIZE = 20;
 
 export function OrdersPage() {
   const qc = useQueryClient();
+  const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<OrderStatus | 'all'>('all');
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [resiOrder, setResiOrder] = useState<Order | null>(null);
+  const [search, setSearch] = useState('');
 
   const { data, isLoading } = useQuery<OrdersResponse>({
     queryKey: ['orders', activeTab, page],
@@ -70,8 +74,19 @@ export function OrdersPage() {
     }).then(r => r.data),
   });
 
-  const orders = data?.items ?? [];
-  const total = data?.total ?? 0;
+  const allOrders = data?.items ?? [];
+  const totalAll = data?.total ?? 0;
+
+  const orders = search.trim()
+    ? allOrders.filter(o =>
+        o.orderCode.toLowerCase().includes(search.toLowerCase()) ||
+        o.buyer?.displayName?.toLowerCase().includes(search.toLowerCase()) ||
+        o.buyer?.waPhone?.toLowerCase().includes(search.toLowerCase()) ||
+        o.product?.name?.toLowerCase().includes(search.toLowerCase())
+      )
+    : allOrders;
+
+  const total = search.trim() ? orders.length : totalAll;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   function handleTabChange(tab: OrderStatus | 'all') { setActiveTab(tab); setPage(1); }
@@ -79,9 +94,17 @@ export function OrdersPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Orders</h1>
-        <p className="text-slate-400 text-sm mt-1">{total} order{total !== 1 ? 's' : ''} total</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Orders</h1>
+          <p className="text-slate-400 text-sm mt-1">{totalAll} order{totalAll !== 1 ? 's' : ''} total</p>
+        </div>
+        <SearchInput
+          placeholder="Search by order code, buyer, or product..."
+          value={search}
+          onChange={setSearch}
+          className="w-72"
+        />
       </div>
 
       {/* Status tabs */}
@@ -212,7 +235,10 @@ export function OrdersPage() {
         order={resiOrder}
         open={!!resiOrder}
         onClose={() => setResiOrder(null)}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['orders'] })}
+        onSaved={() => {
+          qc.invalidateQueries({ queryKey: ['orders'] });
+          addToast('Tracking number updated', 'success');
+        }}
       />
     </div>
   );

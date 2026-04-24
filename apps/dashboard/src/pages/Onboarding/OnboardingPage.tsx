@@ -29,7 +29,7 @@ export function OnboardingPage() {
 
   function next() { setStep(s => Math.min(s + 1, STEPS.length)); }
   function back() { setStep(s => Math.max(s - 1, 1)); }
-  function finish() { navigate('/dashboard/orders'); }
+  function finish() { navigate('/dashboard'); }
 
   return (
     <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center p-6">

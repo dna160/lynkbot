@@ -8,7 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '@/lib/api';
 
-export function useOrders(params?: { status?: string; page?: number; limit?: number }) {
+export function useOrders(params?: { status?: string; page?: number; limit?: number; search?: string }) {
   return useQuery({
     queryKey: ['orders', params],
     queryFn: () => ordersApi.list(params).then((r) => r.data),

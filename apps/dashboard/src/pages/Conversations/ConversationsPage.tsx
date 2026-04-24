@@ -10,6 +10,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, aiApi } from '../../lib/api';
 import type { ConvState, Conversation } from '../../lib/api';
+import { SearchInput } from '../../components/SearchInput';
+import { useToast } from '../../components/ToastProvider';
 
 interface Message {
   id: string;
@@ -82,10 +84,12 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function ConversationsPage() {
   const qc = useQueryClient();
+  const { addToast } = useToast();
   const [filter, setFilter] = useState<Filter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [search, setSearch] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -102,7 +106,13 @@ export function ConversationsPage() {
     refetchInterval: 5000,
   });
 
-  const conversations = listData?.items ?? [];
+  const allConversations = listData?.items ?? [];
+  const conversations = search.trim()
+    ? allConversations.filter(c =>
+        c.buyer?.displayName?.toLowerCase().includes(search.toLowerCase()) ||
+        c.buyer?.waPhone?.toLowerCase().includes(search.toLowerCase())
+      )
+    : allConversations;
 
   // Conversation detail (messages) — poll every 3s when selected
   const { data: detail } = useQuery<ConversationDetail>({
@@ -125,6 +135,7 @@ export function ConversationsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', selectedId] });
+      addToast('Conversation taken over', 'success');
     },
   });
 
@@ -133,6 +144,7 @@ export function ConversationsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', selectedId] });
+      addToast('Returned to bot', 'success');
     },
   });
 
@@ -142,6 +154,7 @@ export function ConversationsPage() {
     onSuccess: () => {
       setReplyText('');
       qc.invalidateQueries({ queryKey: ['conversation', selectedId] });
+      addToast('Message sent', 'success');
     },
   });
 
@@ -157,7 +170,7 @@ export function ConversationsPage() {
       setReplyText(res.data.reply);
       textareaRef.current?.focus();
     } catch {
-      // silently ignore — operator can still type manually
+      addToast('Failed to generate AI suggestion', 'error');
     } finally {
       setAiLoading(false);
     }
@@ -186,6 +199,15 @@ export function ConversationsPage() {
         <div className="mb-3">
           <h1 className="text-xl font-bold text-white">Conversations</h1>
           <p className="text-slate-400 text-xs mt-0.5">{listData?.total ?? 0} total · live</p>
+        </div>
+
+        {/* Search */}
+        <div className="mb-3">
+          <SearchInput
+            placeholder="Search conversations..."
+            value={search}
+            onChange={setSearch}
+          />
         </div>
 
         {/* Filter tabs */}
