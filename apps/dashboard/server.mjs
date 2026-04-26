@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 5173;
-const API_TARGET = process.env.API_URL || 'http://host.docker.internal:3000';
+const API_URL = new URL(process.env.API_URL || 'http://localhost:3000');
 const DIST_DIR = path.join(__dirname, 'dist');
 
 const mimeTypes = {
@@ -21,11 +21,11 @@ const mimeTypes = {
 
 function proxyRequest(req, res, targetPath) {
   const options = {
-    hostname: 'host.docker.internal',
-    port: 3000,
+    hostname: API_URL.hostname,
+    port: Number(API_URL.port) || (API_URL.protocol === 'https:' ? 443 : 80),
     path: targetPath,
     method: req.method,
-    headers: { ...req.headers, host: 'host.docker.internal:3000' },
+    headers: { ...req.headers, host: API_URL.host },
   };
 
   const proxyReq = http.request(options, (proxyRes) => {
@@ -86,5 +86,5 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Dashboard server running at http://0.0.0.0:${PORT}/`);
-  console.log(`API proxy: ${API_TARGET}`);
+  console.log(`API proxy → ${API_URL.href}`);
 });

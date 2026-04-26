@@ -76,7 +76,7 @@ function KnowledgeUploadModal({ product, onClose, onDone }: {
   };
 
   return (
-    <Modal open onClose={step === 'uploading' || step === 'ingesting' ? undefined : onClose}
+    <Modal open onClose={step === 'uploading' || step === 'ingesting' ? () => {} : onClose}
       title={`📄 Upload Knowledge — ${product.name}`}>
       <div className="space-y-4">
         {/* Current status */}
