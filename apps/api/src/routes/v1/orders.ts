@@ -8,9 +8,9 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, inArray } from '@lynkbot/db';
+import { eq, and, desc } from '@lynkbot/db';
 import { Queue } from 'bullmq';
-import { db, orders, shipments, conversations, buyers, products } from '@lynkbot/db';
+import { db, orders, shipments, conversations } from '@lynkbot/db';
 import { QUEUES } from '@lynkbot/shared';
 import { config } from '../../config';
 

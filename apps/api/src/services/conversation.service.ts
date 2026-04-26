@@ -24,7 +24,6 @@ import {
   buildSystemPrompt,
   query as ragQuery,
 } from '@lynkbot/ai';
-import { CONVERSATION_STATES } from '@lynkbot/shared';
 import {
   WatiClient,
   extractText,

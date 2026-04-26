@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/components/Badge.tsx
- * role: Reusable status badge with color variants and optional pulse animation
- * exports: Badge
- */
 import clsx from 'clsx';
 
 type BadgeVariant = 'gray' | 'blue' | 'green' | 'yellow' | 'red' | 'indigo';

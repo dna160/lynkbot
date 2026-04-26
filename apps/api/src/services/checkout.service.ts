@@ -172,7 +172,7 @@ export class CheckoutService {
     }
 
     const tenant = await db.query.tenants.findFirst({
-      where: eq(require('@lynkbot/db').tenants.id, conv.tenantId),
+      where: eq(tenants.id, conv.tenantId),
     }).catch(() => null);
 
     const originCityId = (tenant as any)?.originCityId ?? '501'; // Jakarta default fallback
@@ -235,7 +235,7 @@ export class CheckoutService {
     if (!draft?.rajaongkirCityId) return null;
 
     const tenant = await db.query.tenants.findFirst({
-      where: eq(require('@lynkbot/db').tenants.id, conv.tenantId),
+      where: eq(tenants.id, conv.tenantId),
     }).catch(() => null);
 
     const originCityId = (tenant as any)?.originCityId ?? '501';

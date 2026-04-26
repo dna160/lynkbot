@@ -1,88 +1,40 @@
-/**
- * @CLAUDE_CONTEXT
- * Package : apps/dashboard
- * File    : src/pages/Analytics/AnalyticsPage.tsx
- * Role    : KPI cards, revenue line chart, funnel bar chart, top products table, payment pie chart.
- * Exports : AnalyticsPage
- */
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  BarChart, Bar, PieChart, Pie, Cell, Legend,
-} from 'recharts';
-import { api } from '../../lib/api';
-import { StatCard } from '../../components/StatCard';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar } from 'recharts';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import { StatCard } from '@/components/StatCard';
 
 type Period = '7d' | '30d' | '90d';
-
-interface AnalyticsOverview {
-  totalOrders: number; totalRevenue: number; conversionRate: number; avgOrderValue: number;
-  ordersByStatus: Record<string, number>;
-  revenueOverTime: { date: string; revenue: number }[];
-  topProducts: { productId: string; name: string; unitsSold: number; revenue: number }[];
-  funnelData: { stage: string; count: number }[];
-}
-
 const PERIOD_LABELS: Record<Period, string> = { '7d': '7 Days', '30d': '30 Days', '90d': '90 Days' };
-
-const PIE_COLORS = ['#6366F1', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899'];
 
 function fmtIdr(n: number, short = false): string {
   if (short && n >= 1_000_000) return `Rp ${(n / 1_000_000).toFixed(1)}M`;
   if (short && n >= 1_000) return `Rp ${(n / 1_000).toFixed(0)}K`;
   return `Rp ${n.toLocaleString('id-ID')}`;
 }
-
-function fmtDate(s: string): string {
-  const d = new Date(s);
-  return d.toLocaleDateString('id-ID', { month: 'short', day: 'numeric' });
-}
+function fmtDate(s: string): string { return new Date(s).toLocaleDateString('id-ID', { month: 'short', day: 'numeric' }); }
 
 export function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>('30d');
-
-  const { data, isLoading } = useQuery<AnalyticsOverview>({
-    queryKey: ['analytics', period],
-    queryFn: () => api.get('/analytics/overview', { params: { period } }).then(r => r.data),
-  });
-
-  const pieData = data
-    ? Object.entries(data.ordersByStatus)
-        .filter(([, v]) => v > 0)
-        .map(([name, value]) => ({ name: name.replace(/_/g, ' '), value }))
-    : [];
+  const { data, isLoading, error } = useAnalytics(period);
 
   return (
     <div>
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Analytics</h1>
           <p className="text-slate-400 text-sm mt-1">Store performance overview</p>
         </div>
         <div className="flex gap-1 bg-[#1E293B] border border-[#334155] rounded-lg p-1">
-          {(Object.keys(PERIOD_LABELS) as Period[]).map(p => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
-                period === p ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {PERIOD_LABELS[p]}
-            </button>
+          {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
+            <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${period === p ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>{PERIOD_LABELS[p]}</button>
           ))}
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {[...Array(4)].map((_, i) => <div key={i} className="h-28 bg-[#1E293B] rounded-xl animate-pulse" />)}
-        </div>
-      ) : data ? (
+      {error && <div className="mb-4 bg-red-900/20 border border-red-800 rounded-xl px-4 py-3 text-red-300 text-sm">Failed to load analytics: {(error as Error).message}</div>}
+
+      {isLoading ? <div className="grid grid-cols-4 gap-4 mb-6">{[...Array(4)].map((_, i) => <div key={i} className="h-28 bg-[#1E293B] rounded-xl animate-pulse" />)}</div> : data ? (
         <>
-          {/* KPI row */}
           <div className="grid grid-cols-4 gap-4 mb-6">
             <StatCard label="Total Orders" value={String(data.totalOrders)} />
             <StatCard label="Total Revenue" value={fmtIdr(data.totalRevenue, true)} />
@@ -90,75 +42,39 @@ export function AnalyticsPage() {
             <StatCard label="Avg. Order Value" value={fmtIdr(data.avgOrderValue, true)} />
           </div>
 
-          {/* Charts row 1 */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            {/* Revenue over time */}
-            <div className="col-span-2 bg-[#1E293B] border border-[#334155] rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-300 mb-4">Revenue Over Time</h2>
-              {data.revenueOverTime.length === 0 ? (
-                <div className="h-52 flex items-center justify-center text-slate-500 text-sm">No data for this period.</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={data.revenueOverTime} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: '#94A3B8', fontSize: 11 }} />
-                    <YAxis tickFormatter={n => fmtIdr(n, true)} tick={{ fill: '#94A3B8', fontSize: 11 }} width={70} />
-                    <Tooltip
-                      contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }}
-                      labelStyle={{ color: '#94A3B8' }}
-                      formatter={(v: number) => [fmtIdr(v), 'Revenue']}
-                      labelFormatter={(l: string) => fmtDate(l)}
-                    />
-                    <Line type="monotone" dataKey="revenue" stroke="#6366F1" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* Payment breakdown pie */}
-            <div className="bg-[#1E293B] border border-[#334155] rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-300 mb-4">Orders by Status</h2>
-              {pieData.length === 0 ? (
-                <div className="h-52 flex items-center justify-center text-slate-500 text-sm">No data.</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={pieData} cx="50%" cy="45%" outerRadius={75} dataKey="value" label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                    </Pie>
-                    <Legend wrapperStyle={{ fontSize: 11, color: '#94A3B8' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+          <div className="bg-[#1E293B] border border-[#334155] rounded-xl p-5 mb-4">
+            <h2 className="text-sm font-semibold text-slate-300 mb-4">Revenue Over Time</h2>
+            {data.revenueOverTime.length === 0 ? <div className="h-52 flex items-center justify-center text-slate-500 text-sm">No data for this period.</div> : (
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={data.revenueOverTime} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                  <YAxis tickFormatter={(n) => fmtIdr(n, true)} tick={{ fill: '#94A3B8', fontSize: 11 }} width={70} />
+                  <Tooltip contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }} labelStyle={{ color: '#94A3B8' }} formatter={(v: number) => [fmtIdr(v), 'Revenue']} labelFormatter={(l: string) => fmtDate(l)} />
+                  <Line type="monotone" dataKey="revenue" stroke="#6366F1" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
-          {/* Charts row 2 */}
           <div className="grid grid-cols-3 gap-4">
-            {/* Funnel */}
             <div className="col-span-2 bg-[#1E293B] border border-[#334155] rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-300 mb-4">Conversion Funnel</h2>
-              {data.funnelData.length === 0 ? (
-                <div className="h-52 flex items-center justify-center text-slate-500 text-sm">No data.</div>
-              ) : (
+              <h2 className="text-sm font-semibold text-slate-300 mb-4">Conversation Funnel</h2>
+              {data.funnelData.length === 0 ? <div className="h-52 flex items-center justify-center text-slate-500 text-sm">No data.</div> : (
                 <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={data.funnelData} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
+                  <BarChart data={data.funnelData} layout="vertical" margin={{ top: 5, right: 20, left: 110, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
                     <XAxis type="number" tick={{ fill: '#94A3B8', fontSize: 11 }} />
-                    <YAxis type="category" dataKey="stage" tick={{ fill: '#94A3B8', fontSize: 11 }} width={80} />
+                    <YAxis type="category" dataKey="stage" tick={{ fill: '#94A3B8', fontSize: 11 }} width={105} />
                     <Tooltip contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }} labelStyle={{ color: '#94A3B8' }} />
                     <Bar dataKey="count" fill="#6366F1" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
-
-            {/* Top products */}
             <div className="bg-[#1E293B] border border-[#334155] rounded-xl p-5">
               <h2 className="text-sm font-semibold text-slate-300 mb-4">Top Products</h2>
-              {data.topProducts.length === 0 ? (
-                <div className="text-slate-500 text-sm text-center py-8">No sales yet.</div>
-              ) : (
+              {data.topProducts.length === 0 ? <div className="text-slate-500 text-sm text-center py-8">No sales yet.</div> : (
                 <div className="space-y-3">
                   {data.topProducts.slice(0, 5).map((p, i) => (
                     <div key={p.productId} className="flex items-center gap-3">

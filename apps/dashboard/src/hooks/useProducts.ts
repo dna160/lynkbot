@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/hooks/useProducts.ts
- * role: TanStack Query hooks for products and inventory CRUD
- * exports: useProducts, useInventory, useCreateProduct, useUpdateProduct, useDeleteProduct, useUpdateInventory
- */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { productsApi, inventoryApi, type CreateProductPayload, type Product } from '@/lib/api';
 
@@ -58,13 +51,8 @@ export function useDeleteProduct() {
 export function useUpdateInventory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      productId,
-      data,
-    }: {
-      productId: string;
-      data: { quantity_available: number; low_stock_threshold: number };
-    }) => inventoryApi.update(productId, data).then((r) => r.data),
+    mutationFn: ({ productId, data }: { productId: string; data: { quantityAvailable: number; lowStockThreshold: number } }) =>
+      inventoryApi.update(productId, data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory'] });
     },

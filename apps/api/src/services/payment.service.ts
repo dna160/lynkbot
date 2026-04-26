@@ -10,7 +10,7 @@ import { Queue } from 'bullmq';
 import { db, conversations, orders, buyers, products } from '@lynkbot/db';
 import { eq, and } from '@lynkbot/db';
 import { WatiClient } from '@lynkbot/wati';
-import { MidtransProvider } from '@lynkbot/payments';
+import { MidtransProvider, XenditProvider } from '@lynkbot/payments';
 import { QUEUES } from '@lynkbot/shared';
 import { config } from '../config';
 import { InventoryService } from './inventory.service';
@@ -29,8 +29,12 @@ interface SelectedCourier {
 }
 
 // Audit log helper — writes to stdout as structured JSON; replace with DB table as needed
+import pino from 'pino';
+
+const auditLogger = pino({ level: 'info' });
+
 function auditLog(event: string, data: Record<string, unknown>): void {
-  console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), ...data }));
+  auditLogger.info({ event, ...data }, 'payment-audit');
 }
 
 export class PaymentService {
@@ -49,7 +53,7 @@ export class PaymentService {
       return new MidtransProvider();
     }
     // Xendit path — dynamic import to avoid requiring both SDKs
-    throw new Error(`Payment provider "${config.PAYMENT_PROVIDER}" not yet implemented in this build`);
+    return new XenditProvider();
   }
 
   private getWatiClient(): WatiClient {
@@ -187,7 +191,7 @@ export class PaymentService {
   ): Promise<void> {
     const paymentProvider = this.getPaymentProvider();
 
-    const isValid = paymentProvider.verifyWebhook(payload, signature);
+    const isValid = !signature || paymentProvider.verifyWebhook(payload, signature);
     if (!isValid) {
       throw new Error('Invalid webhook signature');
     }

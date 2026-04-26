@@ -1,9 +1,3 @@
-/*
- * package: @lynkbot/dashboard
- * file: src/components/Toast.tsx
- * role: Individual toast notification item
- * exports: Toast
- */
 import { useEffect } from 'react';
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -38,19 +32,10 @@ export function Toast({ toast, onRemove }: ToastProps) {
   }, [toast.id, onRemove]);
 
   return (
-    <div
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-sm transform transition-all duration-300 animate-in slide-in-from-right ${typeStyles[toast.type]}`}
-      role="alert"
-    >
-      <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-white/10 text-sm">
-        {iconMap[toast.type]}
-      </span>
+    <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-sm transform transition-all duration-300 animate-in slide-in-from-right ${typeStyles[toast.type]}`} role="alert">
+      <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-white/10 text-sm">{iconMap[toast.type]}</span>
       <span className="text-sm font-medium">{toast.message}</span>
-      <button
-        onClick={() => onRemove(toast.id)}
-        className="ml-2 text-white/60 hover:text-white transition-colors"
-        aria-label="Dismiss"
-      >
+      <button onClick={() => onRemove(toast.id)} className="ml-2 text-white/60 hover:text-white transition-colors" aria-label="Dismiss">
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>

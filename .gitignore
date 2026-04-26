@@ -5,3 +5,18 @@ dist/
 *.log
 coverage/
 .turbo/
+
+# Editor / OS
+.DS_Store
+**/.DS_Store
+.claude/
+
+# Local-only directories
+apps/dashboard-old/
+
+# Local lock files (monorepo uses pnpm)
+apps/dashboard/package-lock.json
+
+# Local test scratch
+apps/dashboard/test-vite.mjs
+apps/dashboard/test.html

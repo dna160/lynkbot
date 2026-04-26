@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/hooks/useConversations.ts
- * role: TanStack Query hooks for conversations with 5s polling, takeover, return-to-bot
- * exports: useConversations, useTakeover, useReturnToBot
- */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { conversationsApi } from '@/lib/api';
 
@@ -12,7 +5,26 @@ export function useConversations(params?: { state?: string; isActive?: string; p
   return useQuery({
     queryKey: ['conversations', params],
     queryFn: () => conversationsApi.list(params).then((r) => r.data),
-    refetchInterval: 5_000,
+  });
+}
+
+export function useConversation(id: string) {
+  return useQuery({
+    queryKey: ['conversation', id],
+    queryFn: () => conversationsApi.get(id).then((r) => r.data),
+    enabled: !!id,
+    refetchInterval: 3000,
+  });
+}
+
+export function useSendMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, text }: { id: string; text: string }) =>
+      conversationsApi.sendMessage(id, text).then((r) => r.data),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['conversation', vars.id] });
+    },
   });
 }
 

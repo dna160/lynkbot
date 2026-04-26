@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/components/Layout.tsx
- * role: App shell — sidebar + scrollable main content area for authenticated pages
- * exports: Layout
- */
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 

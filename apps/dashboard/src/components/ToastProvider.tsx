@@ -1,9 +1,3 @@
-/*
- * package: @lynkbot/dashboard
- * file: src/components/ToastProvider.tsx
- * role: Global toast notification context and container
- * exports: ToastProvider, useToast
- */
 import { createContext, useContext, useCallback, useState, useRef, type ReactNode } from 'react';
 import { Toast, type ToastItem, type ToastType } from './Toast';
 

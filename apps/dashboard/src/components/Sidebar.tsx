@@ -1,9 +1,3 @@
-/*
- * package: @lynkbot/dashboard
- * file: src/components/Sidebar.tsx
- * role: Fixed left sidebar with nav links, store name display, badge counts, and logout
- * exports: Sidebar
- */
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '@/hooks/useAuth';
@@ -68,20 +62,17 @@ export function Sidebar() {
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-surface border-r border-border flex flex-col z-40">
-      {/* Logo */}
       <div className="px-6 py-5 border-b border-border">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
           <span className="text-lg font-bold text-primary">LynkBot</span>
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {navItems.map((item) => (
           <NavLink
@@ -110,7 +101,6 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Bottom: store name + logout */}
       <div className="px-3 py-4 border-t border-border space-y-2">
         {tenant && (
           <div className="px-3 py-2">
@@ -125,8 +115,7 @@ export function Sidebar() {
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-secondary hover:text-error hover:bg-red-900/20 transition-all"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
           Logout
         </button>

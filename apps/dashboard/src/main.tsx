@@ -1,9 +1,3 @@
-/**
- * @CLAUDE_CONTEXT
- * Package : apps/dashboard
- * File    : src/main.tsx
- * Role    : React app entry point. Mounts QueryClientProvider + BrowserRouter.
- */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';

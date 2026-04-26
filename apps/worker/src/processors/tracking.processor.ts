@@ -123,8 +123,8 @@ export const trackingProcessor: Processor = async (job) => {
   }
 
   // 4. Call Raja Ongkir waybill API
-  const rajaOngkirKey = process.env.RAJA_ONGKIR_API_KEY!;
-  const waybillUrl = `${process.env.RAJA_ONGKIR_BASE_URL ?? 'https://pro.rajaongkir.com/api'}/waybill`;
+  const rajaOngkirKey = process.env.RAJAONGKIR_API_KEY!;
+  const waybillUrl = `${process.env.RAJAONGKIR_BASE_URL ?? 'https://pro.rajaongkir.com/api'}/waybill`;
 
   let roResult: RajaOngkirResult;
   try {

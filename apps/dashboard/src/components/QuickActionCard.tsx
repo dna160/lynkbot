@@ -1,9 +1,3 @@
-/*
- * package: @lynkbot/dashboard
- * file: src/components/QuickActionCard.tsx
- * role: Action card for overview quick actions
- * exports: QuickActionCard
- */
 import { type ReactNode } from 'react';
 
 interface QuickActionCardProps {
@@ -25,30 +19,15 @@ const colorMap = {
 
 export function QuickActionCard({ icon, label, description, onClick, href, color = 'indigo' }: QuickActionCardProps) {
   const className = `flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors cursor-pointer ${colorMap[color]}`;
-
   const content = (
     <>
-      <div className="w-9 h-9 rounded-lg bg-black/20 flex items-center justify-center flex-shrink-0">
-        {icon}
-      </div>
+      <div className="w-9 h-9 rounded-lg bg-black/20 flex items-center justify-center flex-shrink-0">{icon}</div>
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
         {description && <div className="text-xs opacity-70">{description}</div>}
       </div>
     </>
   );
-
-  if (href) {
-    return (
-      <a href={href} className={className}>
-        {content}
-      </a>
-    );
-  }
-
-  return (
-    <button onClick={onClick} className={className}>
-      {content}
-    </button>
-  );
+  if (href) return <a href={href} className={className}>{content}</a>;
+  return <button onClick={onClick} className={className}>{content}</button>;
 }

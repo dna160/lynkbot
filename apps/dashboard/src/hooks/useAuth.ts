@@ -1,12 +1,5 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/hooks/useAuth.ts
- * role: Auth hook — login mutation, token management, tenant fetch
- * exports: useAuth
- */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { authApi, tenantApi } from '@/lib/api';
+import { authApi, tenantApi, getTenantIdFromToken } from '@/lib/api';
 
 export function useAuth() {
   const qc = useQueryClient();
@@ -14,8 +7,9 @@ export function useAuth() {
   const tenantQuery = useQuery({
     queryKey: ['tenant', 'me'],
     queryFn: () => tenantApi.getMe().then((r) => r.data),
-    enabled: !!localStorage.getItem('lynkbot_token'),
+    enabled: !!getTenantIdFromToken(),
     retry: false,
+    staleTime: 60_000,
   });
 
   const loginMutation = useMutation({
@@ -36,10 +30,11 @@ export function useAuth() {
   return {
     tenant: tenantQuery.data,
     tenantLoading: tenantQuery.isLoading,
+    tenantError: tenantQuery.error,
     login: loginMutation.mutateAsync,
     loginPending: loginMutation.isPending,
     loginError: loginMutation.error,
     logout,
-    isAuthenticated: !!localStorage.getItem('lynkbot_token'),
+    isAuthenticated: !!getTenantIdFromToken(),
   };
 }

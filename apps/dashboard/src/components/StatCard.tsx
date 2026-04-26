@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/components/StatCard.tsx
- * role: KPI stat card for analytics dashboard — shows label, value, optional trend
- * exports: StatCard
- */
 interface StatCardProps {
   label: string;
   value: string | number;

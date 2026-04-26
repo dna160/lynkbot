@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: src/hooks/useOrders.ts
- * role: TanStack Query hooks for orders list, detail, and resi update
- * exports: useOrders, useOrder, useUpdateResi
- */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '@/lib/api';
 
@@ -26,15 +19,8 @@ export function useOrder(id: string) {
 export function useUpdateResi() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      resiNumber,
-      courierCode,
-    }: {
-      id: string;
-      resiNumber: string;
-      courierCode: string;
-    }) => ordersApi.updateResi(id, resiNumber, courierCode).then((r) => r.data),
+    mutationFn: ({ id, resiNumber, courierCode }: { id: string; resiNumber: string; courierCode: string }) =>
+      ordersApi.updateResi(id, resiNumber, courierCode).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
     },

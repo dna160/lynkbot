@@ -1,11 +1,5 @@
-/**
- * @CLAUDE_CONTEXT
- * Package : apps/dashboard
- * File    : src/pages/Orders/ResiModal.tsx
- * Role    : Modal for entering shipping resi number + courier. PUTs to /orders/:id/resi.
- */
 import { useState } from 'react';
-import { api } from '../../lib/api';
+import { ordersApi } from '../../lib/api';
 import { Modal } from '../../components/Modal';
 
 interface Order { id: string; orderCode: string; product?: { name: string }; }
@@ -33,7 +27,7 @@ export function ResiModal({ order, open, onClose, onSaved }: Props) {
     if (!order) return;
     setLoading(true); setError('');
     try {
-      await api.put(`/orders/${order.id}/resi`, { resi_number: resi.trim(), courier_code: courier });
+      await ordersApi.updateResi(order.id, resi.trim(), courier);
       setResi(''); setCourier('jne');
       onSaved(); onClose();
     } catch { setError('Failed to save. Please try again.'); }
@@ -60,21 +54,12 @@ export function ResiModal({ order, open, onClose, onSaved }: Props) {
         </div>
         <div>
           <label className="text-xs text-slate-400 mb-1 block">Resi / Tracking Number</label>
-          <input
-            type="text"
-            value={resi}
-            onChange={e => setResi(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && submit()}
-            placeholder="1234567890123456"
-            className={`${inp} font-mono`}
-          />
+          <input type="text" value={resi} onChange={e => setResi(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} placeholder="1234567890123456" className={`${inp} font-mono`} />
         </div>
         {error && <p className="text-red-400 text-xs">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white">Cancel</button>
-          <button onClick={submit} disabled={loading} className="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50">
-            {loading ? 'Saving...' : 'Save & Notify Buyer'}
-          </button>
+          <button onClick={submit} disabled={loading} className="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50">{loading ? 'Saving...' : 'Save & Notify Buyer'}</button>
         </div>
       </div>
     </Modal>

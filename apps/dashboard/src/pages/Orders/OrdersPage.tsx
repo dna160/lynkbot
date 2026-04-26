@@ -1,11 +1,4 @@
-/**
- * @CLAUDE_CONTEXT
- * Package : apps/dashboard
- * File    : src/pages/Orders/OrdersPage.tsx
- * Role    : Order list with status tabs, expandable rows, resi entry modal, pagination.
- * Exports : OrdersPage
- */
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { ResiModal } from './ResiModal';
@@ -44,13 +37,8 @@ const STATUS_STYLE: Record<OrderStatus, string> = {
 };
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
-  pending_payment: 'Pending Payment',
-  paid: 'Paid',
-  processing: 'Processing',
-  shipped: 'Shipped',
-  delivered: 'Delivered',
-  cancelled: 'Cancelled',
-  refunded: 'Refunded',
+  pending_payment: 'Pending Payment', paid: 'Paid', processing: 'Processing', shipped: 'Shipped',
+  delivered: 'Delivered', cancelled: 'Cancelled', refunded: 'Refunded',
 };
 
 function fmtIdr(n: number) { return `Rp ${n.toLocaleString('id-ID')}`; }
@@ -76,16 +64,12 @@ export function OrdersPage() {
 
   const allOrders = data?.items ?? [];
   const totalAll = data?.total ?? 0;
-
-  const orders = search.trim()
-    ? allOrders.filter(o =>
-        o.orderCode.toLowerCase().includes(search.toLowerCase()) ||
-        o.buyer?.displayName?.toLowerCase().includes(search.toLowerCase()) ||
-        o.buyer?.waPhone?.toLowerCase().includes(search.toLowerCase()) ||
-        o.product?.name?.toLowerCase().includes(search.toLowerCase())
-      )
-    : allOrders;
-
+  const orders = search.trim() ? allOrders.filter(o =>
+    o.orderCode.toLowerCase().includes(search.toLowerCase()) ||
+    o.buyer?.displayName?.toLowerCase().includes(search.toLowerCase()) ||
+    o.buyer?.waPhone?.toLowerCase().includes(search.toLowerCase()) ||
+    o.product?.name?.toLowerCase().includes(search.toLowerCase())
+  ) : allOrders;
   const total = search.trim() ? orders.length : totalAll;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -99,40 +83,20 @@ export function OrdersPage() {
           <h1 className="text-2xl font-bold text-white">Orders</h1>
           <p className="text-slate-400 text-sm mt-1">{totalAll} order{totalAll !== 1 ? 's' : ''} total</p>
         </div>
-        <SearchInput
-          placeholder="Search by order code, buyer, or product..."
-          value={search}
-          onChange={setSearch}
-          className="w-72"
-        />
+        <SearchInput placeholder="Search by order code, buyer, or product..." value={search} onChange={setSearch} className="w-72" />
       </div>
 
-      {/* Status tabs */}
       <div className="flex gap-1 mb-6 bg-[#1E293B] border border-[#334155] rounded-lg p-1 overflow-x-auto">
         {STATUS_TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => handleTabChange(tab.key)}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
-              activeTab === tab.key
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
+          <button key={tab.key} onClick={() => handleTabChange(tab.key)}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${activeTab === tab.key ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
             {tab.label}
           </button>
         ))}
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[...Array(8)].map((_, i) => <div key={i} className="h-14 bg-[#1E293B] rounded-lg animate-pulse" />)}
-        </div>
-      ) : orders.length === 0 ? (
-        <div className="text-center py-20 text-slate-500">
-          <p className="text-4xl mb-3">🛒</p>
-          <p>No orders found{activeTab !== 'all' ? ` with status "${activeTab}"` : ''}.</p>
-        </div>
+      {isLoading ? <div className="space-y-2">{[...Array(8)].map((_, i) => <div key={i} className="h-14 bg-[#1E293B] rounded-lg animate-pulse" />)}</div> : orders.length === 0 ? (
+        <div className="text-center py-20 text-slate-500"><p className="text-4xl mb-3">🛒</p><p>No orders found{activeTab !== 'all' ? ` with status "${activeTab}"` : ''}.</p></div>
       ) : (
         <div className="bg-[#1E293B] border border-[#334155] rounded-xl overflow-hidden">
           <table className="w-full text-sm">
@@ -149,36 +113,22 @@ export function OrdersPage() {
             </thead>
             <tbody>
               {orders.map(order => (
-                <>
-                  <tr
-                    key={order.id}
-                    className="border-b border-[#334155]/50 hover:bg-[#334155]/20 cursor-pointer transition-colors"
-                    onClick={() => toggleExpand(order.id)}
-                  >
+                <Fragment key={order.id}>
+                  <tr className="border-b border-[#334155]/50 hover:bg-[#334155]/20 cursor-pointer transition-colors" onClick={() => toggleExpand(order.id)}>
                     <td className="px-4 py-3 font-mono text-xs text-indigo-400">{order.orderCode}</td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {order.buyer?.displayName || order.buyer?.waPhone || '—'}
-                    </td>
+                    <td className="px-4 py-3 text-slate-300">{order.buyer?.displayName || order.buyer?.waPhone || '—'}</td>
                     <td className="px-4 py-3 text-slate-300 max-w-[200px] truncate">{order.product?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-white font-medium">{fmtIdr(order.totalAmountIdr)}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLE[order.status]}`}>
-                        {STATUS_LABEL[order.status]}
-                      </span>
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLE[order.status]}`}>{STATUS_LABEL[order.status]}</span>
                     </td>
                     <td className="px-4 py-3 text-slate-400 text-xs">{fmtDate(order.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
                       {(order.status === 'paid' || order.status === 'processing') && !order.resiNumber && (
-                        <button
-                          onClick={e => { e.stopPropagation(); setResiOrder(order); }}
-                          className="text-xs bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 px-2.5 py-1 rounded transition-colors"
-                        >
-                          + Resi
-                        </button>
+                        <button onClick={e => { e.stopPropagation(); setResiOrder(order); }}
+                          className="text-xs bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 px-2.5 py-1 rounded transition-colors">+ Resi</button>
                       )}
-                      {order.resiNumber && (
-                        <span className="text-xs text-slate-400 font-mono">{order.resiNumber}</span>
-                      )}
+                      {order.resiNumber && <span className="text-xs text-slate-400 font-mono">{order.resiNumber}</span>}
                     </td>
                   </tr>
                   {expanded === order.id && (
@@ -205,41 +155,26 @@ export function OrdersPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4 text-sm">
           <span className="text-slate-400">Page {page} of {totalPages}</span>
           <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 bg-[#1E293B] border border-[#334155] text-slate-300 rounded-lg disabled:opacity-40 hover:bg-[#334155] transition-colors"
-            >← Prev</button>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 bg-[#1E293B] border border-[#334155] text-slate-300 rounded-lg disabled:opacity-40 hover:bg-[#334155] transition-colors"
-            >Next →</button>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="px-3 py-1.5 bg-[#1E293B] border border-[#334155] text-slate-300 rounded-lg disabled:opacity-40 hover:bg-[#334155] transition-colors">← Prev</button>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              className="px-3 py-1.5 bg-[#1E293B] border border-[#334155] text-slate-300 rounded-lg disabled:opacity-40 hover:bg-[#334155] transition-colors">Next →</button>
           </div>
         </div>
       )}
 
-      <ResiModal
-        order={resiOrder}
-        open={!!resiOrder}
-        onClose={() => setResiOrder(null)}
-        onSaved={() => {
-          qc.invalidateQueries({ queryKey: ['orders'] });
-          addToast('Tracking number updated', 'success');
-        }}
-      />
+      <ResiModal order={resiOrder} open={!!resiOrder} onClose={() => setResiOrder(null)} onSaved={() => { qc.invalidateQueries({ queryKey: ['orders'] }); addToast('Tracking number updated', 'success'); }} />
     </div>
   );
 }

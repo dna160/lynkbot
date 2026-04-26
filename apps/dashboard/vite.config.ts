@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: vite.config.ts
- * role: Vite build configuration with React plugin and path alias
- * exports: default Vite config
- */
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
@@ -17,12 +10,16 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 5173,
+    strictPort: true,
     proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
+      '/api': { target: 'http://localhost:3000', changeOrigin: true },
+      '/webhooks': { target: 'http://localhost:3000', changeOrigin: true },
     },
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
   },
 });

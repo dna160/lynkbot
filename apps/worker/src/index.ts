@@ -15,6 +15,7 @@ import { trackingProcessor } from './processors/tracking.processor';
 import { paymentExpiryProcessor } from './processors/paymentExpiry.processor';
 import { stockReleaseProcessor } from './processors/stockRelease.processor';
 import { restockProcessor } from './processors/restock.processor';
+import { watiStatusProcessor } from './processors/watiStatus.processor';
 
 // Parse REDIS_URL if provided (preferred over individual vars)
 function getRedisConnection() {
@@ -41,6 +42,7 @@ const workers = [
   new Worker(QUEUES.PAYMENT_EXPIRY, paymentExpiryProcessor, { connection: redisConnection, concurrency: 5 }),
   new Worker(QUEUES.STOCK_RELEASE,  stockReleaseProcessor,  { connection: redisConnection, concurrency: 5 }),
   new Worker(QUEUES.RESTOCK_NOTIFY, restockProcessor,       { connection: redisConnection, concurrency: 5 }),
+  new Worker(QUEUES.WATI_STATUS,    watiStatusProcessor,    { connection: redisConnection, concurrency: 2 }),
 ];
 
 workers.forEach((w) => {

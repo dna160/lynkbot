@@ -1,10 +1,3 @@
-/*
- * @CLAUDE_CONTEXT
- * package: @lynkbot/dashboard
- * file: tailwind.config.ts
- * role: TailwindCSS configuration with LynkBot design tokens
- * exports: default Tailwind config
- */
 import type { Config } from 'tailwindcss';
 
 const config: Config = {

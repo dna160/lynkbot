@@ -27,9 +27,18 @@ export const watiWebhookRoutes: FastifyPluginAsync = async (fastify) => {
       const raw = request.body as Record<string, unknown>;
 
       // WATI fires webhooks for both inbound (buyer) and outbound (operator) messages.
-      // owner: true = buyer sent it (process it). owner: false = operator sent it (skip).
-      if (raw?.owner === false) {
+      // owner: false = buyer/customer sent it (process it). owner: true = operator sent it from
+      // the WATI dashboard (skip — we don't echo our own outbound traffic back through the AI).
+      // eventType: "sessionMessageSent" / "templateMessageSent" are also operator-side and skipped.
+      if (raw?.owner === true) {
         return reply.status(200).send({ received: true, skipped: 'operator_message' });
+      }
+      // Skip non-inbound event types. WATI fires status callbacks for our own outbound messages
+      // (sentMessageSENT/DELIVERED/READ/FAILED, sessionMessageSent, templateMessageSent) — these
+      // have no `waId` and would crash the parser. We only act on actual inbound user messages.
+      const eventType = typeof raw?.eventType === 'string' ? raw.eventType : '';
+      if (eventType !== '' && eventType !== 'message') {
+        return reply.status(200).send({ received: true, skipped: 'non_inbound_event', eventType });
       }
 
       request.log.info({ tenantId, waId: raw?.waId }, 'WATI inbound message received');

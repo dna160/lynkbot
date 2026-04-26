@@ -68,22 +68,51 @@ export class WatiClient {
         'COMPLIANCE VIOLATION: Cannot send freeform message outside 24hr window. Use sendTemplate() instead.',
       );
     }
-    // phone goes in the path; messageText is a query param (WATI API spec)
-    const queryParams: Record<string, string> = { messageText: params.message };
+
     const channelNum = params.channelPhoneNumber ?? this.defaultChannelNumber;
-    if (channelNum) {
-      queryParams.channelPhoneNumber = channelNum;
+    const phone = encodeURIComponent(params.phone);
+    const queryParams: Record<string, string> = {};
+    if (channelNum) queryParams.channelPhoneNumber = channelNum;
+
+    // Strategy: try v2 (JSON body — matches WATI dashboard's internal send) first, fall back to
+    // v1 (query param — legacy endpoint). Some WATI accounts route v1/v2 through different Meta
+    // Cloud API apps; only one may have the WABA display name approved (Meta error #131037).
+    const attempts: Array<{ label: string; url: string; body: unknown; queryOnly?: boolean }> = [
+      {
+        label: 'v2',
+        url: `/api/v2/sendSessionMessage/${phone}`,
+        body: { messageText: params.message },
+      },
+      {
+        label: 'v1',
+        url: `/api/v1/sendSessionMessage/${phone}`,
+        body: null,
+        queryOnly: true,
+      },
+    ];
+
+    let lastDetail = 'Unknown WATI send error';
+    for (const attempt of attempts) {
+      try {
+        const reqQuery = attempt.queryOnly
+          ? { ...queryParams, messageText: params.message }
+          : queryParams;
+        const res = await this.http.post(attempt.url, attempt.body, { params: reqQuery });
+        // WATI returns HTTP 200 even on Meta-side failure — check body.
+        if (res.data?.result === true || res.data?.ok === true) return;
+        const detail =
+          res.data?.message?.failedDetail ??
+          res.data?.info ??
+          res.data?.error ??
+          JSON.stringify(res.data ?? {});
+        lastDetail = `[${attempt.label}] ${detail}`;
+        // If this is a non-display-name failure, stop trying — fallback won't help.
+        if (!String(detail).includes('131037')) break;
+      } catch (err) {
+        lastDetail = `[${attempt.label}] ${err instanceof Error ? err.message : String(err)}`;
+      }
     }
-    const res = await this.http.post(
-      `/api/v1/sendSessionMessage/${encodeURIComponent(params.phone)}`,
-      null,
-      { params: queryParams },
-    );
-    // WATI returns HTTP 200 even on failure — check the body
-    if (res.data?.ok === false) {
-      const detail = res.data?.message?.failedDetail ?? res.data?.error ?? 'Unknown WATI send error';
-      throw new Error(`WATI sendSessionMessage failed: ${detail}`);
-    }
+    throw new Error(`WATI sendSessionMessage failed: ${lastDetail}`);
   }
 
   async markAsRead(messageId: string, phone: string): Promise<void> {

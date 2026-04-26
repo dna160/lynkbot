@@ -7,7 +7,7 @@
  * Exports : NotificationService class
  */
 import { db, tenants, buyers, products, waitlist } from '@lynkbot/db';
-import { eq, isNull, and } from '@lynkbot/db';
+import { eq, and } from '@lynkbot/db';
 import { WatiClient } from '@lynkbot/wati';
 import { createDecipheriv } from 'crypto';
 import { config } from '../config';
