@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, aiApi, type ProductCopy } from '../../lib/api';
+import { api, aiApi, productsApi, type ProductCopy } from '../../lib/api';
 import { Modal } from '../../components/Modal';
 import { SearchInput } from '../../components/SearchInput';
 import { useToast } from '../../components/ToastProvider';
@@ -31,6 +31,155 @@ function StockCell({ inv, threshold }: { inv?: InventoryItem; threshold?: number
   const color = avail === 0 ? 'text-red-400' : avail <= low * 2 ? 'text-yellow-400' : 'text-green-400';
   return <span className={`font-mono font-medium ${color}`}>{avail}</span>;
 }
+
+// ─── Knowledge Upload Modal ──────────────────────────────────────────────────
+
+type UploadStep = 'idle' | 'signing' | 'uploading' | 'ingesting' | 'done' | 'error';
+
+function KnowledgeUploadModal({ product, onClose, onDone }: {
+  product: Product; onClose: () => void; onDone: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [step, setStep] = useState<UploadStep>('idle');
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
+
+  const alreadyHasKnowledge = product.knowledgeStatus === 'ready' || product.knowledgeStatus === 'processing';
+
+  async function handleUpload() {
+    if (!file) return;
+    setStep('signing'); setError('');
+    try {
+      // 1. Get presigned URL
+      const { data: { uploadUrl } } = await productsApi.getUploadUrl(product.id, 'pdf');
+
+      // 2. Upload to S3
+      setStep('uploading'); setProgress(0);
+      await productsApi.uploadToS3(uploadUrl, file, setProgress);
+
+      // 3. Trigger ingest
+      setStep('ingesting');
+      await productsApi.triggerIngest(product.id);
+
+      setStep('done');
+      onDone();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? err?.message ?? 'Upload failed');
+      setStep('error');
+    }
+  }
+
+  const stepLabel: Record<UploadStep, string> = {
+    idle: '', signing: 'Getting upload URL…', uploading: `Uploading PDF… ${progress}%`,
+    ingesting: 'AI is processing…', done: 'Done!', error: '',
+  };
+
+  return (
+    <Modal open onClose={step === 'uploading' || step === 'ingesting' ? undefined : onClose}
+      title={`📄 Upload Knowledge — ${product.name}`}>
+      <div className="space-y-4">
+        {/* Current status */}
+        <div className="flex items-center gap-3 bg-[#0F172A] rounded-lg px-4 py-3 border border-[#334155]">
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+            product.knowledgeStatus === 'ready' ? 'bg-green-400' :
+            product.knowledgeStatus === 'processing' ? 'bg-yellow-400 animate-pulse' :
+            product.knowledgeStatus === 'failed' ? 'bg-red-400' : 'bg-slate-500'
+          }`} />
+          <div>
+            <p className="text-xs text-slate-400">Current AI knowledge status</p>
+            <p className="text-sm text-white font-medium capitalize">{product.knowledgeStatus}</p>
+          </div>
+          {alreadyHasKnowledge && (
+            <span className="ml-auto text-xs text-slate-500 italic">Uploading a new file will replace existing knowledge</span>
+          )}
+        </div>
+
+        {step === 'done' ? (
+          <div className="text-center py-6">
+            <div className="text-4xl mb-3">🎉</div>
+            <p className="text-white font-semibold mb-1">Upload complete!</p>
+            <p className="text-slate-400 text-sm">The AI is now processing your PDF. Knowledge status will update to <span className="text-yellow-400">Processing</span> then <span className="text-green-400">Ready</span> in a few minutes.</p>
+            <button onClick={onClose} className="mt-5 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg">Close</button>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="text-xs text-slate-400 mb-2 block font-medium">Product knowledge PDF</label>
+              <div
+                onClick={() => fileRef.current?.click()}
+                className={`relative border-2 border-dashed rounded-xl px-6 py-8 text-center cursor-pointer transition-colors ${
+                  file ? 'border-indigo-500 bg-indigo-600/10' : 'border-[#334155] hover:border-indigo-500/50 hover:bg-[#334155]/20'
+                }`}
+              >
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f); }}
+                  disabled={step !== 'idle' && step !== 'error'}
+                />
+                {file ? (
+                  <>
+                    <div className="text-3xl mb-2">📄</div>
+                    <p className="text-white font-medium text-sm">{file.name}</p>
+                    <p className="text-slate-400 text-xs mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB · Click to change</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-3xl mb-2">☁️</div>
+                    <p className="text-slate-300 text-sm font-medium">Click to select PDF</p>
+                    <p className="text-slate-500 text-xs mt-1">Upload your product book, manual, or sales guide · Max 5 MB</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            {(step === 'uploading' || step === 'signing' || step === 'ingesting') && (
+              <div>
+                <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+                  <span>{stepLabel[step]}</span>
+                  {step === 'uploading' && <span>{progress}%</span>}
+                </div>
+                <div className="h-1.5 bg-[#0F172A] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 transition-all duration-300 rounded-full"
+                    style={{ width: step === 'signing' ? '10%' : step === 'uploading' ? `${progress}%` : '100%' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <p className="text-red-400 text-xs bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">{error}</p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={onClose}
+                disabled={step === 'uploading' || step === 'ingesting'}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white disabled:opacity-40"
+              >Cancel</button>
+              <button
+                onClick={handleUpload}
+                disabled={!file || (step !== 'idle' && step !== 'error')}
+                className="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-40 flex items-center gap-2"
+              >
+                {step !== 'idle' && step !== 'error' ? (
+                  <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>{stepLabel[step] || 'Working…'}</>
+                ) : '📤 Upload & Train AI'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function AiGenerateModal({ product, onApply, onClose }: { product: Product; onApply: (copy: ProductCopy) => void; onClose: () => void }) {
   const [brief, setBrief] = useState('');
@@ -197,10 +346,19 @@ export function ProductsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [aiProduct, setAiProduct] = useState<Product | null>(null);
+  const [uploadProduct, setUploadProduct] = useState<Product | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<ProductFilter>('all');
 
-  const { data: allProducts = [], isLoading: pLoading } = useQuery<Product[]>({ queryKey: ['products'], queryFn: () => api.get('/products').then(r => r.data) });
+  const { data: allProducts = [], isLoading: pLoading } = useQuery<Product[]>({
+    queryKey: ['products'],
+    queryFn: () => api.get('/products').then(r => r.data),
+    // Auto-refresh every 5s when any product is processing so the badge updates live
+    refetchInterval: (query) => {
+      const data = query.state.data as Product[] | undefined;
+      return data?.some(p => p.knowledgeStatus === 'processing') ? 5000 : false;
+    },
+  });
   const { data: inventory = [] } = useQuery<InventoryItem[]>({ queryKey: ['inventory'], queryFn: () => api.get('/inventory').then(r => r.data) });
 
   const invMap = Object.fromEntries(inventory.map(i => [i.productId, i]));
@@ -270,6 +428,11 @@ export function ProductsPage() {
                     <td className="px-4 py-3 text-center"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${ks.color}`}>{ks.label}</span></td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
+                        <button onClick={() => setUploadProduct(p)}
+                          className={`text-xs px-2 py-1 rounded transition-colors ${p.knowledgeStatus === 'ready' ? 'text-green-400 hover:text-green-300' : 'text-slate-400 hover:text-indigo-300'}`}
+                          title="Upload knowledge PDF">
+                          📄 {p.knowledgeStatus === 'ready' ? 'Re-train' : 'Upload'}
+                        </button>
                         <button onClick={() => setAiProduct(p)} className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded" title="Generate AI copy">✨ AI</button>
                         <button onClick={() => setEditProduct(p)} className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded">Edit</button>
                         <button onClick={() => { if (confirm(`Delete "${p.name}"?`)) deleteProduct.mutate(p.id); }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded">Delete</button>
@@ -286,6 +449,16 @@ export function ProductsPage() {
       <AddProductModal open={addOpen} onClose={() => setAddOpen(false)} onSaved={refetch} />
       {editProduct && <EditProductModal product={editProduct} inv={invMap[editProduct.id]} open={!!editProduct} onClose={() => setEditProduct(null)} onSaved={refetch} />}
       {aiProduct && <AiGenerateModal product={aiProduct} onClose={() => setAiProduct(null)} onApply={async (copy) => { await api.patch(`/products/${aiProduct.id}`, { description: copy.description, tagline: copy.tagline, keyOutcomes: copy.keyOutcomes, problemsSolved: copy.problemsSolved, faqPairs: copy.faqPairs, bookPersonaPrompt: copy.bookPersonaPrompt }); refetch(); }} />}
+      {uploadProduct && (
+        <KnowledgeUploadModal
+          product={uploadProduct}
+          onClose={() => setUploadProduct(null)}
+          onDone={() => {
+            qc.invalidateQueries({ queryKey: ['products'] });
+            addToast('PDF uploaded — AI is training on your product', 'success');
+          }}
+        />
+      )}
     </div>
   );
 }

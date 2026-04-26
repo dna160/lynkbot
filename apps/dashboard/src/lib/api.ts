@@ -176,6 +176,30 @@ export const productsApi = {
   create: (data: CreateProductPayload) => api.post<Product>('/products', data),
   update: (id: string, data: Partial<Product>) => api.patch<Product>(`/products/${id}`, data),
   delete: (id: string) => api.delete(`/products/${id}`),
+  /** Get a presigned S3 PUT URL for uploading a PDF or cover image. */
+  getUploadUrl: (id: string, type: 'pdf' | 'image') =>
+    api.post<{ uploadUrl: string; s3Key: string; expiresIn: number }>(
+      `/products/${id}/upload-url`,
+      null,
+      { params: { type } },
+    ),
+  /** Upload a file directly to S3 using a presigned URL (no auth header). */
+  uploadToS3: (presignedUrl: string, file: File, onProgress?: (pct: number) => void) =>
+    new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', presignedUrl);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`S3 upload failed: HTTP ${xhr.status}`)));
+      xhr.onerror = () => reject(new Error('S3 upload network error'));
+      xhr.send(file);
+    }),
+  /** Enqueue the RAG ingest job for a product's PDF. */
+  triggerIngest: (id: string) => api.post(`/products/${id}/ingest`),
 };
 
 export const inventoryApi = {
