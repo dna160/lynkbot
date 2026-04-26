@@ -12,20 +12,24 @@ import { eq, and } from '@lynkbot/db';
 import { db, products, inventory } from '@lynkbot/db';
 import { Queue } from 'bullmq';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { QUEUES } from '@lynkbot/shared';
 import { config } from '../../config';
+import path from 'path';
+import fs from 'fs/promises';
 
 const ingestQueue = new Queue(QUEUES.INGEST, { connection: { url: config.REDIS_URL } });
 
-const s3 = new S3Client({
-  region: config.S3_REGION,
-  credentials: {
-    accessKeyId: config.S3_ACCESS_KEY_ID,
-    secretAccessKey: config.S3_SECRET_ACCESS_KEY,
-  },
-  ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
-});
+// S3 client — only used when S3_BUCKET is configured
+const s3 = config.S3_BUCKET
+  ? new S3Client({
+      region: config.S3_REGION,
+      credentials: {
+        accessKeyId: config.S3_ACCESS_KEY_ID,
+        secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+      },
+      ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
+    })
+  : null;
 
 const createProductSchema = z.object({
   name: z.string().min(1).max(255),
@@ -172,42 +176,55 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /**
-   * POST /v1/products/:id/upload-url
-   * Generate S3 presigned PUT URL for PDF or image upload.
-   * Query: ?type=pdf|image
+   * POST /v1/products/:id/upload-pdf
+   * Direct multipart PDF upload. Saves to S3 when configured, otherwise to local disk.
+   * Accepts: multipart/form-data with field "file" (application/pdf).
    */
-  fastify.post<{ Params: { id: string }; Querystring: { type?: string } }>(
-    '/v1/products/:id/upload-url',
+  fastify.post<{ Params: { id: string } }>(
+    '/v1/products/:id/upload-pdf',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
-      const fileType = request.query.type === 'pdf' ? 'pdf' : 'image';
 
       const product = await db.query.products.findFirst({
         where: and(eq(products.id, id), eq(products.tenantId, tenantId)),
       });
       if (!product) return reply.status(404).send({ error: 'Product not found' });
 
-      const ext = fileType === 'pdf' ? 'pdf' : 'jpg';
-      const contentType = fileType === 'pdf' ? 'application/pdf' : 'image/jpeg';
-      const s3Key = `tenants/${tenantId}/products/${id}/${fileType}.${ext}`;
+      const data = await request.file();
+      if (!data) return reply.status(400).send({ error: 'No file uploaded' });
 
-      const command = new PutObjectCommand({
-        Bucket: config.S3_BUCKET,
-        Key: s3Key,
-        ContentType: contentType,
-      });
+      const fileBuffer = await data.toBuffer();
+      let s3Key: string;
+      let storage: 'local' | 's3';
 
-      const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 }); // 15 minutes
+      if (s3 && config.S3_BUCKET) {
+        // Upload to S3
+        s3Key = `tenants/${tenantId}/products/${id}/pdf.pdf`;
+        const command = new PutObjectCommand({
+          Bucket: config.S3_BUCKET,
+          Key: s3Key,
+          ContentType: 'application/pdf',
+          Body: fileBuffer,
+        });
+        await s3.send(command);
+        storage = 's3';
+      } else {
+        // Save to local disk (development / no S3 configured)
+        const uploadsDir = path.join(process.cwd(), 'uploads', 'products', id);
+        await fs.mkdir(uploadsDir, { recursive: true });
+        const localPath = path.join(uploadsDir, 'pdf.pdf');
+        await fs.writeFile(localPath, fileBuffer);
+        s3Key = `local://${localPath}`;
+        storage = 'local';
+      }
 
-      // Store s3 key on product
-      const updateField = fileType === 'pdf' ? { pdfS3Key: s3Key } : { coverImageUrl: s3Key };
       await db.update(products)
-        .set({ ...updateField, updatedAt: new Date() })
+        .set({ pdfS3Key: s3Key, updatedAt: new Date() })
         .where(eq(products.id, id));
 
-      return reply.send({ uploadUrl, s3Key, expiresIn: 900 });
+      return reply.send({ s3Key, storage });
     },
   );
 

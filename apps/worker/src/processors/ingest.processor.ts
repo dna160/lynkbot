@@ -15,6 +15,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { db, products } from '@lynkbot/db';
 import { ingest } from '@lynkbot/ai';
 import { eq } from '@lynkbot/db';
+import { readFile } from 'fs/promises';
 
 const s3 = new S3Client({
   region: process.env.S3_REGION ?? 'us-east-1',
@@ -55,25 +56,34 @@ export const ingestProcessor: Processor = async (job) => {
       throw new Error(`Product ${productId} has no pdfS3Key — cannot ingest`);
     }
 
-    job.log(`Downloading PDF from S3: bucket=${process.env.S3_BUCKET} key=${product.pdfS3Key}`);
+    let pdfBuffer: Buffer;
 
-    // 3. Stream PDF from S3 into a Buffer
-    const command = new GetObjectCommand({
-      Bucket: process.env.S3_BUCKET!,
-      Key: product.pdfS3Key,
-    });
+    if (product.pdfS3Key.startsWith('local://')) {
+      // Local filesystem storage (development / no S3 configured)
+      const localPath = product.pdfS3Key.replace('local://', '');
+      job.log(`Reading PDF from local disk: ${localPath}`);
+      pdfBuffer = await readFile(localPath);
+    } else {
+      // S3 storage
+      job.log(`Downloading PDF from S3: bucket=${process.env.S3_BUCKET} key=${product.pdfS3Key}`);
 
-    const s3Response = await s3.send(command);
+      const command = new GetObjectCommand({
+        Bucket: process.env.S3_BUCKET!,
+        Key: product.pdfS3Key,
+      });
 
-    if (!s3Response.Body) {
-      throw new Error(`S3 returned empty body for key=${product.pdfS3Key}`);
+      const s3Response = await s3.send(command);
+
+      if (!s3Response.Body) {
+        throw new Error(`S3 returned empty body for key=${product.pdfS3Key}`);
+      }
+
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(chunk);
+      }
+      pdfBuffer = Buffer.concat(chunks);
     }
-
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) {
-      chunks.push(chunk);
-    }
-    const pdfBuffer = Buffer.concat(chunks);
 
     job.log(`PDF downloaded: ${pdfBuffer.byteLength} bytes. Running RAG pipeline...`);
 

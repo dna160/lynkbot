@@ -62,7 +62,7 @@ async function bootstrap(): Promise<void> {
   await server.register(rateLimitPlugin);
   await server.register(authPlugin);
   // Multipart needed for file uploads (buyers CSV/XLSX import)
-  await server.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
+  await server.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50 MB for PDFs
 
   // --- Health check (no auth, no rate limit) ---
   server.get('/health', async (_request, _reply) => {

@@ -34,7 +34,7 @@ function StockCell({ inv, threshold }: { inv?: InventoryItem; threshold?: number
 
 // ─── Knowledge Upload Modal ──────────────────────────────────────────────────
 
-type UploadStep = 'idle' | 'signing' | 'uploading' | 'ingesting' | 'done' | 'error';
+type UploadStep = 'idle' | 'uploading' | 'ingesting' | 'done' | 'error';
 
 function KnowledgeUploadModal({ product, onClose, onDone }: {
   product: Product; onClose: () => void; onDone: () => void;
@@ -49,16 +49,12 @@ function KnowledgeUploadModal({ product, onClose, onDone }: {
 
   async function handleUpload() {
     if (!file) return;
-    setStep('signing'); setError('');
+    setStep('uploading'); setProgress(0); setError('');
     try {
-      // 1. Get presigned URL
-      const { data: { uploadUrl } } = await productsApi.getUploadUrl(product.id, 'pdf');
+      // 1. Upload PDF directly (works with or without S3)
+      await productsApi.uploadPdf(product.id, file, setProgress);
 
-      // 2. Upload to S3
-      setStep('uploading'); setProgress(0);
-      await productsApi.uploadToS3(uploadUrl, file, setProgress);
-
-      // 3. Trigger ingest
+      // 2. Trigger ingest
       setStep('ingesting');
       await productsApi.triggerIngest(product.id);
 
@@ -71,7 +67,7 @@ function KnowledgeUploadModal({ product, onClose, onDone }: {
   }
 
   const stepLabel: Record<UploadStep, string> = {
-    idle: '', signing: 'Getting upload URL…', uploading: `Uploading PDF… ${progress}%`,
+    idle: '', uploading: `Uploading PDF… ${progress}%`,
     ingesting: 'AI is processing…', done: 'Done!', error: '',
   };
 
@@ -130,14 +126,14 @@ function KnowledgeUploadModal({ product, onClose, onDone }: {
                   <>
                     <div className="text-3xl mb-2">☁️</div>
                     <p className="text-slate-300 text-sm font-medium">Click to select PDF</p>
-                    <p className="text-slate-500 text-xs mt-1">Upload your product book, manual, or sales guide · Max 5 MB</p>
+                    <p className="text-slate-500 text-xs mt-1">Upload your product book, manual, or sales guide · Max 50 MB</p>
                   </>
                 )}
               </div>
             </div>
 
             {/* Progress bar */}
-            {(step === 'uploading' || step === 'signing' || step === 'ingesting') && (
+            {(step === 'uploading' || step === 'ingesting') && (
               <div>
                 <div className="flex justify-between text-xs text-slate-400 mb-1.5">
                   <span>{stepLabel[step]}</span>
@@ -146,7 +142,7 @@ function KnowledgeUploadModal({ product, onClose, onDone }: {
                 <div className="h-1.5 bg-[#0F172A] rounded-full overflow-hidden">
                   <div
                     className="h-full bg-indigo-500 transition-all duration-300 rounded-full"
-                    style={{ width: step === 'signing' ? '10%' : step === 'uploading' ? `${progress}%` : '100%' }}
+                    style={{ width: step === 'uploading' ? `${progress}%` : '100%' }}
                   />
                 </div>
               </div>
