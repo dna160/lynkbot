@@ -22,16 +22,27 @@ export async function ingest(productId: string, tenantId: string, pdfBuffer: Buf
   const chunks = chunkText(pages, { maxTokens: 512, overlap: 50 });
   if (chunks.length === 0) throw new Error('PDF produced no text chunks — may be image-only');
 
-  // 3. Batch embed via xAI
-  const embeddings = await batchEmbed(chunks.map((c) => c.text));
+  // 3. Try to embed via xAI. xAI currently has no embedding models on this account —
+  //    fall back to storing chunks without embeddings (full-text search will be used for retrieval).
+  let embeddings: (number[] | null)[] | null = null;
+  const embeddingModel = process.env.XAI_EMBEDDING_MODEL ?? '';
+  if (embeddingModel) {
+    try {
+      embeddings = await batchEmbed(chunks.map((c) => c.text));
+    } catch (err) {
+      console.warn('[ingest] Embedding API failed — falling back to FTS-only mode:', (err as Error).message);
+    }
+  } else {
+    console.log('[ingest] XAI_EMBEDDING_MODEL not set — using FTS-only mode');
+  }
 
-  // 4. Upsert into product_chunks
+  // 4. Upsert into product_chunks (embedding column nullable — omitted in FTS mode)
   const rows = chunks.map((c, i) => ({
     productId,
     tenantId,
     chunkIndex: c.chunkIndex,
     contentText: c.text,
-    embedding: embeddings[i],
+    ...(embeddings ? { embedding: embeddings[i] } : {}),
     pageNumber: c.pageNumber,
     chapterTitle: c.chapterTitle,
     tokenCount: c.tokenCount,
@@ -44,8 +55,8 @@ export async function ingest(productId: string, tenantId: string, pdfBuffer: Buf
       target: [productChunks.productId, productChunks.chunkIndex],
       set: {
         contentText: sql`excluded.content_text`,
-        embedding: sql`excluded.embedding`,
         tokenCount: sql`excluded.token_count`,
+        ...(embeddings ? { embedding: sql`excluded.embedding` } : {}),
       },
     });
   }
@@ -82,18 +93,61 @@ async function generateBookPersona(productId: string, sampleContent: string): Pr
 }
 
 export async function query(productId: string, tenantId: string, question: string): Promise<string> {
-  const queryEmbedding = await embed(question);
-  const embeddingStr = JSON.stringify(queryEmbedding);
+  const embeddingModel = process.env.XAI_EMBEDDING_MODEL ?? '';
+
+  if (embeddingModel) {
+    // Vector similarity search (when embeddings are stored)
+    try {
+      const queryEmbedding = await embed(question);
+      const embeddingStr = JSON.stringify(queryEmbedding);
+      const chunks = await pgClient<{ content_text: string }[]>`
+        SELECT content_text
+        FROM product_chunks
+        WHERE product_id = ${productId}
+          AND tenant_id = ${tenantId}
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> ${embeddingStr}::vector
+        LIMIT 5
+      `;
+      if (chunks.length > 0) return chunks.map((r) => r.content_text).join('\n\n---\n\n');
+    } catch (err) {
+      console.warn('[query] Vector search failed, falling back to FTS:', (err as Error).message);
+    }
+  }
+
+  // Full-text search fallback (no embeddings required)
+  // Sanitise question for tsquery: keep only words and spaces
+  const safeQuery = question.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().split(/\s+/).filter(Boolean).join(' & ');
+  if (!safeQuery) {
+    // No usable terms — return first 5 chunks as context
+    const chunks = await pgClient<{ content_text: string }[]>`
+      SELECT content_text FROM product_chunks
+      WHERE product_id = ${productId} AND tenant_id = ${tenantId}
+      ORDER BY chunk_index LIMIT 5
+    `;
+    return chunks.map((r) => r.content_text).join('\n\n---\n\n');
+  }
 
   const chunks = await pgClient<{ content_text: string }[]>`
-    SELECT content_text, chapter_title, page_number,
-           1 - (embedding <=> ${embeddingStr}::vector) AS similarity
+    SELECT content_text,
+           ts_rank(to_tsvector('english', content_text), to_tsquery('english', ${safeQuery})) AS rank
     FROM product_chunks
     WHERE product_id = ${productId}
       AND tenant_id = ${tenantId}
-    ORDER BY embedding <=> ${embeddingStr}::vector
+      AND to_tsvector('english', content_text) @@ to_tsquery('english', ${safeQuery})
+    ORDER BY rank DESC
     LIMIT 5
   `;
-  if (chunks.length === 0) return '';
+
+  if (chunks.length === 0) {
+    // FTS found nothing — return first 5 chunks as broad context
+    const fallback = await pgClient<{ content_text: string }[]>`
+      SELECT content_text FROM product_chunks
+      WHERE product_id = ${productId} AND tenant_id = ${tenantId}
+      ORDER BY chunk_index LIMIT 5
+    `;
+    return fallback.map((r) => r.content_text).join('\n\n---\n\n');
+  }
+
   return chunks.map((r) => r.content_text).join('\n\n---\n\n');
 }

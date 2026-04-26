@@ -42,7 +42,8 @@ function getEnc(): Tiktoken {
 export async function extractPdfText(pdfBuffer: Buffer): Promise<PageText[]> {
   const pages: PageText[] = [];
   await getPdfParse()(pdfBuffer, {
-    pagerender: (pageData) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    pagerender: (pageData: any) => {
       return pageData.getTextContent().then((content: { items: Array<{ str: string }> }) => {
         const text = content.items.map((item) => item.str).join(' ');
         pages.push({ pageNumber: pages.length + 1, text: text.trim() });
