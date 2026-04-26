@@ -20,3 +20,4 @@ export * from './waitlist';
 export * from './auditLogs';
 export * from './opsTickets';
 export * from './broadcasts';
+export * from './buyerGenomes';

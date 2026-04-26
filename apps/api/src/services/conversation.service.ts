@@ -12,7 +12,7 @@
  * Tests   : src/services/__tests__/conversation.service.test.ts
  */
 import { eq, and } from '@lynkbot/db';
-import { db, conversations, messages, buyers, tenants, products, waitlist } from '@lynkbot/db';
+import { db, conversations, messages, buyers, tenants, products, waitlist, buyerGenomes } from '@lynkbot/db';
 import {
   BUY_INTENT_KEYWORDS,
   OBJECTION_KEYWORDS,
@@ -30,6 +30,20 @@ import {
   extractMessageId,
   isLocationMessage,
 } from '@lynkbot/wati';
+import {
+  extractSignals,
+  extractName,
+  deriveScores,
+  scoreConfidence,
+  applyConfidencePenalty,
+  mergeScores,
+  defaultGenome,
+  classifyMoment,
+  selectDialog,
+  computeRWI,
+  buildFallbackCache,
+  type GenomeScores,
+} from '@lynkbot/pantheon';
 import { config } from '../config';
 import { CheckoutService } from './checkout.service';
 import { ShippingService } from './shipping.service';
@@ -120,6 +134,20 @@ export class ConversationService {
 
     if (buyer.doNotContact) return; // Silently ignore opted-out buyers
 
+    // Pantheon: try to extract buyer name from message if not yet known
+    if (!buyer.displayName) {
+      const rawText = extractText(payload);
+      if (rawText) {
+        const detectedName = extractName([rawText]);
+        if (detectedName) {
+          await db.update(buyers)
+            .set({ displayName: detectedName, updatedAt: new Date() })
+            .where(eq(buyers.id, buyer.id));
+          buyer = { ...buyer, displayName: detectedName };
+        }
+      }
+    }
+
     // Get or create active conversation
     let conv = await db.query.conversations.findFirst({
       where: and(
@@ -176,6 +204,9 @@ export class ConversationService {
       await this.handleLocationShare(conv, payload.location as WaLocation);
       return;
     }
+
+    // Pantheon: async genome update (fire-and-forget — never blocks the response)
+    this.updateGenomeAsync(buyer.id, conv.tenantId, conv.id).catch(() => null);
 
     // Route to state handler
     await this.routeByState(conv, buyer, payload);
@@ -516,7 +547,73 @@ export class ConversationService {
       ? `\n\nRELEVANT CONTEXT:\n${additionalContext}`
       : '';
 
-    const fullSystem = systemPrompt + stateOverlay + contextBlock;
+    // ── Pantheon V2: classify moment + inject dialog recommendation ────────────
+    let pantheonBlock = '';
+    try {
+      const genomeRow = await db.query.buyerGenomes.findFirst({
+        where: and(eq(buyerGenomes.buyerId, buyer.id), eq(buyerGenomes.tenantId, conv.tenantId)),
+      });
+
+      const genome = genomeRow
+        ? {
+            buyerId: buyer.id,
+            tenantId: conv.tenantId,
+            confidence: genomeRow.confidence as 'HIGH' | 'MEDIUM' | 'LOW',
+            observationCount: genomeRow.observationCount,
+            formationInvariants: (genomeRow.formationInvariants as string[]) ?? [],
+            lastUpdatedAt: genomeRow.updatedAt,
+            scores: {
+              openness: genomeRow.openness,
+              conscientiousness: genomeRow.conscientiousness,
+              extraversion: genomeRow.extraversion,
+              agreeableness: genomeRow.agreeableness,
+              neuroticism: genomeRow.neuroticism,
+              communicationStyle: genomeRow.communicationStyle,
+              decisionMaking: genomeRow.decisionMaking,
+              brandRelationship: genomeRow.brandRelationship,
+              influenceSusceptibility: genomeRow.influenceSusceptibility,
+              emotionalExpression: genomeRow.emotionalExpression,
+              conflictBehavior: genomeRow.conflictBehavior,
+              literacyArticulation: genomeRow.literacyArticulation,
+              socioeconomicFriction: genomeRow.socioeconomicFriction,
+              identityFusion: genomeRow.identityFusion,
+              chronesthesiaCapacity: genomeRow.chronesthesiaCapacity,
+              tomSelfAwareness: genomeRow.tomSelfAwareness,
+              tomSocialModeling: genomeRow.tomSocialModeling,
+              executiveFlexibility: genomeRow.executiveFlexibility,
+            },
+          }
+        : defaultGenome(buyer.id, conv.tenantId);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cache = (genomeRow?.dialogCache as any) ?? buildFallbackCache(conv.language ?? 'id');
+
+      // Last 5 inbound messages for moment context
+      const recentMsgs = await db.query.messages.findMany({
+        where: and(eq(messages.conversationId, conv.id), eq(messages.direction, 'inbound')),
+        orderBy: (m, { desc }) => desc(m.createdAt),
+        limit: 5,
+      });
+      const recentTexts = recentMsgs.map(m => m.textContent ?? '').filter(Boolean).reverse();
+
+      const classification = classifyMoment(userMessage, recentTexts);
+      const rwi = computeRWI(conv.messageCount ?? 1, [classification.momentType], Date.now());
+      const selection = selectDialog(cache, classification.momentType, genome, rwi);
+
+      pantheonBlock =
+        `\n\nPANTHEON V2 DIALOG RECOMMENDATION:\n` +
+        `Moment type: ${classification.momentType} (confidence: ${Math.round(classification.confidence * 100)}%)\n` +
+        `Recommended approach: "${selection.recommendedText}"\n` +
+        `Reasoning: ${selection.reasoning}\n` +
+        `RWI: ${rwi.score}/100 (window: ${rwi.windowStatus})\n` +
+        `Buyer intelligence confidence: ${genome.confidence}\n` +
+        `IMPORTANT: Use this recommendation as inspiration. Adapt naturally — do not quote verbatim.`;
+    } catch {
+      // Pantheon unavailable — proceed without recommendation
+    }
+    // ────────────────────────────────────────────────────────────────────────────
+
+    const fullSystem = systemPrompt + stateOverlay + contextBlock + pantheonBlock;
 
     const llm = getLLMClient();
     const start = Date.now();
@@ -589,5 +686,117 @@ export class ConversationService {
       where: eq(messages.watiMessageId, messageId),
     });
     return !!existing;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Pantheon: background genome update (fire-and-forget)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async updateGenomeAsync(buyerId: string, tenantId: string, conversationId: string): Promise<void> {
+    const recentMsgs = await db.query.messages.findMany({
+      where: and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')),
+      orderBy: (m, { asc }) => asc(m.createdAt),
+      limit: 50,
+    });
+
+    const msgTexts = recentMsgs.map(m => m.textContent ?? '').filter(Boolean);
+    if (msgTexts.length === 0) return;
+
+    const msgTimestamps = recentMsgs.map(m => m.createdAt.getTime());
+    const signals = extractSignals(msgTexts, msgTimestamps);
+    if (signals.messageCount === 0) return;
+
+    const newScores = deriveScores(signals);
+    const confidence = scoreConfidence(signals.messageCount);
+    const adjustedScores = applyConfidencePenalty(newScores, confidence);
+
+    const existing = await db.query.buyerGenomes.findFirst({
+      where: and(eq(buyerGenomes.buyerId, buyerId), eq(buyerGenomes.tenantId, tenantId)),
+    });
+
+    let finalScores: GenomeScores;
+    let observationCount: number;
+
+    if (existing) {
+      const existingScores: GenomeScores = {
+        openness: existing.openness,
+        conscientiousness: existing.conscientiousness,
+        extraversion: existing.extraversion,
+        agreeableness: existing.agreeableness,
+        neuroticism: existing.neuroticism,
+        communicationStyle: existing.communicationStyle,
+        decisionMaking: existing.decisionMaking,
+        brandRelationship: existing.brandRelationship,
+        influenceSusceptibility: existing.influenceSusceptibility,
+        emotionalExpression: existing.emotionalExpression,
+        conflictBehavior: existing.conflictBehavior,
+        literacyArticulation: existing.literacyArticulation,
+        socioeconomicFriction: existing.socioeconomicFriction,
+        identityFusion: existing.identityFusion,
+        chronesthesiaCapacity: existing.chronesthesiaCapacity,
+        tomSelfAwareness: existing.tomSelfAwareness,
+        tomSocialModeling: existing.tomSocialModeling,
+        executiveFlexibility: existing.executiveFlexibility,
+      };
+      finalScores = mergeScores(existingScores, adjustedScores);
+      observationCount = existing.observationCount + signals.messageCount;
+    } else {
+      finalScores = adjustedScores;
+      observationCount = signals.messageCount;
+    }
+
+    const finalConfidence = scoreConfidence(observationCount);
+
+    await db.insert(buyerGenomes).values({
+      buyerId,
+      tenantId,
+      confidence: finalConfidence,
+      observationCount,
+      openness: finalScores.openness,
+      conscientiousness: finalScores.conscientiousness,
+      extraversion: finalScores.extraversion,
+      agreeableness: finalScores.agreeableness,
+      neuroticism: finalScores.neuroticism,
+      communicationStyle: finalScores.communicationStyle,
+      decisionMaking: finalScores.decisionMaking,
+      brandRelationship: finalScores.brandRelationship,
+      influenceSusceptibility: finalScores.influenceSusceptibility,
+      emotionalExpression: finalScores.emotionalExpression,
+      conflictBehavior: finalScores.conflictBehavior,
+      literacyArticulation: finalScores.literacyArticulation,
+      socioeconomicFriction: finalScores.socioeconomicFriction,
+      identityFusion: finalScores.identityFusion,
+      chronesthesiaCapacity: finalScores.chronesthesiaCapacity,
+      tomSelfAwareness: finalScores.tomSelfAwareness,
+      tomSocialModeling: finalScores.tomSocialModeling,
+      executiveFlexibility: finalScores.executiveFlexibility,
+      formationInvariants: [],
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: [buyerGenomes.buyerId, buyerGenomes.tenantId],
+      set: {
+        confidence: finalConfidence,
+        observationCount,
+        openness: finalScores.openness,
+        conscientiousness: finalScores.conscientiousness,
+        extraversion: finalScores.extraversion,
+        agreeableness: finalScores.agreeableness,
+        neuroticism: finalScores.neuroticism,
+        communicationStyle: finalScores.communicationStyle,
+        decisionMaking: finalScores.decisionMaking,
+        brandRelationship: finalScores.brandRelationship,
+        influenceSusceptibility: finalScores.influenceSusceptibility,
+        emotionalExpression: finalScores.emotionalExpression,
+        conflictBehavior: finalScores.conflictBehavior,
+        literacyArticulation: finalScores.literacyArticulation,
+        socioeconomicFriction: finalScores.socioeconomicFriction,
+        identityFusion: finalScores.identityFusion,
+        chronesthesiaCapacity: finalScores.chronesthesiaCapacity,
+        tomSelfAwareness: finalScores.tomSelfAwareness,
+        tomSocialModeling: finalScores.tomSocialModeling,
+        executiveFlexibility: finalScores.executiveFlexibility,
+        updatedAt: new Date(),
+      },
+    });
   }
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { buyersApi, broadcastsApi, type Buyer, type BroadcastTemplate } from '@/lib/api';
+import { buyersApi, broadcastsApi, intelligenceApi, type Buyer, type BroadcastTemplate, type Genome, type GenomeResponse } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 
 function formatPhone(p: string) { return p ? `+${p}` : '—'; }
@@ -154,6 +154,216 @@ function BroadcastModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ── Pantheon Intelligence Drawer ────────────────────────────────────────────
+
+const TRAIT_LABELS: Record<string, string> = {
+  openness: 'Openness', conscientiousness: 'Conscientiousness', extraversion: 'Extraversion',
+  agreeableness: 'Agreeableness', neuroticism: 'Neuroticism',
+  communicationStyle: 'Communication Style', decisionMaking: 'Decision Making',
+  brandRelationship: 'Brand Relationship', influenceSusceptibility: 'Influence Susceptibility',
+  emotionalExpression: 'Emotional Expression', conflictBehavior: 'Conflict Behavior',
+  literacyArticulation: 'Literacy / Articulation', socioeconomicFriction: 'Socioeconomic Friction',
+  identityFusion: 'Identity Fusion', chronesthesiaCapacity: 'Chronesthesia',
+  tomSelfAwareness: 'Self-Awareness (ToM)', tomSocialModeling: 'Social Modeling (ToM)',
+  executiveFlexibility: 'Executive Flexibility',
+};
+
+const CLUSTER_KEYS = {
+  'A — OCEAN': ['openness', 'conscientiousness', 'extraversion', 'agreeableness', 'neuroticism'],
+  'B — Behavioral': ['communicationStyle', 'decisionMaking', 'brandRelationship', 'influenceSusceptibility', 'emotionalExpression', 'conflictBehavior', 'literacyArticulation', 'socioeconomicFriction'],
+  'C — Human Uniqueness': ['identityFusion', 'chronesthesiaCapacity', 'tomSelfAwareness', 'tomSocialModeling', 'executiveFlexibility'],
+};
+
+function scoreColor(v: number) {
+  if (v >= 70) return 'bg-emerald-500';
+  if (v >= 55) return 'bg-blue-500';
+  if (v >= 40) return 'bg-yellow-500';
+  return 'bg-red-500';
+}
+
+function confidenceBadge(c: 'HIGH' | 'MEDIUM' | 'LOW') {
+  const map = { HIGH: 'bg-emerald-900/40 text-emerald-400 border-emerald-800/50', MEDIUM: 'bg-yellow-900/40 text-yellow-400 border-yellow-800/50', LOW: 'bg-zinc-800 text-zinc-400 border-zinc-700' };
+  return map[c] ?? map.LOW;
+}
+
+function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => void }) {
+  const { addToast } = useToast();
+  const [data, setData] = useState<GenomeResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<'genome' | 'mutations' | 'cache'>('genome');
+
+  useEffect(() => {
+    intelligenceApi.getGenome(buyer.id).then(res => { setData(res.data); }).catch(() => {}).finally(() => setLoading(false));
+  }, [buyer.id]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const res = await intelligenceApi.refreshGenome(buyer.id);
+      setData(res.data);
+      addToast(`Genome refreshed — ${(res.data as any).signalsSummary?.messagesAnalyzed ?? 0} messages analyzed`, 'success');
+    } catch { addToast('Refresh failed', 'error'); }
+    finally { setRefreshing(false); }
+  };
+
+  const genome: Genome | null = data?.genome ?? null;
+  const scores = genome?.scores;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex justify-end z-50" onClick={onClose}>
+      <div className="w-full max-w-xl bg-surface border-l border-border h-full overflow-y-auto flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-surface z-10">
+          <div>
+            <h2 className="text-base font-semibold text-primary">Customer Intelligence Profile</h2>
+            <p className="text-xs text-secondary mt-0.5">{buyer.displayName || 'Unnamed'} · +{buyer.waPhone}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={handleRefresh} disabled={refreshing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-secondary hover:text-primary hover:border-accent/50 disabled:opacity-40 transition-all">
+              <svg className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              {refreshing ? 'Refreshing…' : 'Refresh Genome'}
+            </button>
+            <button onClick={onClose} className="text-secondary hover:text-primary transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center"><div className="w-8 h-8 rounded-full border-2 border-accent border-t-transparent animate-spin" /></div>
+        ) : !data?.hasPersisted ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-4">
+            <div className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center">
+              <svg className="w-7 h-7 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-primary mb-1">No genome yet</p>
+              <p className="text-xs text-secondary">This buyer hasn't had enough conversation messages to build a profile. Click <span className="text-accent">Refresh Genome</span> to analyze existing messages.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col">
+            {/* Summary bar */}
+            {genome && (
+              <div className="flex items-center gap-4 px-5 py-3 border-b border-border bg-white/2">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${confidenceBadge(genome.confidence)}`}>{genome.confidence} confidence</span>
+                <span className="text-xs text-secondary">{genome.observationCount} messages observed</span>
+                {data.mutations.length > 0 && <span className="text-xs text-secondary">{data.mutations.length} trait mutations</span>}
+              </div>
+            )}
+
+            {/* Tabs */}
+            <div className="flex border-b border-border px-5">
+              {(['genome', 'mutations', 'cache'] as const).map(t => (
+                <button key={t} onClick={() => setTab(t)}
+                  className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors capitalize ${tab === t ? 'border-accent text-accent' : 'border-transparent text-secondary hover:text-primary'}`}>
+                  {t === 'genome' ? 'Parameters' : t === 'mutations' ? `History (${data.mutations.length})` : 'Dialog Cache'}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab: Genome parameters */}
+            {tab === 'genome' && scores && (
+              <div className="p-5 space-y-6">
+                {Object.entries(CLUSTER_KEYS).map(([cluster, keys]) => (
+                  <div key={cluster}>
+                    <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-3">{cluster}</h3>
+                    <div className="space-y-2">
+                      {keys.map(key => {
+                        const val = (scores as unknown as Record<string, number>)[key] ?? 50;
+                        return (
+                          <div key={key} className="flex items-center gap-3">
+                            <span className="text-xs text-secondary w-44 shrink-0">{TRAIT_LABELS[key] ?? key}</span>
+                            <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full transition-all ${scoreColor(val)}`} style={{ width: `${val}%` }} />
+                            </div>
+                            <span className="text-xs font-mono text-primary w-6 text-right">{val}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {data.osintSummary && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-2">OSINT Summary</h3>
+                    <p className="text-xs text-secondary leading-relaxed bg-white/3 rounded-lg p-3">{data.osintSummary}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Mutation history */}
+            {tab === 'mutations' && (
+              <div className="p-5">
+                {data.mutations.length === 0 ? (
+                  <p className="text-sm text-secondary text-center py-8">No significant trait changes recorded yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {data.mutations.map((m, i) => (
+                      <div key={i} className="bg-white/3 border border-border/50 rounded-lg p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-primary">{TRAIT_LABELS[m.traitName] ?? m.traitName}</span>
+                          <span className={`text-xs font-mono font-semibold ${m.delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{m.delta > 0 ? '+' : ''}{m.delta}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-secondary">
+                          <span className="font-mono">{m.oldScore}</span>
+                          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                          <span className="font-mono text-primary">{m.newScore}</span>
+                          <span className="ml-auto">{formatDate(m.createdAt)}</span>
+                        </div>
+                        {m.evidenceSummary && <p className="text-xs text-secondary/70 italic">{m.evidenceSummary}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Dialog cache */}
+            {tab === 'cache' && (
+              <div className="p-5">
+                {!data.dialogCache ? (
+                  <div className="text-center py-8 space-y-2">
+                    <p className="text-sm text-secondary">Dialog cache not built yet.</p>
+                    <p className="text-xs text-secondary/60">Genome confidence must be MEDIUM or HIGH. Click Refresh Genome to build.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {data.dialogCacheBuiltAt && <p className="text-xs text-secondary">Built {formatDate(data.dialogCacheBuiltAt)}</p>}
+                    {Object.entries(data.dialogCache).map(([momentType, momentData]) => (
+                      <div key={momentType} className="border border-border/50 rounded-lg overflow-hidden">
+                        <div className="px-3 py-2 bg-white/3 border-b border-border/50">
+                          <span className="text-xs font-semibold text-accent capitalize">{momentType.replace(/_/g, ' ')}</span>
+                        </div>
+                        <div className="p-3 space-y-2">
+                          {(['option_a', 'option_b', 'option_c'] as const).map(opt => {
+                            const o = (momentData as Record<string, { baseLanguage?: string; baseProbability?: number }>)[opt];
+                            if (!o) return null;
+                            return (
+                              <div key={opt} className="flex items-start gap-2">
+                                <span className="text-xs font-mono text-accent/70 w-6 shrink-0 mt-0.5">{opt.slice(-1).toUpperCase()}</span>
+                                <span className="text-xs text-secondary flex-1 leading-relaxed">{o.baseLanguage ?? '—'}</span>
+                                <span className="text-xs font-mono text-secondary/50 shrink-0">{o.baseProbability ?? '?'}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function BuyersPage() {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [total, setTotal] = useState(0);
@@ -163,6 +373,7 @@ export function BuyersPage() {
   const [showImport, setShowImport] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedBuyer, setSelectedBuyer] = useState<Buyer | null>(null);
   const limit = 50;
 
   const fetchBuyers = useCallback(async (p = page, s = search) => {
@@ -228,13 +439,13 @@ export function BuyersPage() {
             )) : buyers.length === 0 ? (
               <tr><td colSpan={6} className="px-4 py-16 text-center text-secondary text-sm">{search ? 'No contacts match your search.' : 'No contacts yet — import a CSV or XLSX to get started.'}</td></tr>
             ) : buyers.map(buyer => (
-              <tr key={buyer.id} className="border-b border-border/50 hover:bg-white/2 transition-colors">
+              <tr key={buyer.id} className="border-b border-border/50 hover:bg-white/2 transition-colors cursor-pointer" onClick={() => setSelectedBuyer(buyer)}>
                 <td className="px-4 py-3"><div className="text-sm font-medium text-primary">{buyer.displayName || <span className="text-secondary italic">unnamed</span>}</div></td>
                 <td className="px-4 py-3"><span className="text-sm text-secondary font-mono">{formatPhone(buyer.waPhone)}</span></td>
                 <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{(buyer.tags ?? []).map(tag => <span key={tag} className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent/80 border border-accent/20">{tag}</span>)}</div></td>
                 <td className="px-4 py-3"><span className="text-sm text-secondary">{buyer.totalOrders}</span></td>
                 <td className="px-4 py-3"><span className="text-sm text-secondary">{formatDate(buyer.createdAt)}</span></td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                   <button onClick={() => handleDelete(buyer.id)} disabled={deletingId === buyer.id} className="text-secondary hover:text-red-400 transition-colors disabled:opacity-40" title="Delete contact">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                   </button>
@@ -257,6 +468,7 @@ export function BuyersPage() {
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); fetchBuyers(1, search); }} />}
       {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
+      {selectedBuyer && <IntelligenceDrawer buyer={selectedBuyer} onClose={() => setSelectedBuyer(null)} />}
     </div>
   );
 }

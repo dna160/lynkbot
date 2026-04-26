@@ -35,6 +35,7 @@ import { analyticsRoutes } from './routes/v1/analytics';
 import { buyerRoutes } from './routes/v1/buyers';
 import { broadcastRoutes } from './routes/v1/broadcasts';
 import { aiRoutes } from './routes/v1/ai';
+import { intelligenceRoutes } from './routes/v1/intelligence';
 
 // Lazy-load Sentry only when DSN is configured
 if (config.SENTRY_DSN) {
@@ -90,6 +91,7 @@ async function bootstrap(): Promise<void> {
   await server.register(buyerRoutes, { prefix: '/api' });
   await server.register(broadcastRoutes, { prefix: '/api' });
   await server.register(aiRoutes, { prefix: '/api' });
+  await server.register(intelligenceRoutes, { prefix: '/api' });
 
   // --- Sentry error handler ---
   server.setErrorHandler((error, request, reply) => {

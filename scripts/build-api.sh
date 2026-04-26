@@ -19,7 +19,7 @@ fi
 
 # --- Recompile workspace packages whose src is newer than dist ---
 # Order matters: shared has no internal deps; others depend on shared.
-for pkg in shared db ai wati payments; do
+for pkg in shared db ai wati payments pantheon; do
   PKG_DIR="$ROOT/packages/$pkg"
   [ -d "$PKG_DIR/src" ] || continue
   NEWEST_SRC=$(find "$PKG_DIR/src" -name '*.ts' -type f -exec stat -f '%m' {} \; | sort -n | tail -1)

@@ -332,3 +332,50 @@ export const broadcastsApi = {
     api.post<{ id: string; recipientCount: number; status: string }>('/broadcasts', data),
   get: (id: string) => api.get<Broadcast>(`/broadcasts/${id}`),
 };
+
+// ── Pantheon Intelligence ────────────────────────────────────────────────────
+
+export interface GenomeScores {
+  openness: number; conscientiousness: number; extraversion: number;
+  agreeableness: number; neuroticism: number;
+  communicationStyle: number; decisionMaking: number; brandRelationship: number;
+  influenceSusceptibility: number; emotionalExpression: number; conflictBehavior: number;
+  literacyArticulation: number; socioeconomicFriction: number;
+  identityFusion: number; chronesthesiaCapacity: number;
+  tomSelfAwareness: number; tomSocialModeling: number; executiveFlexibility: number;
+}
+
+export interface Genome {
+  buyerId: string;
+  tenantId: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  observationCount: number;
+  formationInvariants: string[];
+  lastUpdatedAt: string;
+  scores: GenomeScores;
+}
+
+export interface GenomeMutation {
+  traitName: string;
+  oldScore: number;
+  newScore: number;
+  delta: number;
+  evidenceSummary: string | null;
+  createdAt: string;
+}
+
+export interface GenomeResponse {
+  genome: Genome;
+  mutations: GenomeMutation[];
+  dialogCache: Record<string, unknown> | null;
+  dialogCacheBuiltAt: string | null;
+  osintSummary: string | null;
+  hasPersisted: boolean;
+}
+
+export const intelligenceApi = {
+  getGenome: (buyerId: string) =>
+    api.get<GenomeResponse>(`/buyers/${buyerId}/genome`),
+  refreshGenome: (buyerId: string) =>
+    api.post<GenomeResponse & { updated: boolean; signalsSummary: Record<string, unknown> }>(`/buyers/${buyerId}/genome/refresh`),
+};
