@@ -221,7 +221,7 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
         }
       } else {
         // First time: seed from cultural priors, then layer in signal-derived scores
-        const seeded = buildSeededGenome(id, tenantId, buyer.waId ?? undefined);
+        const seeded = buildSeededGenome(id, tenantId, buyer.waPhone ?? undefined);
         finalScores = signals.messageCount > 0
           ? mergeScores(seeded.scores, adjustedScores)
           : seeded.scores;

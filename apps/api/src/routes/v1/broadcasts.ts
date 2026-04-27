@@ -140,7 +140,7 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Build template components from positional parameters
       const components = parameters.length > 0
-        ? [{ type: 'body', parameters: parameters.map((p) => ({ type: 'text', text: p })) }]
+        ? [{ type: 'body' as const, parameters: parameters.map((p) => ({ type: 'text' as const, text: p })) }]
         : [];
 
       for (const recipient of audience) {

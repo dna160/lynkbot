@@ -121,8 +121,8 @@ export interface MetaNormalizedPayload {
   messageType: MetaMessageType;
   /** Location data, present when messageType === 'location' */
   location?: {
-    latitude: string;
-    longitude: string;
+    latitude: number;
+    longitude: number;
     name?: string;
     address?: string;
   };

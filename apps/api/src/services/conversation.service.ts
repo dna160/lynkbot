@@ -129,7 +129,7 @@ export class ConversationService {
       const [created] = await db.insert(buyers).values({
         tenantId,
         waPhone: waId,
-        displayName: payload.senderName ?? payload.contactName ?? null,
+        displayName: payload.name ?? null,
         preferredLanguage: 'id',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -187,11 +187,11 @@ export class ConversationService {
         tenantId,
         watiMessageId: messageId,
         direction: 'inbound',
-        messageType: payload.type ?? payload.messageType ?? 'text',
+        messageType: payload.messageType ?? 'text',
         textContent: extractText(payload) || null,
         locationLat: payload.location?.latitude?.toString() ?? null,
         locationLng: payload.location?.longitude?.toString() ?? null,
-        rawPayload: payload as Record<string, unknown>,
+        rawPayload: payload as unknown as Record<string, unknown>,
         createdAt: new Date(),
       }).onConflictDoNothing();
     }
@@ -210,7 +210,7 @@ export class ConversationService {
 
     // Location message — route separately
     if (isLocationMessage(payload) && payload.location) {
-      await this.handleLocationShare(conv, payload.location as { latitude: string; longitude: string; name?: string; address?: string });
+      await this.handleLocationShare(conv, payload.location);
       return;
     }
 
@@ -243,7 +243,7 @@ export class ConversationService {
       if (within24h) {
         const meta = this.getMetaClient();
         await meta.sendText({
-          to: buyer.waId,
+          to: buyer.waPhone,
           message: 'Kamu telah berhenti. Untuk mulai lagi, chat kami kapan saja.',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -262,7 +262,7 @@ export class ConversationService {
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
         await meta.sendText({
-          to: buyer.waId,
+          to: buyer.waPhone,
           message: 'Menghubungkan ke tim kami... ⏳',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -280,7 +280,8 @@ export class ConversationService {
   // Location share
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async handleLocationShare(conv: ConvRow, location: { latitude: string; longitude: string; name?: string; address?: string }): Promise<void> {
+  async handleLocationShare(conv: ConvRow, location: { latitude: number; longitude: number; name?: string; address?: string } | undefined): Promise<void> {
+    if (!location) return;
     const validStates: ConversationStateValue[] = ['ADDRESS_COLLECTION', 'CHECKOUT_INTENT', 'LOCATION_RECEIVED'];
     if (!validStates.includes(conv.state as ConversationStateValue)) return;
 
@@ -300,7 +301,7 @@ export class ConversationService {
       await this.transitionState(conv.id, 'LOCATION_RECEIVED');
       if (within24h) {
         await meta.sendText({
-          to: (await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) }))?.waId ?? '',
+          to: (await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) }))?.waPhone ?? '',
           message:
             `Lokasi diterima! Tapi nama kota *${result.rawAddress ?? ''}* tidak ditemukan di database ongkir. ` +
             'Bisa konfirmasi nama kota / kabupaten kamu? (contoh: Jakarta Selatan, Bandung)',
@@ -312,7 +313,7 @@ export class ConversationService {
       if (within24h) {
         const buyerRow = await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) });
         await meta.sendText({
-          to: buyerRow?.waId ?? '',
+          to: buyerRow?.waPhone ?? '',
           message: 'Maaf, tidak bisa membaca lokasi kamu. Bisa ketik alamat lengkap? (nama jalan, kelurahan, kota)',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -515,7 +516,7 @@ export class ConversationService {
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
         await meta.sendText({
-          to: buyer.waId,
+          to: buyer.waPhone,
           message: 'Oke, sudah masuk waitlist! Kami akan langsung kabari kalau stok sudah tersedia 😊',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -595,7 +596,7 @@ export class ConversationService {
         : defaultGenome(buyer.id, conv.tenantId);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cache = (genomeRow?.dialogCache as any) ?? buildFallbackCache(conv.language ?? 'id');
+      const cache = (genomeRow?.dialogCache as any) ?? buildFallbackCache((conv.language ?? 'id') as 'id' | 'en');
 
       // Last 5 inbound messages for moment context
       const recentMsgs = await db.query.messages.findMany({
@@ -651,7 +652,7 @@ export class ConversationService {
 
     const meta = this.getMetaClient();
     await meta.sendText({
-      to: buyer.waId,
+      to: buyer.waPhone,
       message: aiText,
       isWithin24hrWindow: true,
     });
@@ -769,7 +770,7 @@ export class ConversationService {
     } else {
       // First message(s) ever: seed culturally, then layer signal deltas
       const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, buyerId) });
-      const seeded = buildSeededGenome(buyerId, tenantId, buyer?.waId ?? undefined);
+      const seeded = buildSeededGenome(buyerId, tenantId, buyer?.waPhone ?? undefined);
       finalScores = mergeScores(seeded.scores, adjustedScores);
       observationCount = signals.messageCount;
     }

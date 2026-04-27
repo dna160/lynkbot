@@ -72,8 +72,8 @@ export function extractFirstMessage(body: unknown): MetaNormalizedPayload | null
 
       const location = msg.location
         ? {
-            latitude: String(msg.location.latitude),
-            longitude: String(msg.location.longitude),
+            latitude: Number(msg.location.latitude),
+            longitude: Number(msg.location.longitude),
             name: msg.location.name,
             address: msg.location.address,
           }

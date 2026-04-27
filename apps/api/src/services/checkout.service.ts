@@ -7,7 +7,7 @@
  * Exports : CheckoutService class
  * DO NOT  : Handle payment invoice creation (that's PaymentService).
  */
-import { db, conversations, products } from '@lynkbot/db';
+import { db, conversations, products, tenants } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
 import { MetaClient } from '@lynkbot/meta';
 import { config } from '../config';

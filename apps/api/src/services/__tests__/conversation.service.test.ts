@@ -176,14 +176,16 @@ function makeConv(overrides: Record<string, unknown> = {}) {
 }
 
 function makePayload(text: string, overrides: Record<string, unknown> = {}) {
+  const id = `msg-${Date.now()}-${Math.random()}`;
   return {
     waId: '628123456789',
-    id: `msg-${Date.now()}-${Math.random()}`,
-    messageId: `msg-${Date.now()}-${Math.random()}`,
-    type: 'text',
-    messageType: 'text',
+    messageId: id,
+    messageType: 'text' as const,
     text,
-    senderName: 'Test User',
+    name: 'Test User',
+    timestamp: Date.now(),
+    phoneNumberId: 'phone-number-id-1',
+    raw: {} as any,
     ...overrides,
   };
 }
@@ -238,7 +240,7 @@ describe('ConversationService', () => {
   describe('idempotency', () => {
     it('processes the same messageId only once', async () => {
       const payload = makePayload('halo');
-      const messageId = payload.id!;
+      const messageId = payload.messageId;
 
       // First call: not duplicate
       (db.query.messages.findFirst as any).mockResolvedValueOnce(null);
