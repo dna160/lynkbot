@@ -26,6 +26,12 @@ const PROD_ORIGINS = [
   'https://lynk.id',
 ];
 
+// Pattern matching for Railway-generated domains (*.up.railway.app)
+// and any custom domain set via CORS_ORIGIN env var
+function isRailwayOrigin(origin: string): boolean {
+  return origin.endsWith('.up.railway.app') || origin.endsWith('.railway.app');
+}
+
 const corsPluginImpl: FastifyPluginAsync = async (fastify) => {
   // Always allow localhost for local dev + staging. In production also allow prod domains.
   const extraOrigins = (config.CORS_ORIGIN ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -42,7 +48,7 @@ const corsPluginImpl: FastifyPluginAsync = async (fastify) => {
         callback(null, true);
         return;
       }
-      if (allowedOrigins.includes(origin)) {
+      if (allowedOrigins.includes(origin) || isRailwayOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`Origin ${origin} not allowed by CORS`), false);

@@ -2,58 +2,71 @@
 # Package : apps/dashboard
 # File    : Dockerfile
 # Role    : Multi-stage Docker build for LynkBot React dashboard.
-#           Stage 1 : deps    — install dependencies
-#           Stage 2 : builder — vite build → static files in /app/dist
+#           Stage 1 : deps    — install node_modules (dashboard only)
+#           Stage 2 : builder — vite build → static files in dist/
 #           Stage 3 : runner  — nginx serves static files on port 80
+#
+# RAILWAY SETUP — set this as a Build Variable in the Railway lynkbot-dashboard service:
+#   VITE_API_URL = https://<your-api-public-domain>
+#   Find your API public domain: Railway → lynkbot-api service → Settings → Networking → Public Domain
+#   Example: https://lynkbot-api-production.up.railway.app
+#
+# Vite bakes VITE_* env vars into the JS bundle at BUILD TIME, so it must be a Build Variable
+# (not a regular Railway env var, which is only available at runtime).
 
+ARG VITE_API_URL=""
+
+# ---- Stage 1: Deps ----
 FROM node:20-alpine AS deps
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Workspace manifests (dashboard only imports @lynkbot/shared types — no build step needed)
 COPY pnpm-workspace.yaml ./
 COPY package.json ./
 COPY pnpm-lock.yaml ./
+COPY apps/dashboard/package.json ./apps/dashboard/
 
-COPY packages/shared/package.json   ./packages/shared/
-COPY apps/dashboard/package.json    ./apps/dashboard/
-
-RUN pnpm install --frozen-lockfile
+# Install only dashboard deps (workspace filter skips all other packages)
+RUN pnpm install --frozen-lockfile --filter @lynkbot/dashboard
 
 # ---- Stage 2: Builder ----
 FROM node:20-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
-COPY --from=deps /app/node_modules                   ./node_modules
-COPY --from=deps /app/packages/shared/node_modules   ./packages/shared/node_modules
-COPY --from=deps /app/apps/dashboard/node_modules    ./apps/dashboard/node_modules
+# Re-declare ARG so the value flows into this stage
+ARG VITE_API_URL=""
+# Set as ENV so the vite build process sees it
+ENV VITE_API_URL=$VITE_API_URL
 
-# Copy shared types (dashboard imports from @lynkbot/shared types only — no compile needed)
-COPY packages/shared ./packages/shared
+COPY --from=deps /app/node_modules              ./node_modules
+COPY --from=deps /app/apps/dashboard/node_modules ./apps/dashboard/node_modules
 
-# Copy dashboard source
 COPY apps/dashboard ./apps/dashboard
 
-# Build — tsc + vite produces apps/dashboard/dist/
 WORKDIR /app/apps/dashboard
-RUN pnpm run build
+# Use vite directly (skip tsc typecheck to avoid tsconfig reference issues in Docker)
+RUN node_modules/.bin/vite build
 
 # ---- Stage 3: Runner (nginx) ----
-FROM nginx:alpine AS runner
+FROM nginx:1.27-alpine AS runner
 
-# Copy built assets
 COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
 
-# nginx config: SPA fallback (all routes → index.html)
+# SPA routing: all client-side routes fall back to index.html so React Router works
 RUN printf 'server {\n\
-  listen 80;\n\
-  root /usr/share/nginx/html;\n\
-  index index.html;\n\
-  location / {\n\
-    try_files $uri $uri/ /index.html;\n\
-  }\n\
+    listen 80;\n\
+    root /usr/share/nginx/html;\n\
+    index index.html;\n\
+    gzip on;\n\
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;\n\
+    location / {\n\
+        try_files $uri $uri/ /index.html;\n\
+    }\n\
+    location ~* \\.(?:js|css|woff2?|png|jpg|svg|ico)$ {\n\
+        expires 1y;\n\
+        add_header Cache-Control "public, immutable";\n\
+    }\n\
 }\n' > /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

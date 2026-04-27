@@ -1,6 +1,35 @@
 # LynkBot Railway deployment configuration — MVP
-# Three services: API (HTTP) + Worker (background jobs) + Dashboard (static SPA)
-# Database and Redis are Railway managed services
+# Three services: API (HTTP) + Worker (BullMQ) + Dashboard (nginx static)
+#
+# ─── REQUIRED RAILWAY ENV VARS ──────────────────────────────────────────────
+# Set these in Railway → each service → Variables tab:
+#
+# lynkbot-api + lynkbot-worker (same vars for both):
+#   DATABASE_URL              (auto-injected by Railway Postgres plugin)
+#   REDIS_URL                 (auto-injected by Railway Redis plugin)
+#   JWT_SECRET                random 64-char hex secret
+#   LYNK_INTERNAL_API_KEY     random 64-char hex secret
+#   XAI_API_KEY               xAI API key
+#   XAI_BASE_URL              https://api.x.ai/v1
+#   XAI_MODEL                 grok-4-1-fast-reasoning
+#   XAI_EMBEDDING_MODEL       text-embedding-3-small
+#   META_ACCESS_TOKEN         WhatsApp System User access token
+#   META_PHONE_NUMBER_ID      536516392872816
+#   META_WABA_ID              538059646048440
+#   META_APP_SECRET           Meta App Secret
+#   META_WEBHOOK_VERIFY_TOKEN lynkbot_webhook_verify
+#   META_API_VERSION          v23.0
+#   RAJAONGKIR_API_KEY        Raja Ongkir Pro key
+#   NODE_ENV                  production
+#
+# lynkbot-dashboard (set as Build Variable, NOT runtime var):
+#   VITE_API_URL  → https://<lynkbot-api public domain>
+#   (Railway → lynkbot-api → Settings → Networking → Public Domain)
+#
+# After first deploy, update Meta webhook URL:
+#   Meta Developer Console → App → WhatsApp → Configuration → Webhook URL:
+#   https://<lynkbot-api public domain>/webhooks/meta
+# ────────────────────────────────────────────────────────────────────────────
 
 [build]
 builder = "DOCKERFILE"
@@ -11,7 +40,6 @@ source = "."
 dockerfile = "apps/api/Dockerfile"
 
 [services.deploy]
-startCommand = "node dist/index.js"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
@@ -23,7 +51,6 @@ source = "."
 dockerfile = "apps/worker/Dockerfile"
 
 [services.deploy]
-startCommand = "node dist/index.js"
 restartPolicyType = "ALWAYS"
 
 [[services]]
