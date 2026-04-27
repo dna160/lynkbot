@@ -92,8 +92,25 @@ pnpm --filter @lynkbot/db db:push
 
 ## 2. Production Deployment (Railway)
 
-Railway deployment is fully automated via the GitHub integration.
-Push to `main` → Railway rebuilds affected services.
+### ⚠️ One-time dashboard setup — REQUIRED before first deploy
+
+Railway reads **one `railway.toml` per service**, configured via the service's "Config Path" setting.
+Without this, Railway falls back to Nixpacks auto-detection and runs `pnpm --filter @pkg build`,
+which **doesn't work** for this monorepo (builds deps in wrong order, breaks symlinks).
+
+**Do this once in the Railway dashboard for each service:**
+
+| Service | Setting | Value |
+|---------|---------|-------|
+| `lynkbot-api` | Settings → Source → **Config Path** | `infra/api.railway.toml` |
+| `lynkbot-worker` | Settings → Source → **Config Path** | `infra/worker.railway.toml` |
+| `lynkbot-dashboard` | Settings → Source → **Config Path** | `infra/dashboard.railway.toml` |
+| All services | Settings → Source → **Root Directory** | *(leave empty)* |
+
+After setting Config Path, trigger a manual redeploy. Subsequent `git push` to `main`
+will deploy automatically.
+
+---
 
 ### How turbo prune stops Railway from hanging
 

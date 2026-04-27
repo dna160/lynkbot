@@ -1,0 +1,21 @@
+# Railway service config for lynkbot-dashboard
+#
+# HOW TO ACTIVATE:
+#   Railway dashboard → lynkbot-dashboard → Settings → Source → Config Path
+#   Set to: infra/dashboard.railway.toml
+#
+# Also ensure:
+#   - Source Repo: dna160/lynkbot
+#   - Root Directory: (empty — build context is repo root)
+#   - Build Variables: VITE_API_URL = https://<your-api-domain>.up.railway.app
+#     (must be a Build Variable, NOT a runtime env var — Vite bakes it in at build time)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/dashboard/Dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

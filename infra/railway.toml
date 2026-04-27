@@ -31,35 +31,14 @@
 #   https://<lynkbot-api public domain>/webhooks/meta
 # ────────────────────────────────────────────────────────────────────────────
 
-[build]
-builder = "DOCKERFILE"
-
-[[services]]
-name = "lynkbot-api"
-source = "."
-dockerfile = "apps/api/Dockerfile"
-
-[services.deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 30
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
-
-[[services]]
-name = "lynkbot-worker"
-source = "."
-dockerfile = "apps/worker/Dockerfile"
-
-[services.deploy]
-restartPolicyType = "ALWAYS"
-
-[[services]]
-name = "lynkbot-dashboard"
-source = "."
-dockerfile = "apps/dashboard/Dockerfile"
-
-[services.deploy]
-healthcheckPath = "/"
-healthcheckTimeout = 30
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+# ─── IMPORTANT: This file is documentation only ──────────────────────────────
+# Railway reads ONE railway.toml per SERVICE, not a multi-service array.
+# The [[services]] syntax below is NOT valid Railway TOML.
+#
+# USE THESE FILES INSTEAD — one per service, activated via Railway dashboard:
+#   infra/api.railway.toml        → lynkbot-api
+#   infra/worker.railway.toml     → lynkbot-worker
+#   infra/dashboard.railway.toml  → lynkbot-dashboard
+#
+# In Railway dashboard → each service → Settings → Source → Config Path
+# ─────────────────────────────────────────────────────────────────────────────

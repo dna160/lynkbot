@@ -1,0 +1,19 @@
+# Railway service config for lynkbot-api
+#
+# HOW TO ACTIVATE:
+#   Railway dashboard → lynkbot-api → Settings → Source → Config Path
+#   Set to: infra/api.railway.toml
+#
+# Also ensure:
+#   - Source Repo: dna160/lynkbot
+#   - Root Directory: (empty — build context is repo root, required for turbo prune)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/api/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
