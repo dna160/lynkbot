@@ -53,9 +53,10 @@ FROM nginx:1.27-alpine AS runner
 
 COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
 
-# SPA routing: all client-side routes fall back to index.html so React Router works
+# Write nginx config as a template — $PORT is substituted at container start by envsubst.
+# Railway injects $PORT dynamically; hardcoding 80 causes healthcheck failures.
 RUN printf 'server {\n\
-    listen 80;\n\
+    listen ${PORT};\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
     gzip on;\n\
@@ -67,7 +68,12 @@ RUN printf 'server {\n\
         expires 1y;\n\
         add_header Cache-Control "public, immutable";\n\
     }\n\
-}\n' > /etc/nginx/conf.d/default.conf
+}\n' > /etc/nginx/conf.d/default.conf.template
 
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Default PORT to 80 for local docker run (Railway always overrides this)
+ENV PORT=80
+
+EXPOSE ${PORT}
+
+# envsubst replaces ${PORT} in the template, then starts nginx
+CMD ["/bin/sh", "-c", "envsubst '${PORT}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
