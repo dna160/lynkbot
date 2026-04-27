@@ -53,9 +53,10 @@ FROM nginx:1.27-alpine AS runner
 
 COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
 
-# Write nginx config as a template — $PORT is substituted at container start by envsubst.
-# Railway injects $PORT dynamically; hardcoding 80 causes healthcheck failures.
-RUN printf 'server {\n\
+# nginx:alpine's built-in entrypoint automatically runs envsubst on every
+# file in /etc/nginx/templates/*.conf.template → /etc/nginx/conf.d/*.conf
+# before starting nginx. This is the official mechanism — no custom CMD needed.
+RUN mkdir -p /etc/nginx/templates && printf 'server {\n\
     listen ${PORT};\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
@@ -68,12 +69,9 @@ RUN printf 'server {\n\
         expires 1y;\n\
         add_header Cache-Control "public, immutable";\n\
     }\n\
-}\n' > /etc/nginx/conf.d/default.conf.template
+}\n' > /etc/nginx/templates/default.conf.template
 
-# Default PORT to 80 for local docker run (Railway always overrides this)
+# Default PORT=80 for local use. Railway overrides this at runtime.
 ENV PORT=80
 
-EXPOSE ${PORT}
-
-# envsubst replaces ${PORT} in the template, then starts nginx
-CMD ["/bin/sh", "-c", "envsubst '${PORT}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+EXPOSE 80
