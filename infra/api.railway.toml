@@ -1,16 +1,14 @@
-# Railway service config for lynkbot-api
+# Railway config for lynkbot-api
+# Optional — use this for the health check and explicit deploy settings.
 #
-# HOW TO ACTIVATE:
-#   Railway dashboard → lynkbot-api → Settings → Source → Config Path
-#   Set to: infra/api.railway.toml
+# In Railway dashboard: lynkbot-api → Settings → Source → Config Path
+# Set to: infra/api.railway.toml
 #
-# Also ensure:
-#   - Source Repo: dna160/lynkbot
-#   - Root Directory: (empty — build context is repo root, required for turbo prune)
+# Root Directory must be empty (repo root) — Docker context needs the full monorepo.
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "apps/api/Dockerfile"
+# Uses root Dockerfile (default SERVICE=api — no build arg needed)
 
 [deploy]
 healthcheckPath = "/health"

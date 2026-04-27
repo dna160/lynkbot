@@ -1,16 +1,18 @@
-# Railway service config for lynkbot-worker
+# Railway config for lynkbot-worker
 #
-# HOW TO ACTIVATE:
+# OPTION A — Config Path (explicit, recommended):
 #   Railway dashboard → lynkbot-worker → Settings → Source → Config Path
 #   Set to: infra/worker.railway.toml
 #
-# Also ensure:
-#   - Source Repo: dna160/lynkbot
-#   - Root Directory: (empty — build context is repo root, required for turbo prune)
+# OPTION B — Build Variable only (simpler):
+#   Railway dashboard → lynkbot-worker → Variables → Add variable:
+#   Key: SERVICE  Value: worker  (toggle Build Variable ON)
+#   No Config Path needed. Root Dockerfile + SERVICE=worker build arg is sufficient.
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "apps/worker/Dockerfile"
+# Uses root Dockerfile with SERVICE=worker.
+# Also set SERVICE=worker as a Build Variable in the Railway dashboard.
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

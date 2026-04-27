@@ -1,0 +1,18 @@
+# LynkBot Railway configuration — auto-read from repo root for all services.
+#
+# This file is the fallback for services with no Config Path set.
+# It defaults to building the API (SERVICE=api).
+#
+# Per-service overrides (set via Settings → Source → Config Path):
+#   lynkbot-api    → infra/api.railway.toml       (adds health check)
+#   lynkbot-worker → infra/worker.railway.toml    (sets SERVICE=worker)
+#   lynkbot-dashboard → infra/dashboard.railway.toml (nginx Dockerfile)
+#
+# If you only configure one thing per service in Railway:
+#   Worker  → Variables → SERVICE=worker (Build Variable toggle ON)
+#   Dashboard → Settings → Source → Config Path → infra/dashboard.railway.toml
+
+[build]
+builder = "DOCKERFILE"
+# Uses Dockerfile at repo root. SERVICE build arg defaults to "api".
+# Override per service by setting SERVICE as a Build Variable.
