@@ -9,6 +9,7 @@
  */
 import Fastify from 'fastify';
 import { config } from './config';
+import { runMigrations } from './migrate';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Sentry: any = null;
@@ -58,6 +59,9 @@ const server = Fastify({
 });
 
 async function bootstrap(): Promise<void> {
+  // --- Run DB migrations before accepting traffic ---
+  await runMigrations();
+
   // --- Core plugins ---
   await server.register(corsPlugin);
   await server.register(rateLimitPlugin);
