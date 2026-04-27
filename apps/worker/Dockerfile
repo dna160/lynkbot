@@ -1,50 +1,42 @@
 # @CLAUDE_CONTEXT
 # Package : apps/worker
 # File    : Dockerfile
-# Role    : Multi-stage Docker build for LynkBot background worker service.
-#           No HTTP port exposed — pure BullMQ job processor.
-# Stage 1 : deps    — install all dependencies (frozen lockfile)
-# Stage 2 : builder — compile TypeScript for all packages + worker
-# Stage 3 : runner  — minimal production image
+# Role    : Two-stage Docker build for LynkBot background worker (BullMQ processors).
+#           No HTTP port exposed — pure job processor.
+#
+# WHY SINGLE BUILD STAGE (not 3-stage deps/builder/runner):
+#   pnpm workspaces wire @lynkbot/* as symlinks inside node_modules.
+#   Copying those symlinks between Docker stages breaks them because the
+#   target paths (.pnpm virtual store + package source dirs) must exist in
+#   the SAME filesystem layer. Installing and building in one stage avoids
+#   this entirely.
+#
+# CACHE STRATEGY:
+#   Layer 1: Install pnpm + copy workspace manifests + package.json files
+#   Layer 2: pnpm install  (cached until any package.json changes)
+#   Layer 3: Copy source   (cached until source changes)
+#   Layer 4+: Build steps  (one layer per package = granular invalidation)
 
-FROM node:20-alpine AS deps
+# ---- Stage 1: Build ----
+FROM node:20-alpine AS build
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-COPY pnpm-workspace.yaml ./
-COPY package.json ./
-COPY pnpm-lock.yaml ./
-COPY tsconfig.base.json ./
+# Workspace manifests + only package.json files (deps cache layer)
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY packages/shared/package.json    ./packages/shared/
+COPY packages/db/package.json        ./packages/db/
+COPY packages/ai/package.json        ./packages/ai/
+COPY packages/meta/package.json      ./packages/meta/
+COPY packages/payments/package.json  ./packages/payments/
+COPY apps/worker/package.json        ./apps/worker/
 
-COPY packages/shared/package.json   ./packages/shared/
-COPY packages/db/package.json       ./packages/db/
-COPY packages/ai/package.json       ./packages/ai/
-COPY packages/meta/package.json     ./packages/meta/
-COPY packages/payments/package.json ./packages/payments/
-COPY apps/worker/package.json       ./apps/worker/
-
+# Install all deps — pnpm creates workspace symlinks in this same layer
 RUN pnpm install --frozen-lockfile
 
-# ---- Stage 2: Builder ----
-FROM node:20-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
-WORKDIR /app
-
-# pnpm needs pnpm-workspace.yaml + package.json in this stage to resolve --filter targets
-COPY pnpm-workspace.yaml ./
-COPY package.json ./
-COPY tsconfig.base.json ./
-
-COPY --from=deps /app/node_modules                  ./node_modules
-COPY --from=deps /app/packages/shared/node_modules  ./packages/shared/node_modules
-COPY --from=deps /app/packages/db/node_modules      ./packages/db/node_modules
-COPY --from=deps /app/packages/ai/node_modules      ./packages/ai/node_modules
-COPY --from=deps /app/packages/meta/node_modules    ./packages/meta/node_modules
-COPY --from=deps /app/packages/payments/node_modules ./packages/payments/node_modules
-COPY --from=deps /app/apps/worker/node_modules      ./apps/worker/node_modules
-
+# Copy source (after install so the install layer is cached separately)
 COPY packages/shared    ./packages/shared
 COPY packages/db        ./packages/db
 COPY packages/ai        ./packages/ai
@@ -52,6 +44,7 @@ COPY packages/meta      ./packages/meta
 COPY packages/payments  ./packages/payments
 COPY apps/worker        ./apps/worker
 
+# Build workspace packages in dependency order, then the worker
 RUN pnpm --filter @lynkbot/shared   run build
 RUN pnpm --filter @lynkbot/db       run build
 RUN pnpm --filter @lynkbot/ai       run build
@@ -59,7 +52,7 @@ RUN pnpm --filter @lynkbot/meta     run build
 RUN pnpm --filter @lynkbot/payments run build
 RUN pnpm --filter @lynkbot/worker   run build
 
-# ---- Stage 3: Runner ----
+# ---- Stage 2: Runner ----
 FROM node:20-alpine AS runner
 RUN apk add --no-cache dumb-init
 WORKDIR /app
@@ -69,21 +62,24 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 worker
 
-COPY --from=builder --chown=worker:nodejs /app/node_modules ./node_modules
+# Copy the entire workspace node_modules (contains pnpm .pnpm virtual store + symlinks)
+COPY --from=build --chown=worker:nodejs /app/node_modules ./node_modules
 
-COPY --from=builder --chown=worker:nodejs /app/packages/shared/dist         ./packages/shared/dist
-COPY --from=builder --chown=worker:nodejs /app/packages/shared/package.json ./packages/shared/
-COPY --from=builder --chown=worker:nodejs /app/packages/db/dist             ./packages/db/dist
-COPY --from=builder --chown=worker:nodejs /app/packages/db/package.json     ./packages/db/
-COPY --from=builder --chown=worker:nodejs /app/packages/ai/dist             ./packages/ai/dist
-COPY --from=builder --chown=worker:nodejs /app/packages/ai/package.json     ./packages/ai/
-COPY --from=builder --chown=worker:nodejs /app/packages/meta/dist           ./packages/meta/dist
-COPY --from=builder --chown=worker:nodejs /app/packages/meta/package.json   ./packages/meta/
-COPY --from=builder --chown=worker:nodejs /app/packages/payments/dist       ./packages/payments/dist
-COPY --from=builder --chown=worker:nodejs /app/packages/payments/package.json ./packages/payments/
+# Copy compiled workspace packages (dist + package.json for module resolution)
+COPY --from=build --chown=worker:nodejs /app/packages/shared/dist         ./packages/shared/dist
+COPY --from=build --chown=worker:nodejs /app/packages/shared/package.json ./packages/shared/
+COPY --from=build --chown=worker:nodejs /app/packages/db/dist             ./packages/db/dist
+COPY --from=build --chown=worker:nodejs /app/packages/db/package.json     ./packages/db/
+COPY --from=build --chown=worker:nodejs /app/packages/ai/dist             ./packages/ai/dist
+COPY --from=build --chown=worker:nodejs /app/packages/ai/package.json     ./packages/ai/
+COPY --from=build --chown=worker:nodejs /app/packages/meta/dist           ./packages/meta/dist
+COPY --from=build --chown=worker:nodejs /app/packages/meta/package.json   ./packages/meta/
+COPY --from=build --chown=worker:nodejs /app/packages/payments/dist       ./packages/payments/dist
+COPY --from=build --chown=worker:nodejs /app/packages/payments/package.json ./packages/payments/
 
-COPY --from=builder --chown=worker:nodejs /app/apps/worker/dist         ./apps/worker/dist
-COPY --from=builder --chown=worker:nodejs /app/apps/worker/package.json ./apps/worker/
+# Copy worker dist
+COPY --from=build --chown=worker:nodejs /app/apps/worker/dist         ./apps/worker/dist
+COPY --from=build --chown=worker:nodejs /app/apps/worker/package.json ./apps/worker/
 
 USER worker
 
