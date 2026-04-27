@@ -53,11 +53,13 @@ FROM nginx:1.27-alpine AS runner
 
 COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
 
-# nginx:alpine's built-in entrypoint automatically runs envsubst on every
-# file in /etc/nginx/templates/*.conf.template → /etc/nginx/conf.d/*.conf
-# before starting nginx. This is the official mechanism — no custom CMD needed.
-RUN mkdir -p /etc/nginx/templates && printf 'server {\n\
-    listen ${PORT};\n\
+# Remove the default nginx config so only ours is loaded
+RUN rm -f /etc/nginx/conf.d/default.conf
+
+# Write config with __PORT__ as a plain-text placeholder.
+# sed replaces it at runtime — no envsubst, no $ ambiguity with nginx variables.
+RUN printf 'server {\n\
+    listen __PORT__;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
     gzip on;\n\
@@ -69,9 +71,10 @@ RUN mkdir -p /etc/nginx/templates && printf 'server {\n\
         expires 1y;\n\
         add_header Cache-Control "public, immutable";\n\
     }\n\
-}\n' > /etc/nginx/templates/default.conf.template
+}\n' > /tmp/nginx.conf.template
 
-# Default PORT=80 for local use. Railway overrides this at runtime.
 ENV PORT=80
-
 EXPOSE 80
+
+# At startup: substitute __PORT__ with $PORT then launch nginx
+CMD ["/bin/sh", "-c", "sed \"s/__PORT__/${PORT}/g\" /tmp/nginx.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
