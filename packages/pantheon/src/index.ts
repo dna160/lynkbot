@@ -7,7 +7,8 @@
  * Exports : types, genome functions, dialog functions, classifier
  */
 export * from './types';
-export { deriveScores, scoreConfidence, applyConfidencePenalty, defaultGenome, mergeScores } from './genome/builder';
+export { deriveScores, scoreConfidence, applyConfidencePenalty, defaultGenome, mergeScores, buildSeededGenome } from './genome/builder';
+export { inferRegionFromPhone, buildSeededScores } from './genome/culturalPriors';
 export { extractSignals, extractName } from './genome/signals';
 export { classifyMoment } from './dialog/momentClassifier';
 export { buildDialogCache, buildFallbackCache } from './dialog/cacheBuilder';

@@ -56,6 +56,13 @@ export const buyerGenomes = pgTable('buyer_genomes', {
   /** Extracted OSINT summary — stored for display on dashboard */
   osintSummary: text('osint_summary'),
 
+  /**
+   * Tracks when signal extraction last ran.
+   * Incremental refresh only processes messages NEWER than this timestamp.
+   * null = genome was never derived from real messages (only seeded from cultural priors).
+   */
+  lastSignalExtractedAt: timestamp('last_signal_extracted_at'),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ({

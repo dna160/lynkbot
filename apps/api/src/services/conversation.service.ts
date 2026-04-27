@@ -11,7 +11,7 @@
  *           Payment events arrive via PaymentService callback.
  * Tests   : src/services/__tests__/conversation.service.test.ts
  */
-import { eq, and } from '@lynkbot/db';
+import { eq, and, gt } from '@lynkbot/db';
 import { db, conversations, messages, buyers, tenants, products, waitlist, buyerGenomes } from '@lynkbot/db';
 import {
   BUY_INTENT_KEYWORDS,
@@ -38,6 +38,7 @@ import {
   applyConfidencePenalty,
   mergeScores,
   defaultGenome,
+  buildSeededGenome,
   classifyMoment,
   selectDialog,
   computeRWI,
@@ -692,32 +693,49 @@ export class ConversationService {
   // Pantheon: background genome update (fire-and-forget)
   // ─────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Fire-and-forget genome updater. Incremental — only processes messages
+   * newer than lastSignalExtractedAt. First-time call seeds from cultural priors.
+   */
   private async updateGenomeAsync(buyerId: string, tenantId: string, conversationId: string): Promise<void> {
-    const recentMsgs = await db.query.messages.findMany({
-      where: and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')),
+    // Load existing genome to get the cutoff timestamp
+    const existing = await db.query.buyerGenomes.findFirst({
+      where: and(eq(buyerGenomes.buyerId, buyerId), eq(buyerGenomes.tenantId, tenantId)),
+    });
+
+    const cutoff: Date = existing?.lastSignalExtractedAt ?? new Date(0);
+    const now = new Date();
+
+    // Only fetch inbound messages NEWER than the last extraction
+    const newMsgs = await db.query.messages.findMany({
+      where: and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        gt(messages.createdAt, cutoff),
+      ),
       orderBy: (m, { asc }) => asc(m.createdAt),
       limit: 50,
     });
 
-    const msgTexts = recentMsgs.map(m => m.textContent ?? '').filter(Boolean);
+    // Nothing new since last run — leave genome unchanged
+    if (newMsgs.length === 0) return;
+
+    const msgTexts = newMsgs.map(m => m.textContent ?? '').filter(Boolean);
     if (msgTexts.length === 0) return;
 
-    const msgTimestamps = recentMsgs.map(m => m.createdAt.getTime());
+    const msgTimestamps = newMsgs.map(m => m.createdAt.getTime());
     const signals = extractSignals(msgTexts, msgTimestamps);
     if (signals.messageCount === 0) return;
 
     const newScores = deriveScores(signals);
-    const confidence = scoreConfidence(signals.messageCount);
-    const adjustedScores = applyConfidencePenalty(newScores, confidence);
-
-    const existing = await db.query.buyerGenomes.findFirst({
-      where: and(eq(buyerGenomes.buyerId, buyerId), eq(buyerGenomes.tenantId, tenantId)),
-    });
+    const batchConfidence = scoreConfidence(signals.messageCount);
+    const adjustedScores = applyConfidencePenalty(newScores, batchConfidence);
 
     let finalScores: GenomeScores;
     let observationCount: number;
 
     if (existing) {
+      // Incremental: EMA-merge new signal deltas on top of current genome
       const existingScores: GenomeScores = {
         openness: existing.openness,
         conscientiousness: existing.conscientiousness,
@@ -741,7 +759,10 @@ export class ConversationService {
       finalScores = mergeScores(existingScores, adjustedScores);
       observationCount = existing.observationCount + signals.messageCount;
     } else {
-      finalScores = adjustedScores;
+      // First message(s) ever: seed culturally, then layer signal deltas
+      const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, buyerId) });
+      const seeded = buildSeededGenome(buyerId, tenantId, buyer?.waId ?? undefined);
+      finalScores = mergeScores(seeded.scores, adjustedScores);
       observationCount = signals.messageCount;
     }
 
@@ -771,7 +792,8 @@ export class ConversationService {
       tomSocialModeling: finalScores.tomSocialModeling,
       executiveFlexibility: finalScores.executiveFlexibility,
       formationInvariants: [],
-      updatedAt: new Date(),
+      lastSignalExtractedAt: now,
+      updatedAt: now,
     }).onConflictDoUpdate({
       target: [buyerGenomes.buyerId, buyerGenomes.tenantId],
       set: {
@@ -795,7 +817,8 @@ export class ConversationService {
         tomSelfAwareness: finalScores.tomSelfAwareness,
         tomSocialModeling: finalScores.tomSocialModeling,
         executiveFlexibility: finalScores.executiveFlexibility,
-        updatedAt: new Date(),
+        lastSignalExtractedAt: now,
+        updatedAt: now,
       },
     });
   }

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Rebuild the worker bundle (apps/worker/dist/bundle.js) with esbuild.
-# Recompiles any stale @lynkbot/* workspace packages first, then bundles.
+# Rebuild apps/worker using tsc --noCheck (transpile only, no type checking).
+# Compiles @lynkbot/* workspace packages first, then apps/worker.
+# Output: apps/worker/dist/  (CommonJS, mirrors src/ structure)
+# Run with: node apps/worker/dist/index.js
 set -euo pipefail
 
 ROOT="/Users/storytellers/Documents/Claude Home/Lynkbot"
 cd "$ROOT" || exit 1
 
-ESBUILD_LIB="$ROOT/node_modules/.pnpm/esbuild@0.28.0/node_modules/esbuild/lib/main.js"
-if [ ! -f "$ESBUILD_LIB" ]; then
-  echo "ERROR: esbuild not found at $ESBUILD_LIB" >&2
-  exit 1
-fi
+find_tsc() {
+  local pkg_dir="$1"
+  for t in "$pkg_dir/node_modules/.bin/tsc" "$ROOT/node_modules/.bin/tsc" "$ROOT/apps/worker/node_modules/.bin/tsc"; do
+    [ -x "$t" ] && echo "$t" && return
+  done
+  echo "ERROR: tsc not found for $pkg_dir" >&2; exit 1
+}
 
 # --- Recompile workspace packages whose src is newer than dist ---
 for pkg in shared db ai wati payments pantheon; do
@@ -20,38 +24,18 @@ for pkg in shared db ai wati payments pantheon; do
   NEWEST_DIST=$(find "$PKG_DIR/dist" -name '*.js' -type f -exec stat -f '%m' {} \; 2>/dev/null | sort -n | tail -1)
   NEWEST_DIST=${NEWEST_DIST:-0}
   if [ "${NEWEST_SRC:-0}" -gt "$NEWEST_DIST" ]; then
-    echo "→ recompiling @lynkbot/$pkg (src newer than dist)"
-    TSC="$PKG_DIR/node_modules/.bin/tsc"
-    [ -x "$TSC" ] || TSC="$ROOT/node_modules/.bin/tsc"
-    [ -x "$TSC" ] || TSC="$ROOT/apps/api/node_modules/.bin/tsc"
-    if [ ! -x "$TSC" ]; then echo "ERROR: tsc not found for $pkg" >&2; exit 1; fi
+    echo "→ recompiling @lynkbot/$pkg"
+    TSC=$(find_tsc "$PKG_DIR")
     (cd "$PKG_DIR" && "$TSC")
   else
-    echo "  @lynkbot/$pkg dist up-to-date — skipping tsc"
+    echo "  @lynkbot/$pkg dist up-to-date"
   fi
 done
 
-# --- Re-bundle apps/worker ---
-START=$(date +%s)
-node --input-type=module -e "
-import { build } from '$ESBUILD_LIB';
-await build({
-  entryPoints: ['apps/worker/src/index.ts'],
-  bundle: true,
-  platform: 'node',
-  target: 'node20',
-  outfile: 'apps/worker/dist/bundle.js',
-  external: [
-    'pg-native', 'better-sqlite3', 'mysql2', 'oracledb',
-    'tedious', '@aws-sdk/client-s3', 'canvas',
-    // tiktoken and pdf-parse use WASM / native bindings that esbuild can't bundle
-    'tiktoken', 'pdf-parse',
-  ],
-  loader: { '.node': 'file' },
-  logLevel: 'info',
-});
-console.log('BUILD_OK');
-"
-ELAPSED=$(( $(date +%s) - START ))
-SIZE=$(stat -f%z apps/worker/dist/bundle.js 2>/dev/null || stat -c%s apps/worker/dist/bundle.js)
-echo "Bundle: apps/worker/dist/bundle.js ($SIZE bytes, ${ELAPSED}s)"
+# --- Compile apps/worker with --noCheck (transpile-only, no type analysis) ---
+echo "→ compiling apps/worker (--noCheck)"
+TSC=$(find_tsc "$ROOT/apps/worker")
+(cd "$ROOT/apps/worker" && "$TSC" --noCheck)
+
+SIZE=$(du -sh "$ROOT/apps/worker/dist" 2>/dev/null | cut -f1)
+echo "✓ apps/worker/dist ready ($SIZE). Run: node apps/worker/dist/index.js"

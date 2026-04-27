@@ -7,13 +7,13 @@
  * Exports : intelligenceRoutes (Fastify plugin)
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, and } from '@lynkbot/db';
+import { eq, and, gt } from '@lynkbot/db';
 import { db, buyers, buyerGenomes, genomeMutations, conversations, messages } from '@lynkbot/db';
 import {
   extractSignals, deriveScores, scoreConfidence, applyConfidencePenalty,
   mergeScores, classifyMoment, selectDialog, computeRWI,
   buildDialogCache, buildFallbackCache,
-  defaultGenome,
+  defaultGenome, buildSeededGenome,
   type GenomeScores, type Genome, type MomentType,
 } from '@lynkbot/pantheon';
 
@@ -132,8 +132,9 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /v1/buyers/:id/genome/refresh
-   * Re-runs signal extraction from recent conversation messages and updates genome.
-   * Also rebuilds dialog cache if confidence >= MEDIUM.
+   * Incremental refresh: only processes messages NEWER than lastSignalExtractedAt.
+   * First-time call seeds from cultural priors, then layers in signal deltas.
+   * If no new messages since last refresh, returns existing genome with updated: false.
    */
   fastify.post<{ Params: { id: string } }>(
     '/v1/buyers/:id/genome/refresh',
@@ -147,70 +148,89 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
       });
       if (!buyer) return reply.status(404).send({ error: 'Buyer not found' });
 
-      // Load last 50 inbound messages from buyer
+      // Load existing genome to determine the signal cutoff timestamp
+      const existing = await db.query.buyerGenomes.findFirst({
+        where: and(eq(buyerGenomes.buyerId, id), eq(buyerGenomes.tenantId, tenantId)),
+      });
+
+      const cutoff: Date = existing?.lastSignalExtractedAt ?? new Date(0);
+      const now = new Date();
+
+      // Find most recent conversation
       const conv = await db.query.conversations.findFirst({
         where: and(eq(conversations.buyerId, id), eq(conversations.tenantId, tenantId)),
         orderBy: (c, { desc }) => desc(c.lastMessageAt),
       });
 
-      const recentMessages = conv
+      // Only fetch inbound messages NEWER than the last extraction cutoff
+      const newMessages = conv
         ? await db.query.messages.findMany({
             where: and(
               eq(messages.conversationId, conv.id),
               eq(messages.direction, 'inbound'),
+              gt(messages.createdAt, cutoff),
             ),
             orderBy: (m, { asc }) => asc(m.createdAt),
             limit: 50,
           })
         : [];
 
-      const msgTexts = recentMessages.map(m => m.textContent ?? '').filter(Boolean);
-      const msgTimestamps = recentMessages.map(m => m.createdAt.getTime());
+      // No new messages since last refresh — return existing genome unchanged
+      if (newMessages.length === 0 && existing) {
+        return reply.send({
+          genome: rowToGenome(existing),
+          dialogCache: existing.dialogCache ?? null,
+          updated: false,
+          signalsSummary: { messagesAnalyzed: 0, note: 'No new messages since last refresh' },
+        });
+      }
 
+      const msgTexts = newMessages.map(m => m.textContent ?? '').filter(Boolean);
+      const msgTimestamps = newMessages.map(m => m.createdAt.getTime());
       const signals = extractSignals(msgTexts, msgTimestamps);
       const newScores = deriveScores(signals);
-      const confidence = scoreConfidence(signals.messageCount);
-      const adjustedScores = applyConfidencePenalty(newScores, confidence);
-
-      // Get or create genome row
-      const existing = await db.query.buyerGenomes.findFirst({
-        where: and(eq(buyerGenomes.buyerId, id), eq(buyerGenomes.tenantId, tenantId)),
-      });
+      const batchConfidence = scoreConfidence(signals.messageCount);
+      const adjustedScores = applyConfidencePenalty(newScores, batchConfidence);
 
       let finalScores: GenomeScores;
       let observationCount: number;
 
       if (existing) {
+        // Incremental: EMA-merge new signals on top of existing genome
         const existingGenome = rowToGenome(existing);
         finalScores = mergeScores(existingGenome.scores, adjustedScores);
         observationCount = existing.observationCount + signals.messageCount;
 
-        // Record significant mutations (delta > 5)
+        // Record significant trait mutations (|delta| >= 5)
         for (const key of Object.keys(finalScores) as (keyof GenomeScores)[]) {
-          const delta = Math.abs(finalScores[key] - existingGenome.scores[key]);
-          if (delta >= 5) {
+          const delta = finalScores[key] - existingGenome.scores[key];
+          if (Math.abs(delta) >= 5) {
             await db.insert(genomeMutations).values({
               buyerId: id,
               tenantId,
               traitName: key,
               oldScore: existingGenome.scores[key],
               newScore: finalScores[key],
-              delta: finalScores[key] - existingGenome.scores[key],
-              evidenceSummary: `Updated from ${signals.messageCount} messages. Signal: ${JSON.stringify({ emojiFreq: signals.emojiFrequency, priceQ: signals.priceQuestionsCount, polite: signals.politenessCount })}`,
-              confidence,
+              delta,
+              evidenceSummary: `+${signals.messageCount} msgs since last refresh. emoji=${signals.emojiFrequency.toFixed(2)}, priceQ=${signals.priceQuestionsCount}, polite=${signals.politenessCount}`,
+              confidence: batchConfidence,
               conversationId: conv?.id ?? null,
-              createdAt: new Date(),
+              createdAt: now,
             });
           }
         }
       } else {
-        finalScores = adjustedScores;
+        // First time: seed from cultural priors, then layer in signal-derived scores
+        const seeded = buildSeededGenome(id, tenantId, buyer.waId ?? undefined);
+        finalScores = signals.messageCount > 0
+          ? mergeScores(seeded.scores, adjustedScores)
+          : seeded.scores;
         observationCount = signals.messageCount;
       }
 
       const finalConfidence = scoreConfidence(observationCount);
 
-      // Upsert genome
+      // Upsert genome with updated lastSignalExtractedAt
       const [upserted] = await db
         .insert(buyerGenomes)
         .values({
@@ -220,7 +240,8 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
           observationCount,
           ...scoresToDbFields(finalScores),
           formationInvariants: [],
-          updatedAt: new Date(),
+          lastSignalExtractedAt: now,
+          updatedAt: now,
         })
         .onConflictDoUpdate({
           target: [buyerGenomes.buyerId, buyerGenomes.tenantId],
@@ -228,7 +249,8 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
             confidence: finalConfidence,
             observationCount,
             ...scoresToDbFields(finalScores),
-            updatedAt: new Date(),
+            lastSignalExtractedAt: now,
+            updatedAt: now,
           },
         })
         .returning();
@@ -237,16 +259,16 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
       let dialogCache = existing?.dialogCache ?? null;
       if (finalConfidence !== 'LOW' && (!existing?.dialogCacheBuiltAt || observationCount % 10 === 0)) {
         try {
-          const genome: Genome = { buyerId: id, tenantId, scores: finalScores, confidence: finalConfidence, formationInvariants: [], observationCount, lastUpdatedAt: new Date() };
+          const genome: Genome = { buyerId: id, tenantId, scores: finalScores, confidence: finalConfidence, formationInvariants: [], observationCount, lastUpdatedAt: now };
           dialogCache = await buildDialogCache(genome, 'your product', 'our store', 'id') as Record<string, unknown>;
           await db.update(buyerGenomes)
-            .set({ dialogCache, dialogCacheBuiltAt: new Date() })
+            .set({ dialogCache, dialogCacheBuiltAt: now })
             .where(eq(buyerGenomes.id, upserted.id));
         } catch (err) {
           fastify.log.warn({ err }, 'Dialog cache build failed — using fallback');
           dialogCache = buildFallbackCache('id') as unknown as Record<string, unknown>;
           await db.update(buyerGenomes)
-            .set({ dialogCache, dialogCacheBuiltAt: new Date() })
+            .set({ dialogCache, dialogCacheBuiltAt: now })
             .where(eq(buyerGenomes.id, upserted.id));
         }
       }

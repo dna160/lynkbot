@@ -5,10 +5,18 @@
  * Role    : Builds a Genome from conversation signals. Rule-based scoring — no LLM.
  *           Mirrors Pantheon V2 GenomeBuilder._derive_scores_from_intake() logic
  *           but adapted for WhatsApp conversation patterns instead of intake forms.
- *           All scores start at 50 (neutral) and are adjusted by signal evidence.
- * Exports : buildGenomeFromSignals(), defaultGenome()
+ *           Initial genome is seeded from cultural priors (not flat 50s).
+ *           Signal-based updates are INCREMENTAL — only new messages are processed.
+ * Exports : deriveScores(), scoreConfidence(), applyConfidencePenalty(),
+ *           defaultGenome(), mergeScores(), buildSeededGenome()
  */
 import type { GenomeScores, Genome, ConversationSignals, ConfidenceLevel } from '../types';
+import {
+  buildSeededScores,
+  inferRegionFromPhone,
+  type RegionCode,
+  type ReligiosityTier,
+} from './culturalPriors';
 
 const NEUTRAL: GenomeScores = {
   openness: 50, conscientiousness: 50, extraversion: 50,
@@ -157,17 +165,41 @@ export function applyConfidencePenalty(scores: GenomeScores, confidence: Confide
   return result;
 }
 
-/** Starting genome for a brand-new buyer — everything at neutral 50, LOW confidence */
-export function defaultGenome(buyerId: string, tenantId: string): Genome {
+/**
+ * Build a culturally-seeded genome for a new buyer.
+ * Uses regional cultural priors + individual Gaussian spread (sigma=10).
+ * The seed is deterministic per buyerId — stable across multiple calls.
+ * This is the Formation layer: scores are set once and protected by
+ * formation invariants; subsequent updates are incremental deltas only.
+ */
+export function buildSeededGenome(
+  buyerId: string,
+  tenantId: string,
+  waPhone?: string,
+  region?: RegionCode,
+  religiosity?: ReligiosityTier,
+): Genome {
+  const detectedRegion = region ?? (waPhone ? inferRegionFromPhone(waPhone) : 'id');
+  const scores = buildSeededScores(buyerId, detectedRegion, religiosity ?? 'moderate');
+  // Apply LOW confidence compression — scores are priors, not observed
+  const compressed = applyConfidencePenalty(scores, 'LOW');
   return {
     buyerId,
     tenantId,
-    scores: { ...NEUTRAL },
+    scores: compressed,
     confidence: 'LOW',
     formationInvariants: [],
     observationCount: 0,
     lastUpdatedAt: new Date(),
   };
+}
+
+/**
+ * Default genome stub for display when no genome exists yet.
+ * Uses cultural seeding (not flat 50s).
+ */
+export function defaultGenome(buyerId: string, tenantId: string, waPhone?: string): Genome {
+  return buildSeededGenome(buyerId, tenantId, waPhone);
 }
 
 /**
