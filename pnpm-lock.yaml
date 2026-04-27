@@ -56,6 +56,9 @@ importers:
       '@lynkbot/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@lynkbot/meta':
+        specifier: workspace:*
+        version: link:../../packages/meta
       '@lynkbot/pantheon':
         specifier: workspace:*
         version: link:../../packages/pantheon
@@ -65,9 +68,6 @@ importers:
       '@lynkbot/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@lynkbot/wati':
-        specifier: workspace:*
-        version: link:../../packages/wati
       '@sentry/node':
         specifier: ^8.0.0
         version: 8.55.1
@@ -178,15 +178,15 @@ importers:
       '@lynkbot/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@lynkbot/meta':
+        specifier: workspace:*
+        version: link:../../packages/meta
       '@lynkbot/payments':
         specifier: workspace:*
         version: link:../../packages/payments
       '@lynkbot/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@lynkbot/wati':
-        specifier: workspace:*
-        version: link:../../packages/wati
       '@sentry/node':
         specifier: ^8.0.0
         version: 8.55.1
@@ -265,6 +265,25 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
+
+  packages/meta:
+    dependencies:
+      '@lynkbot/shared':
+        specifier: workspace:*
+        version: link:../shared
+      axios:
+        specifier: ^1.7.0
+        version: 1.15.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
   packages/pantheon:
     dependencies:

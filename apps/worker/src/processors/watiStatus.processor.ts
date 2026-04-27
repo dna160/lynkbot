@@ -2,67 +2,28 @@
  * @CLAUDE_CONTEXT
  * Package : apps/worker
  * File    : src/processors/watiStatus.processor.ts
- * Role    : Polls WATI Partner API for WABA account status updates.
- *           Updates tenant record when account becomes active.
- * Job data: { tenantId: string, watiAccountId: string, attempt: number, maxAttempts: number }
+ * Role    : DEPRECATED — LynkBot now uses Meta Direct (no WATI Partner).
+ *           This processor is a no-op stub retained to avoid breaking queue registrations.
+ *           Remove when the WATI_WABA_STATUS queue is drained and purged.
+ * Exports : watiStatusProcessor
  */
 import type { Processor } from 'bullmq';
 import { db, tenants } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
-import { WatiPartnerClient } from '@lynkbot/wati';
 
 export const watiStatusProcessor: Processor = async (job) => {
-  const { tenantId, watiAccountId, attempt, maxAttempts } = job.data as {
-    tenantId: string;
-    watiAccountId: string;
-    attempt: number;
-    maxAttempts: number;
-  };
+  const { tenantId } = job.data as { tenantId: string };
 
-  job.log(`Polling WATI status for tenant ${tenantId}, account ${watiAccountId} (attempt ${attempt + 1}/${maxAttempts})`);
+  job.log(`Meta Direct mode — WABA status polling is not needed. Marking tenant ${tenantId} as manual_required if still pending.`);
 
-  const client = new WatiPartnerClient(
-    process.env.WATI_API_KEY!,
-    process.env.WATI_PARTNER_BASE_URL,
-  );
-
-  const status = await client.getAccountStatus(watiAccountId);
-  job.log(`WATI account status: ${status.status}`);
-
-  if (status.status === 'active' && status.wabaId) {
+  // Safety net: if a tenant is still in 'registering' state (legacy), push to manual_required
+  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+  if (tenant && tenant.watiAccountStatus === 'registering') {
     await db.update(tenants)
-      .set({
-        wabaId: status.wabaId,
-        watiAccountStatus: 'active',
-        updatedAt: new Date(),
-      })
+      .set({ watiAccountStatus: 'manual_required', updatedAt: new Date() })
       .where(eq(tenants.id, tenantId));
-    job.log(`Tenant ${tenantId} WATI account activated`);
-    return { activated: true };
+    job.log(`Tenant ${tenantId} moved from 'registering' to 'manual_required' (Meta Direct migration)`);
   }
 
-  if (status.status === 'rejected' || status.status === 'failed') {
-    await db.update(tenants)
-      .set({
-        watiAccountStatus: 'manual_required',
-        updatedAt: new Date(),
-      })
-      .where(eq(tenants.id, tenantId));
-    job.log(`Tenant ${tenantId} WATI account rejected — switched to manual_required`);
-    return { activated: false, reason: 'rejected' };
-  }
-
-  if (attempt >= maxAttempts - 1) {
-    await db.update(tenants)
-      .set({
-        watiAccountStatus: 'manual_required',
-        updatedAt: new Date(),
-      })
-      .where(eq(tenants.id, tenantId));
-    job.log(`Tenant ${tenantId} max attempts reached — switched to manual_required`);
-    return { activated: false, reason: 'max_attempts' };
-  }
-
-  // Still pending — throw to trigger BullMQ retry
-  throw new Error(`WATI account status still "${status.status}" — will retry`);
+  return { skipped: true, reason: 'meta_direct_mode' };
 };

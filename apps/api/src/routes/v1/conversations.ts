@@ -9,7 +9,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, desc } from '@lynkbot/db';
 import { db, conversations, messages, buyers } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
+import { MetaClient } from '@lynkbot/meta';
 import { config } from '../../config';
 
 function isWithin24HourWindow(lastMessageAt: Date | string): boolean {
@@ -183,25 +183,21 @@ export const conversationRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      // Send via WATI — in dev mode we tolerate WATI errors (fake phone numbers)
-      const wati = new WatiClient(
-        config.WATI_API_KEY,
-        config.WATI_BASE_URL,
-        config.WATI_CHANNEL_NUMBER || undefined,
-      );
+      // Send via Meta — in dev mode we tolerate errors (test phone numbers)
+      const meta = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
       try {
-        await wati.sendText({
-          phone: conv.buyerWaPhone!,
+        await meta.sendText({
+          to: conv.buyerWaPhone!,
           message: text.trim(),
           isWithin24hrWindow: true,
         });
-      } catch (watiErr: any) {
+      } catch (sendErr: any) {
         if (config.NODE_ENV === 'production') {
-          const watiMsg = watiErr?.response?.data?.message ?? watiErr?.message ?? 'WATI error';
-          return reply.status(502).send({ error: `Failed to send via WhatsApp: ${watiMsg}` });
+          const errMsg = sendErr?.response?.data?.error?.message ?? sendErr?.message ?? 'Meta send error';
+          return reply.status(502).send({ error: `Failed to send via WhatsApp: ${errMsg}` });
         }
         // In dev: log and continue — still persist to DB for UI testing
-        request.log.warn({ err: watiErr }, 'WATI send failed (dev mode — message saved to DB anyway)');
+        request.log.warn({ err: sendErr }, 'Meta send failed (dev mode — message saved to DB anyway)');
       }
 
       // Persist the outbound message

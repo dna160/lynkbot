@@ -23,11 +23,19 @@ const envSchema = z.object({
   LLM_PROVIDER: z.string().default('xai'),
   LLM_FALLBACK_MODEL: z.string().default('grok-3'),
   XAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
-  WATI_BASE_URL: z.string().default('https://live-server.wati.io'),
-  WATI_API_KEY: z.string().default(''),
-  WATI_CHANNEL_NUMBER: z.string().default(''),
-  WATI_ALLOWED_IPS: z.string().default(''),
-  WATI_PARTNER_ENABLED: z.string().default('false').transform(v => v === 'true'),
+  // ── Meta WhatsApp Cloud API ──────────────────────────────────────────────────
+  // System User Access Token from Meta Business Manager
+  META_ACCESS_TOKEN: z.string().default(''),
+  // Phone Number ID for +6281947888808 (found in Meta App Dashboard → WhatsApp → API Setup)
+  META_PHONE_NUMBER_ID: z.string().default(''),
+  // WhatsApp Business Account ID
+  META_WABA_ID: z.string().default(''),
+  // App Secret from Meta App Dashboard → Settings → Basic (used for HMAC webhook verification)
+  META_APP_SECRET: z.string().default(''),
+  // Any string you choose — must match what you enter in Meta Developer Console webhook config
+  META_WEBHOOK_VERIFY_TOKEN: z.string().default('lynkbot_webhook_verify'),
+  // Graph API version — pin to avoid unexpected breaking changes
+  META_API_VERSION: z.string().default('v23.0'),
   PAYMENT_PROVIDER: z.enum(['midtrans', 'xendit']).default('midtrans'),
   MIDTRANS_SERVER_KEY: z.string().optional(),
   MIDTRANS_CLIENT_KEY: z.string().optional(),

@@ -9,24 +9,27 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, desc } from '@lynkbot/db';
 import { db, buyers, broadcasts } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
-import { TEMPLATES } from '@lynkbot/wati';
+import { MetaClient } from '@lynkbot/meta';
 import { config } from '../../config';
 
 export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /v1/broadcasts/templates
-   * Returns the list of registered templates with their parameter schemas.
+   * Returns the list of registered Meta-approved templates.
+   * Templates must be pre-approved in Meta Business Manager.
    */
   fastify.get(
     '/v1/broadcasts/templates',
     { preHandler: fastify.authenticate },
     async (_request, reply) => {
-      const templates = Object.entries(TEMPLATES).map(([key, tpl]) => ({
-        key,
-        name: tpl.name,
-        params: [...tpl.params],
-      }));
+      // Meta templates are managed in Meta Business Manager.
+      // Return a static list of known approved templates for this account.
+      const templates = [
+        { key: 'order_confirmation', name: 'order_confirmation', languageCode: 'id', params: ['buyer_name', 'order_id', 'total'] },
+        { key: 'payment_reminder', name: 'payment_reminder', languageCode: 'id', params: ['buyer_name', 'amount', 'deadline'] },
+        { key: 'shipping_update', name: 'shipping_update', languageCode: 'id', params: ['buyer_name', 'courier', 'tracking_number'] },
+        { key: 'restock_alert', name: 'restock_alert', languageCode: 'id', params: ['product_name'] },
+      ];
       return reply.send({ templates });
     },
   );
@@ -79,7 +82,13 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(400).send({ error: 'templateKey is required' });
       }
 
-      const template = (TEMPLATES as Record<string, { name: string; params: readonly string[] }>)[templateKey];
+      const knownTemplates: Record<string, { name: string; languageCode: string }> = {
+        order_confirmation: { name: 'order_confirmation', languageCode: 'id' },
+        payment_reminder: { name: 'payment_reminder', languageCode: 'id' },
+        shipping_update: { name: 'shipping_update', languageCode: 'id' },
+        restock_alert: { name: 'restock_alert', languageCode: 'id' },
+      };
+      const template = knownTemplates[templateKey];
       if (!template) {
         return reply.status(400).send({ error: `Unknown template: ${templateKey}` });
       }
@@ -123,19 +132,24 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
         message: `Sending to ${audience.length} contacts`,
       });
 
-      // Background send
-      const wati = new WatiClient(config.WATI_API_KEY, config.WATI_BASE_URL);
+      // Background send via Meta
+      const meta = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
       let sentCount = 0;
       let failedCount = 0;
       const errorLog: string[] = [];
 
+      // Build template components from positional parameters
+      const components = parameters.length > 0
+        ? [{ type: 'body', parameters: parameters.map((p) => ({ type: 'text', text: p })) }]
+        : [];
+
       for (const recipient of audience) {
         try {
-          await wati.sendTemplate({
-            phone: recipient.waPhone,
-            templateName: templateKey as any,
-            parameters,
-            broadcastName: `broadcast_${broadcast.id.slice(0, 8)}`,
+          await meta.sendTemplate({
+            to: recipient.waPhone,
+            templateName: template.name,
+            languageCode: template.languageCode,
+            components,
           });
           sentCount++;
         } catch (err: any) {

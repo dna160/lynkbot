@@ -5,7 +5,7 @@
  * Role    : Single entry point for all inbound WA message processing.
  *           Implements the 23-state conversation state machine via dispatch table.
  *           Stateless service — all state lives in the conversations DB table.
- * Imports : @lynkbot/shared, @lynkbot/db, @lynkbot/ai, @lynkbot/wati
+ * Imports : @lynkbot/shared, @lynkbot/db, @lynkbot/ai, @lynkbot/meta
  * Exports : ConversationService class
  * DO NOT  : Add HTTP routing logic here. Import packages/payments directly.
  *           Payment events arrive via PaymentService callback.
@@ -25,11 +25,12 @@ import {
   query as ragQuery,
 } from '@lynkbot/ai';
 import {
-  WatiClient,
+  MetaClient,
   extractText,
   extractMessageId,
   isLocationMessage,
-} from '@lynkbot/wati';
+  type MetaNormalizedPayload,
+} from '@lynkbot/meta';
 import {
   extractSignals,
   extractName,
@@ -51,7 +52,6 @@ import { ShippingService } from './shipping.service';
 import { NotificationService } from './notification.service';
 import { PaymentService } from './payment.service';
 import type { ConversationStateValue } from '@lynkbot/shared';
-import type { WatiWebhookPayload, WaLocation } from '@lynkbot/shared';
 
 type ConvRow = typeof conversations.$inferSelect;
 type BuyerRow = typeof buyers.$inferSelect;
@@ -91,19 +91,27 @@ export class ConversationService {
   private notificationService = new NotificationService();
   private paymentService = new PaymentService();
 
-  private getWatiClient(): WatiClient {
-    return new WatiClient(
-      config.WATI_API_KEY,
-      config.WATI_BASE_URL,
-      config.WATI_CHANNEL_NUMBER || undefined,
-    );
+  private getMetaClient(): MetaClient {
+    return new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+  }
+
+  /**
+   * Look up which tenant owns a given Meta phone_number_id.
+   * The Meta webhook doesn't include a tenantId path param (unlike the old WATI
+   * per-tenant webhook URL), so we look it up from the tenants table.
+   */
+  async resolveTenantByPhoneNumberId(phoneNumberId: string): Promise<string | null> {
+    const tenant = await db.query.tenants.findFirst({
+      where: (t, { eq }) => eq(t.metaPhoneNumberId, phoneNumberId),
+    });
+    return tenant?.id ?? null;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Public entry point
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async handleInbound(tenantId: string, payload: WatiWebhookPayload): Promise<void> {
+  async handleInbound(tenantId: string, payload: MetaNormalizedPayload): Promise<void> {
     const messageId = extractMessageId(payload);
     const waId = payload.waId;
 
@@ -202,7 +210,7 @@ export class ConversationService {
 
     // Location message — route separately
     if (isLocationMessage(payload) && payload.location) {
-      await this.handleLocationShare(conv, payload.location as WaLocation);
+      await this.handleLocationShare(conv, payload.location as { latitude: string; longitude: string; name?: string; address?: string });
       return;
     }
 
@@ -217,7 +225,7 @@ export class ConversationService {
   // Global commands
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async handleGlobalCommands(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<boolean> {
+  async handleGlobalCommands(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<boolean> {
     const text = extractText(payload);
     if (!text) return false;
 
@@ -233,9 +241,9 @@ export class ConversationService {
 
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
-        const wati = this.getWatiClient();
-        await wati.sendText({
-          phone: buyer.waPhone,
+        const meta = this.getMetaClient();
+        await meta.sendText({
+          to: buyer.waId,
           message: 'Kamu telah berhenti. Untuk mulai lagi, chat kami kapan saja.',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -250,11 +258,11 @@ export class ConversationService {
         .set({ state: 'ESCALATED', lastMessageAt: new Date() })
         .where(eq(conversations.id, conv.id));
 
-      const wati = this.getWatiClient();
+      const meta = this.getMetaClient();
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
-        await wati.sendText({
-          phone: buyer.waPhone,
+        await meta.sendText({
+          to: buyer.waId,
           message: 'Menghubungkan ke tim kami... ⏳',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -272,13 +280,13 @@ export class ConversationService {
   // Location share
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async handleLocationShare(conv: ConvRow, location: WaLocation): Promise<void> {
+  async handleLocationShare(conv: ConvRow, location: { latitude: string; longitude: string; name?: string; address?: string }): Promise<void> {
     const validStates: ConversationStateValue[] = ['ADDRESS_COLLECTION', 'CHECKOUT_INTENT', 'LOCATION_RECEIVED'];
     if (!validStates.includes(conv.state as ConversationStateValue)) return;
 
     const result = await this.shippingService.processLocationShare(conv.id, location);
 
-    const wati = this.getWatiClient();
+    const meta = this.getMetaClient();
     const within24h = isWithin24HourWindow(conv.lastMessageAt);
 
     if (result.status === 'success') {
@@ -291,8 +299,8 @@ export class ConversationService {
     } else if (result.status === 'city_not_found') {
       await this.transitionState(conv.id, 'LOCATION_RECEIVED');
       if (within24h) {
-        await wati.sendText({
-          phone: (await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) }))?.waPhone ?? '',
+        await meta.sendText({
+          to: (await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) }))?.waId ?? '',
           message:
             `Lokasi diterima! Tapi nama kota *${result.rawAddress ?? ''}* tidak ditemukan di database ongkir. ` +
             'Bisa konfirmasi nama kota / kabupaten kamu? (contoh: Jakarta Selatan, Bandung)',
@@ -303,8 +311,8 @@ export class ConversationService {
       // geocode_failed
       if (within24h) {
         const buyerRow = await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) });
-        await wati.sendText({
-          phone: buyerRow?.waPhone ?? '',
+        await meta.sendText({
+          to: buyerRow?.waId ?? '',
           message: 'Maaf, tidak bisa membaca lokasi kamu. Bisa ketik alamat lengkap? (nama jalan, kelurahan, kota)',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -316,7 +324,7 @@ export class ConversationService {
   // State dispatch table
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async routeByState(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  async routeByState(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const handlers: Record<ConversationStateValue, () => Promise<void>> = {
       INIT:                  () => this.handleInit(conv, buyer, payload),
       GREETING:              () => this.handleGreeting(conv, buyer, payload),
@@ -351,7 +359,7 @@ export class ConversationService {
   // Individual state handlers
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private async handleInit(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleInit(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
     const lang = this.detectLanguage(text);
 
@@ -363,13 +371,13 @@ export class ConversationService {
     await this.handleGreeting(updatedConv, buyer, payload);
   }
 
-  private async handleGreeting(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleGreeting(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const userMessage = extractText(payload);
     await this.sendAiResponse(conv, buyer, userMessage);
     await this.transitionState(conv.id, 'BROWSING');
   }
 
-  private async handleBrowsing(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleBrowsing(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
 
     if (detectBuyIntent(text, conv.language as 'id' | 'en')) {
@@ -385,7 +393,7 @@ export class ConversationService {
     }
   }
 
-  private async handleProductInquiry(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleProductInquiry(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
 
     if (detectBuyIntent(text)) {
@@ -413,7 +421,7 @@ export class ConversationService {
     await this.sendAiResponse(conv, buyer, text, ragContext || undefined);
   }
 
-  private async handleObjection(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleObjection(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
 
     if (detectBuyIntent(text)) {
@@ -433,7 +441,7 @@ export class ConversationService {
     await this.sendAiResponse(conv, buyer, text);
   }
 
-  private async handlePaymentMethodSelect(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handlePaymentMethodSelect(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const selected = await this.checkoutService.selectPaymentMethod(conv, buyer, payload);
     if (selected && conv.productId) {
       // Trigger invoice creation via PaymentService
@@ -450,12 +458,12 @@ export class ConversationService {
     }
   }
 
-  private async handleAwaitingPayment(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleAwaitingPayment(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
     await this.sendAiResponse(conv, buyer, text);
   }
 
-  private async handlePaymentExpired(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handlePaymentExpired(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload).toLowerCase();
 
     const yesKeywords = ['ya', 'yes', 'iya', 'ok', 'oke', 'yep', 'yup', 'mau'];
@@ -479,14 +487,14 @@ export class ConversationService {
     // Otherwise: no response needed — template already sent
   }
 
-  private async handleOrderProcessing(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleOrderProcessing(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
     // Respond to general queries and explain awaiting shipment
     const context = 'Pesanan sedang diproses dan menunggu pengiriman. Estimasi 1-2 hari kerja.';
     await this.sendAiResponse(conv, buyer, text, context);
   }
 
-  private async handleOutOfStock(conv: ConvRow, buyer: BuyerRow, payload: WatiWebhookPayload): Promise<void> {
+  private async handleOutOfStock(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload).toLowerCase();
     const yesKeywords = ['ya', 'yes', 'iya', 'ok', 'oke', 'mau', 'daftar', 'waitlist'];
 
@@ -503,11 +511,11 @@ export class ConversationService {
         createdAt: new Date(),
       }).onConflictDoNothing();
 
-      const wati = this.getWatiClient();
+      const meta = this.getMetaClient();
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
-        await wati.sendText({
-          phone: buyer.waPhone,
+        await meta.sendText({
+          to: buyer.waId,
           message: 'Oke, sudah masuk waitlist! Kami akan langsung kabari kalau stok sudah tersedia 😊',
           isWithin24hrWindow: true,
         }).catch(() => null);
@@ -641,9 +649,9 @@ export class ConversationService {
         : '\n\n_(Type STOP to unsubscribe, or AGENT to talk to our team)_';
     }
 
-    const wati = this.getWatiClient();
-    await wati.sendText({
-      phone: buyer.waPhone,
+    const meta = this.getMetaClient();
+    await meta.sendText({
+      to: buyer.waId,
       message: aiText,
       isWithin24hrWindow: true,
     });

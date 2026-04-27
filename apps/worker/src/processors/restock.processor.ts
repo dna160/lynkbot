@@ -3,31 +3,20 @@
  * Package : apps/worker
  * File    : src/processors/restock.processor.ts
  * Role    : Notifies waitlisted buyers when a product is back in stock.
- *           Sends RESTOCK_NOTIFY WA template. Marks waitlist entries as notified.
+ *           Sends restock_notify WA template via Meta Cloud API.
  *           Rate limited: max 50 per run. Re-enqueues remainder if more than 50.
- * Imports : @lynkbot/db, @lynkbot/wati
+ * Imports : @lynkbot/db, @lynkbot/meta
  * Exports : restockProcessor
  * Job data: { productId: string, tenantId: string }
  */
 import type { Processor } from 'bullmq';
-import { db, waitlist, buyers, products, tenants } from '@lynkbot/db';
+import { db, waitlist, buyers, products } from '@lynkbot/db';
 import { eq, and, isNull } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
-import { createDecipheriv } from 'crypto';
+import { MetaClient } from '@lynkbot/meta';
 import { getQueue } from '../queues';
 import { QUEUES } from '@lynkbot/shared';
 
 const BATCH_SIZE = 50;
-
-function decryptApiKey(encrypted: string): string {
-  const key = (process.env.JWT_SECRET ?? 'default_key_32_chars_minimum_!!').slice(0, 32);
-  const [ivHex, encHex] = encrypted.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = createDecipheriv('aes-256-cbc', Buffer.from(key), iv);
-  let decrypted = decipher.update(encHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
 
 export const restockProcessor: Processor = async (job) => {
   const { productId, tenantId } = job.data as { productId: string; tenantId: string };
@@ -47,17 +36,13 @@ export const restockProcessor: Processor = async (job) => {
 
   if (batch.length === 0) { job.log('No waitlist entries to notify'); return; }
 
-  // Load tenant and product
-  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   const product = await db.query.products.findFirst({ where: eq(products.id, productId) });
-
-  if (!tenant?.watiApiKeyEnc || !product) {
-    job.log('Missing tenant WATI key or product — aborting');
+  if (!product) {
+    job.log('Product not found — aborting');
     return;
   }
 
-  const apiKey = decryptApiKey(tenant.watiApiKeyEnc);
-  const wati = new WatiClient(apiKey);
+  const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
 
   let notified = 0;
   for (const entry of batch) {
@@ -66,10 +51,16 @@ export const restockProcessor: Processor = async (job) => {
     if (!buyer) continue;
 
     try {
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName: 'RESTOCK_NOTIFY',
-        parameters: [product.name],
+      await meta.sendTemplate({
+        to: buyer.waPhone,
+        templateName: 'restock_notify',
+        languageCode: 'id',
+        components: [
+          {
+            type: 'body',
+            parameters: [{ type: 'text', text: product.name }],
+          },
+        ],
       });
       await db.update(waitlist)
         .set({ notifiedAt: new Date() })

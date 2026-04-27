@@ -20,7 +20,7 @@ import { authPlugin } from './plugins/auth';
 import multipart from '@fastify/multipart';
 
 // Webhook routes
-import { watiWebhookRoutes } from './routes/webhooks/wati';
+import { metaWebhookRoutes } from './routes/webhooks/meta';
 import { midtransWebhookRoutes } from './routes/webhooks/midtrans';
 import { xenditWebhookRoutes } from './routes/webhooks/xendit';
 
@@ -76,7 +76,7 @@ async function bootstrap(): Promise<void> {
   });
 
   // --- Webhook routes (signature verification applied per-route) ---
-  await server.register(watiWebhookRoutes);
+  await server.register(metaWebhookRoutes);
   await server.register(midtransWebhookRoutes);
   await server.register(xenditWebhookRoutes);
 

@@ -3,28 +3,18 @@
  * Package : apps/worker
  * File    : src/processors/paymentExpiry.processor.ts
  * Role    : Expires unpaid invoices after 24 hours. Releases stock reservation.
- *           Sends PAYMENT_EXPIRED WA template. Transitions conversation to PAYMENT_EXPIRED.
+ *           Sends payment_expired WA template via Meta Cloud API.
+ *           Transitions conversation to PAYMENT_EXPIRED.
  *           Idempotent: already-paid orders are skipped silently.
- * Imports : @lynkbot/db, @lynkbot/wati
+ * Imports : @lynkbot/db, @lynkbot/meta
  * Exports : paymentExpiryProcessor
  * Job data: { orderId: string, tenantId: string, conversationId: string }
  */
 import type { Processor } from 'bullmq';
-import { db, orders, conversations, inventory, buyers, products, tenants, auditLogs } from '@lynkbot/db';
-import { eq, and } from '@lynkbot/db';
+import { db, orders, conversations, buyers, products, auditLogs } from '@lynkbot/db';
+import { eq } from '@lynkbot/db';
 import { pgClient } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
-import { createDecipheriv } from 'crypto';
-
-function decryptApiKey(encrypted: string): string {
-  const key = (process.env.JWT_SECRET ?? 'default_key_32_chars_minimum_!!').slice(0, 32);
-  const [ivHex, encHex] = encrypted.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = createDecipheriv('aes-256-cbc', Buffer.from(key), iv);
-  let decrypted = decipher.update(encHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
+import { MetaClient } from '@lynkbot/meta';
 
 export const paymentExpiryProcessor: Processor = async (job) => {
   const { orderId, tenantId, conversationId } = job.data as {
@@ -46,7 +36,7 @@ export const paymentExpiryProcessor: Processor = async (job) => {
     .set({ status: 'cancelled', updatedAt: new Date() })
     .where(eq(orders.id, orderId));
 
-  // 3. Release stock reservation (raw SQL)
+  // 3. Release stock reservation (raw SQL — atomic)
   await pgClient`
     UPDATE inventory
     SET quantity_available = quantity_available + 1,
@@ -63,22 +53,29 @@ export const paymentExpiryProcessor: Processor = async (job) => {
       .where(eq(conversations.id, conversationId));
   }
 
-  // 5. Load tenant WATI client and send template
-  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+  // 5. Send PAYMENT_EXPIRED template via Meta
   const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) });
   const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
-  if (tenant?.watiApiKeyEnc && buyer && product) {
+  if (buyer && product) {
     try {
-      const apiKey = decryptApiKey(tenant.watiApiKeyEnc);
-      const wati = new WatiClient(apiKey);
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName: 'PAYMENT_EXPIRED',
-        parameters: [buyer.displayName ?? 'Kak', product.name],
+      const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
+      await meta.sendTemplate({
+        to: buyer.waPhone,
+        templateName: 'payment_expired',
+        languageCode: 'id',
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: buyer.displayName ?? 'Kak' },
+              { type: 'text', text: product.name },
+            ],
+          },
+        ],
       });
     } catch (err) {
-      job.log(`Failed to send PAYMENT_EXPIRED template: ${(err as Error).message}`);
+      job.log(`Failed to send payment_expired template: ${(err as Error).message}`);
     }
   }
 

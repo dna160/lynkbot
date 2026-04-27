@@ -3,19 +3,19 @@
  * Package : apps/worker
  * File    : src/processors/tracking.processor.ts
  * Role    : Polls Raja Ongkir tracking API for resi status changes.
- *           Sends WA template on status change. Terminates job on DELIVERED or 30 days elapsed.
+ *           Sends WA template via Meta Cloud API on status change.
+ *           Terminates job on DELIVERED or 30 days elapsed.
  *           Runs on QUEUES.TRACKING as a repeatable job (every 2 hours by default).
- * Imports : @lynkbot/db, @lynkbot/wati, @lynkbot/shared
+ * Imports : @lynkbot/db, @lynkbot/meta, @lynkbot/shared
  * Exports : trackingProcessor (BullMQ Processor)
  * Job data: { shipmentId: string, tenantId: string, conversationId: string }
  * DO NOT  : Import from apps/api or apps/dashboard.
  */
 import type { Processor } from 'bullmq';
 import axios from 'axios';
-import { db, shipments, orders, conversations, buyers, tenants } from '@lynkbot/db';
+import { db, shipments, orders, conversations, buyers } from '@lynkbot/db';
 import { eq, sql } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
-import type { TemplateName } from '@lynkbot/wati';
+import { MetaClient } from '@lynkbot/meta';
 import { ShipmentStatus } from '@lynkbot/shared';
 
 export interface TrackingJobData {
@@ -54,7 +54,6 @@ interface RajaOngkirResponse {
 // Status mapping
 // ---------------------------------------------------------------------------
 const CARRIER_STATUS_MAP: Record<string, ShipmentStatus> = {
-  // Raja Ongkir status strings (lowercase for safe comparison)
   'manifest': ShipmentStatus.PENDING,
   'in transit': ShipmentStatus.IN_TRANSIT,
   'on process': ShipmentStatus.IN_TRANSIT,
@@ -68,25 +67,23 @@ const CARRIER_STATUS_MAP: Record<string, ShipmentStatus> = {
 
 function mapCarrierStatus(raw: string): ShipmentStatus {
   const key = raw.toLowerCase().trim();
-  // Try exact match first
   if (key in CARRIER_STATUS_MAP) return CARRIER_STATUS_MAP[key]!;
-  // Substring fallback
   for (const [pattern, status] of Object.entries(CARRIER_STATUS_MAP)) {
     if (key.includes(pattern)) return status;
   }
-  return ShipmentStatus.IN_TRANSIT; // Safe default
+  return ShipmentStatus.IN_TRANSIT;
 }
 
 // ---------------------------------------------------------------------------
-// WA template selection per status
+// Meta template name per status
 // ---------------------------------------------------------------------------
-function templateForStatus(status: ShipmentStatus): TemplateName | null {
+function templateForStatus(status: ShipmentStatus): string | null {
   switch (status) {
-    case ShipmentStatus.IN_TRANSIT: return 'ORDER_SHIPPED';
-    case ShipmentStatus.OUT_FOR_DELIVERY: return 'OUT_FOR_DELIVERY';
-    case ShipmentStatus.DELIVERED: return 'DELIVERED';
-    case ShipmentStatus.EXCEPTION: return 'SHIPPING_EXCEPTION';
-    default: return null;
+    case ShipmentStatus.IN_TRANSIT:        return 'order_shipped';
+    case ShipmentStatus.OUT_FOR_DELIVERY:  return 'out_for_delivery';
+    case ShipmentStatus.DELIVERED:         return 'delivered';
+    case ShipmentStatus.EXCEPTION:         return 'shipping_exception';
+    default:                               return null;
   }
 }
 
@@ -139,7 +136,6 @@ export const trackingProcessor: Processor = async (job) => {
     roResult = response.data.rajaongkir.result;
   } catch (err) {
     job.log(`Raja Ongkir API error for resi=${shipment.resiNumber}: ${String(err)}`);
-    // Don't throw — let BullMQ repeatable job retry on next schedule
     return { polled: false, error: String(err) };
   }
 
@@ -177,42 +173,43 @@ export const trackingProcessor: Processor = async (job) => {
     })
     .where(eq(shipments.id, shipmentId));
 
-  // 9. Send WA notification
+  // 9. Send WA notification via Meta Cloud API
   const templateName = templateForStatus(newStatus);
   if (templateName) {
-    // Load tenant and conversation for WatiClient
-    const [tenant, conversation] = await Promise.all([
-      db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }),
-      db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) }),
-    ]);
+    const conversation = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) });
     const buyer = conversation?.buyerId
       ? await db.query.buyers.findFirst({ where: eq(buyers.id, conversation.buyerId) })
       : null;
 
-    if (tenant?.watiApiKeyEnc && buyer?.waPhone) {
-      const wati = new WatiClient(tenant.watiApiKeyEnc);
+    if (buyer?.waPhone) {
+      const order = await db.query.orders.findFirst({ where: eq(orders.id, shipment.orderId) });
+      const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
 
-      // Load order for template parameters
-      const order = await db.query.orders.findFirst({
-        where: eq(orders.id, shipment.orderId),
-      });
-
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName,
-        parameters: [
-          buyer.displayName ?? 'Pembeli',
-          shipment.resiNumber,
-          shipment.courierCode.toUpperCase(),
-          historyEntry.description,
-          historyEntry.location,
-          ...(order ? [order.id] : []),
-        ],
-      });
-
-      job.log(`Sent ${templateName} to ${buyer.waPhone}`);
+      try {
+        await meta.sendTemplate({
+          to: buyer.waPhone,
+          templateName,
+          languageCode: 'id',
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: buyer.displayName ?? 'Pembeli' },
+                { type: 'text', text: shipment.resiNumber },
+                { type: 'text', text: shipment.courierCode.toUpperCase() },
+                { type: 'text', text: historyEntry.description },
+                { type: 'text', text: historyEntry.location },
+                ...(order ? [{ type: 'text' as const, text: order.id }] : []),
+              ],
+            },
+          ],
+        });
+        job.log(`Sent ${templateName} to ${buyer.waPhone}`);
+      } catch (err) {
+        job.log(`Failed to send ${templateName}: ${(err as Error).message}`);
+      }
     } else {
-      job.log(`Could not send template: missing tenant WATI key or buyer phone`);
+      job.log(`Could not send template: missing buyer phone`);
     }
   }
 

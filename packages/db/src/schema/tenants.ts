@@ -47,6 +47,8 @@ export const tenants = pgTable('tenants', {
   subscriptionTier: subscriptionTierEnum('subscription_tier').default('trial'),
   subscriptionExpiresAt: timestamp('subscription_expires_at'),
   metaBusinessId: varchar('meta_business_id', { length: 255 }),
+  /** Meta phone_number_id — routes incoming Meta webhooks to this tenant */
+  metaPhoneNumberId: varchar('meta_phone_number_id', { length: 50 }),
   displayPhoneNumber: varchar('display_phone_number', { length: 20 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

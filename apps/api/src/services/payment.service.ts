@@ -3,13 +3,13 @@
  * Package : apps/api
  * File    : src/services/payment.service.ts
  * Role    : Invoice creation and payment webhook processing.
- * Imports : @lynkbot/shared, @lynkbot/db, @lynkbot/payments, @lynkbot/wati
+ * Imports : @lynkbot/shared, @lynkbot/db, @lynkbot/payments, @lynkbot/meta
  * Exports : PaymentService class
  */
 import { Queue } from 'bullmq';
 import { db, conversations, orders, buyers, products } from '@lynkbot/db';
 import { eq, and } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
+import { MetaClient } from '@lynkbot/meta';
 import { MidtransProvider, XenditProvider } from '@lynkbot/payments';
 import { QUEUES } from '@lynkbot/shared';
 import { config } from '../config';
@@ -56,8 +56,8 @@ export class PaymentService {
     return new XenditProvider();
   }
 
-  private getWatiClient(): WatiClient {
-    return new WatiClient(config.WATI_API_KEY, config.WATI_BASE_URL);
+  private getMetaClient(): MetaClient {
+    return new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
   }
 
   async createInvoice(
@@ -136,35 +136,43 @@ export class PaymentService {
       })
       .where(eq(conversations.id, conv.id));
 
-    // Send invoice template via WhatsApp
-    const wati = this.getWatiClient();
+    // Send invoice template via WhatsApp (Meta Cloud API)
+    const meta = this.getMetaClient();
     const expiryStr = invoiceResult.expiresAt.toLocaleString('id-ID', {
       day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
     });
 
     if (invoiceResult.vaNumber && invoiceResult.vaBank) {
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName: 'INVOICE_VA',
-        parameters: [
-          buyer.displayName ?? 'Kak',
-          product.name,
-          totalAmount.toLocaleString('id-ID'),
-          invoiceResult.vaBank,
-          invoiceResult.vaNumber,
-          expiryStr,
-        ],
+      await meta.sendTemplate({
+        to: buyer.waPhone,
+        templateName: 'invoice_va',
+        languageCode: 'id',
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: buyer.displayName ?? 'Kak' },
+            { type: 'text', text: product.name },
+            { type: 'text', text: totalAmount.toLocaleString('id-ID') },
+            { type: 'text', text: invoiceResult.vaBank },
+            { type: 'text', text: invoiceResult.vaNumber },
+            { type: 'text', text: expiryStr },
+          ],
+        }],
       });
     } else {
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName: 'INVOICE_QRIS',
-        parameters: [
-          buyer.displayName ?? 'Kak',
-          product.name,
-          totalAmount.toLocaleString('id-ID'),
-          expiryStr,
-        ],
+      await meta.sendTemplate({
+        to: buyer.waPhone,
+        templateName: 'invoice_qris',
+        languageCode: 'id',
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: buyer.displayName ?? 'Kak' },
+            { type: 'text', text: product.name },
+            { type: 'text', text: totalAmount.toLocaleString('id-ID') },
+            { type: 'text', text: expiryStr },
+          ],
+        }],
       });
     }
 
@@ -255,15 +263,19 @@ export class PaymentService {
     const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
     if (buyer && product) {
-      const wati = this.getWatiClient();
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName: 'PAYMENT_CONFIRMED',
-        parameters: [
-          order.orderCode,
-          product.name,
-          '1-2 hari kerja',
-        ],
+      const meta = this.getMetaClient();
+      await meta.sendTemplate({
+        to: buyer.waPhone,
+        templateName: 'payment_confirmed',
+        languageCode: 'id',
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: order.orderCode },
+            { type: 'text', text: product.name },
+            { type: 'text', text: '1-2 hari kerja' },
+          ],
+        }],
       });
     }
 
@@ -300,11 +312,18 @@ export class PaymentService {
     const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
     if (buyer && product) {
-      const wati = this.getWatiClient();
-      await wati.sendTemplate({
-        phone: buyer.waPhone,
-        templateName: 'PAYMENT_EXPIRED',
-        parameters: [buyer.displayName ?? buyer.waPhone, product.name],
+      const meta = this.getMetaClient();
+      await meta.sendTemplate({
+        to: buyer.waPhone,
+        templateName: 'payment_expired',
+        languageCode: 'id',
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: buyer.displayName ?? buyer.waPhone },
+            { type: 'text', text: product.name },
+          ],
+        }],
       });
     }
 
