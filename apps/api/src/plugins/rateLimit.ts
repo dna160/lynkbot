@@ -24,7 +24,7 @@ const rateLimitPluginImpl: FastifyPluginAsync = async (fastify) => {
     enableOfflineQueue: false,
   });
 
-  redis.on('error', (err) => {
+  redis.on('error', (err: Error) => {
     fastify.log.warn({ err }, 'Redis rate-limit connection error — falling back to memory store');
   });
 

@@ -60,12 +60,18 @@ vi.mock('@lynkbot/ai', () => ({
   query: vi.fn().mockResolvedValue({ chunks: [] }),
 }));
 
-vi.mock('@lynkbot/wati', () => ({
-  WatiClient: vi.fn().mockImplementation(() => ({
+vi.mock('@lynkbot/meta', () => ({
+  MetaClient: vi.fn().mockImplementation(() => ({
     sendText: vi.fn().mockResolvedValue(undefined),
     sendTemplate: vi.fn().mockResolvedValue(undefined),
-    markAsRead: vi.fn().mockResolvedValue(undefined),
+    markRead: vi.fn().mockResolvedValue(undefined),
   })),
+  verifyWebhookSignature: vi.fn().mockReturnValue(true),
+  extractFirstMessage: vi.fn(),
+  isTextMessage: vi.fn().mockReturnValue(true),
+  extractText: vi.fn().mockReturnValue(''),
+  extractMessageId: vi.fn().mockReturnValue('mock-msg-id'),
+  isStatusUpdate: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock('../checkout.service', () => ({
@@ -86,7 +92,7 @@ vi.mock('../shipping.service', () => ({
 
 vi.mock('../notification.service', () => ({
   NotificationService: vi.fn().mockImplementation(() => ({
-    getWatiClientForTenant: vi.fn().mockResolvedValue({}),
+    getMetaClientForTenant: vi.fn().mockResolvedValue({}),
     sendPaymentExpired: vi.fn().mockResolvedValue(undefined),
     sendRestockNotifications: vi.fn().mockResolvedValue(undefined),
   })),
@@ -103,11 +109,14 @@ vi.mock('../payment.service', () => ({
 
 vi.mock('../../config', () => ({
   config: {
-    WATI_API_KEY: 'test-api-key',
-    WATI_BASE_URL: 'https://test.wati.io',
+    META_ACCESS_TOKEN: 'test-meta-token',
+    META_PHONE_NUMBER_ID: '123456789',
+    META_WABA_ID: '987654321',
+    META_APP_SECRET: 'test-secret',
+    META_WEBHOOK_VERIFY_TOKEN: 'test-verify',
+    META_API_VERSION: 'v23.0',
     REDIS_URL: 'redis://localhost:6379',
     JWT_SECRET: '12345678901234567890123456789012',
-    WATI_PARTNER_ENABLED: false,
     PAYMENT_PROVIDER: 'midtrans',
     MIDTRANS_IS_PRODUCTION: false,
     RAJAONGKIR_API_KEY: 'test-ro-key',
@@ -123,7 +132,7 @@ vi.mock('../../config', () => ({
 // ─── Import service AFTER mocks ───────────────────────────────────────────────
 import { ConversationService } from '../conversation.service';
 import { db } from '@lynkbot/db';
-import { WatiClient } from '@lynkbot/wati';
+import { MetaClient } from '@lynkbot/meta';
 
 // ─── Test data factories ──────────────────────────────────────────────────────
 
@@ -275,12 +284,12 @@ describe('ConversationService', () => {
 
     it('sends freeform text within 24h window on STOP', async () => {
       const payload = makePayload('stop');
-      const watiInstance = (WatiClient as any).mock.results[0]?.value ?? { sendText: vi.fn() };
+      const metaInstance = (MetaClient as any).mock.results[0]?.value ?? { sendText: vi.fn() };
 
       await service.handleInbound('tenant-1', payload);
 
-      // WatiClient.sendText should have been called with the stop message
-      const instances = (WatiClient as any).mock.instances;
+      // MetaClient.sendText should have been called with the stop message
+      const instances = (MetaClient as any).mock.instances;
       if (instances.length > 0) {
         const sendTextCalls = instances[0].sendText.mock?.calls ?? [];
         const stopMsg = sendTextCalls.find((args: any[]) =>
@@ -380,12 +389,12 @@ describe('ConversationService', () => {
     it('appends escape hint when messageCount is divisible by 3', async () => {
       const conv = makeConv({ state: 'BROWSING', messageCount: 3 });
 
-      const watiSendText = vi.fn().mockResolvedValue(undefined);
-      (WatiClient as any).mockImplementation(() => ({ sendText: watiSendText, sendTemplate: vi.fn() }));
+      const metaSendText = vi.fn().mockResolvedValue(undefined);
+      (MetaClient as any).mockImplementation(() => ({ sendText: metaSendText, sendTemplate: vi.fn() }));
 
       await service.sendAiResponse(conv as any, makeBuyer() as any, 'halo');
 
-      const calls = watiSendText.mock.calls;
+      const calls = metaSendText.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       const sentMessage = calls[0][0].message as string;
       // Should contain STOP or AGENT hint
@@ -395,12 +404,12 @@ describe('ConversationService', () => {
     it('does NOT append escape hint when messageCount is not divisible by 3', async () => {
       const conv = makeConv({ state: 'BROWSING', messageCount: 2 });
 
-      const watiSendText = vi.fn().mockResolvedValue(undefined);
-      (WatiClient as any).mockImplementation(() => ({ sendText: watiSendText, sendTemplate: vi.fn() }));
+      const metaSendText = vi.fn().mockResolvedValue(undefined);
+      (MetaClient as any).mockImplementation(() => ({ sendText: metaSendText, sendTemplate: vi.fn() }));
 
       await service.sendAiResponse(conv as any, makeBuyer() as any, 'halo');
 
-      const calls = watiSendText.mock.calls;
+      const calls = metaSendText.mock.calls;
       if (calls.length > 0) {
         const sentMessage = calls[0][0].message as string;
         expect(sentMessage).not.toMatch(/\(Ketik STOP/);
@@ -449,14 +458,14 @@ describe('ConversationService', () => {
       const conv = makeConv({ state: 'ESCALATED' });
       (db.query.conversations.findFirst as any).mockResolvedValue(conv);
 
-      const watiSendText = vi.fn().mockResolvedValue(undefined);
-      (WatiClient as any).mockImplementation(() => ({ sendText: watiSendText, sendTemplate: vi.fn() }));
+      const metaSendText = vi.fn().mockResolvedValue(undefined);
+      (MetaClient as any).mockImplementation(() => ({ sendText: metaSendText, sendTemplate: vi.fn() }));
 
       await service.handleInbound('tenant-1', payload as any);
 
       // AI should be completely silent — no sendText calls for AI response
       // (There may be 0 calls, or only non-AI calls)
-      expect(watiSendText).not.toHaveBeenCalled();
+      expect(metaSendText).not.toHaveBeenCalled();
     });
 
     it('routeByState ESCALATED resolves without action', async () => {
@@ -501,12 +510,12 @@ describe('ConversationService', () => {
       const conv = makeConv({ state: 'CLOSED_LOST', isActive: false });
       (db.query.conversations.findFirst as any).mockResolvedValue(conv);
 
-      const watiSendText = vi.fn().mockResolvedValue(undefined);
-      (WatiClient as any).mockImplementation(() => ({ sendText: watiSendText, sendTemplate: vi.fn() }));
+      const metaSendText = vi.fn().mockResolvedValue(undefined);
+      (MetaClient as any).mockImplementation(() => ({ sendText: metaSendText, sendTemplate: vi.fn() }));
 
       await service.handleInbound('tenant-1', payload as any);
 
-      expect(watiSendText).not.toHaveBeenCalled();
+      expect(metaSendText).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,0 +1,14 @@
+# Exclude local node_modules — Docker installs fresh via pnpm in the deps stage
+**/node_modules
+**/.DS_Store
+
+# Exclude local build artifacts — Docker compiles fresh in the builder stage
+**/dist
+
+# Exclude dev/local files
+.env
+.env.*
+!.env.example
+uploads/
+*.log
+.claude/

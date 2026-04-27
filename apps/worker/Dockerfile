@@ -32,6 +32,11 @@ FROM node:20-alpine AS builder
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
+# pnpm needs pnpm-workspace.yaml + package.json in this stage to resolve --filter targets
+COPY pnpm-workspace.yaml ./
+COPY package.json ./
+COPY tsconfig.base.json ./
+
 COPY --from=deps /app/node_modules                  ./node_modules
 COPY --from=deps /app/packages/shared/node_modules  ./packages/shared/node_modules
 COPY --from=deps /app/packages/db/node_modules      ./packages/db/node_modules
@@ -40,7 +45,6 @@ COPY --from=deps /app/packages/meta/node_modules    ./packages/meta/node_modules
 COPY --from=deps /app/packages/payments/node_modules ./packages/payments/node_modules
 COPY --from=deps /app/apps/worker/node_modules      ./apps/worker/node_modules
 
-COPY tsconfig.base.json ./
 COPY packages/shared    ./packages/shared
 COPY packages/db        ./packages/db
 COPY packages/ai        ./packages/ai

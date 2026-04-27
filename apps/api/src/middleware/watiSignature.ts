@@ -2,30 +2,17 @@
  * @CLAUDE_CONTEXT
  * Package : apps/api
  * File    : src/middleware/watiSignature.ts
- * Role    : Inbound WATI webhook request gating.
- *           WATI does NOT send HMAC signatures — IP allowlisting is the optional
- *           production-hardening path (set WATI_ALLOWED_IPS env var).
- *           In development / when WATI_ALLOWED_IPS is unset, all sources are accepted.
+ * Role    : DEPRECATED — retained as stub. WATI webhook is no longer used.
+ *           The route still exports this hook to avoid removing the import,
+ *           but it always passes through (allow-all).
  * Exports : verifyWatiSignature() Fastify hook
  */
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { config } from '../config';
 
-const WATI_ALLOWED_IPS = config.WATI_ALLOWED_IPS
-  ? config.WATI_ALLOWED_IPS.split(',').map(s => s.trim()).filter(Boolean)
-  : [];
-
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function verifyWatiSignature(
-  request: FastifyRequest,
-  reply: FastifyReply
+  _request: FastifyRequest,
+  _reply: FastifyReply
 ): Promise<void> {
-  // If IP allowlist is configured, enforce it in production
-  if (config.NODE_ENV === 'production' && WATI_ALLOWED_IPS.length > 0) {
-    const clientIp = request.ip;
-    if (!WATI_ALLOWED_IPS.includes(clientIp)) {
-      request.log.warn({ ip: clientIp, url: request.url }, 'WATI webhook rejected: IP not in allowlist');
-      return reply.status(401).send({ error: 'Unauthorized webhook source' });
-    }
-  }
-  // No HMAC check — WATI does not send signatures
+  // No-op — WATI webhook is deprecated. Meta webhook uses metaSignature.ts instead.
 }
