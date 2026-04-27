@@ -67,8 +67,12 @@ COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 # Compiled workspace packages. turbo prune means only $SERVICE's deps are here.
 COPY --from=builder --chown=appuser:nodejs /app/packages ./packages
 
-# App dist
-COPY --from=builder --chown=appuser:nodejs /app/apps/${SERVICE}/dist      ./apps/${SERVICE}/dist
+# App node_modules — pnpm per-app symlinks (e.g. fastify → ../../node_modules/.pnpm/...)
+# Without this, Node can't resolve direct dependencies like fastify, bullmq, etc.
+COPY --from=builder --chown=appuser:nodejs /app/apps/${SERVICE}/node_modules ./apps/${SERVICE}/node_modules
+
+# App dist + package.json
+COPY --from=builder --chown=appuser:nodejs /app/apps/${SERVICE}/dist         ./apps/${SERVICE}/dist
 COPY --from=builder --chown=appuser:nodejs /app/apps/${SERVICE}/package.json ./apps/${SERVICE}/
 
 USER appuser
