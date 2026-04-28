@@ -59,16 +59,14 @@ export class GrokClient implements ILLMClient {
       ? [{ role: 'system', content: opts.system }, ...messages]
       : messages;
 
-    // Reasoning models (e.g. grok-4-1-fast-reasoning) do not accept temperature
-    // or response_format — omit them to avoid API rejections
-    const isReasoningModel = model.includes('reasoning');
-
     const res = await this.client.chat.completions.create({
       model,
       messages: fullMessages,
       max_tokens: opts.maxTokens ?? 1024,
-      ...(!isReasoningModel && { temperature: opts.temperature ?? 0.7 }),
-      ...(!isReasoningModel && opts.responseFormat === 'json_object' && { response_format: { type: 'json_object' as const } }),
+      temperature: opts.temperature ?? 0.7,
+      // Only send response_format when explicitly requesting JSON — sending
+      // { type: 'text' } as a default causes xAI API to reject the request
+      ...(opts.responseFormat === 'json_object' && { response_format: { type: 'json_object' as const } }),
     });
     return {
       content: res.choices[0]?.message?.content ?? '',
