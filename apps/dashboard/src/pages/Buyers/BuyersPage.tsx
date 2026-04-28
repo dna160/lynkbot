@@ -209,17 +209,14 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
   };
 
   const handleOsint = async () => {
-    const opts: { nameOverride?: string; linkedinUrl?: string; instagramUsername?: string } = {};
+    const opts: { nameOverride?: string; instagramUsername?: string } = {};
 
     if (!buyer.displayName) {
       const input = window.prompt(
-        `No WhatsApp profile name found.\nEnter the person's full name to search (or leave blank to skip external search):`,
+        `No WhatsApp profile name found for this contact.\nEnter their full name to search LinkedIn & Instagram (or cancel to run on in-system data only):`,
       );
       if (input && input.trim().length >= 2) opts.nameOverride = input.trim();
     }
-
-    const ig = window.prompt('Instagram username (optional — leave blank to search by name):');
-    if (ig && ig.trim()) opts.instagramUsername = ig.trim().replace(/^@/, '');
 
     setRunningOsint(true);
     try {
