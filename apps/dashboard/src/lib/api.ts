@@ -388,6 +388,6 @@ export const intelligenceApi = {
     api.get<GenomeResponse>(`/buyers/${buyerId}/genome`),
   refreshGenome: (buyerId: string) =>
     api.post<GenomeResponse & { updated: boolean; signalsSummary: Record<string, unknown> }>(`/buyers/${buyerId}/genome/refresh`),
-  runOsint: (buyerId: string) =>
-    api.post<GenomeResponse>(`/buyers/${buyerId}/osint`),
+  runOsint: (buyerId: string, nameOverride?: string) =>
+    api.post<GenomeResponse & { externalOsintSearched: boolean; externalOsintName: string | null }>(`/buyers/${buyerId}/osint`, nameOverride ? { nameOverride } : {}),
 };

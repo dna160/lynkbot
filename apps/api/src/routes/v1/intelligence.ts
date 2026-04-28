@@ -307,12 +307,13 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
    *
    * Post-LLM: adjustments become real genome mutations. OSINT run logged as sentinel entry.
    */
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post<{ Params: { id: string }; Body: { nameOverride?: string } }>(
     '/v1/buyers/:id/osint',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
+      const { nameOverride } = request.body ?? {};
 
       const buyer = await db.query.buyers.findFirst({
         where: and(eq(buyers.id, id), eq(buyers.tenantId, tenantId)),
@@ -339,14 +340,6 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
         `First seen: ${buyer.createdAt?.toISOString().split('T')[0] ?? 'unknown'}`,
         `Last order date: ${buyer.lastOrderAt ? buyer.lastOrderAt.toISOString().split('T')[0] : '(no orders yet)'}`,
       ].join('\n');
-
-      // ── Source 5: External OSINT — kick off early to run in parallel with DB ─
-      // Use display name (most reliable) or fall back to phone-expressed name once available
-      const externalOsintPromise = runExternalOsint(
-        buyer.displayName ?? null,
-        inferredRegion,
-        config.APIFY_API_KEY,
-      );
 
       // ── Source 2: Full conversation corpus ────────────────────────────────
       const allConvs = await db.query.conversations.findMany({
@@ -447,8 +440,10 @@ A — OCEAN: openness=${scores.openness} conscientiousness=${scores.conscientiou
 B — Behavioral: communicationStyle=${scores.communicationStyle} decisionMaking=${scores.decisionMaking} brandRelationship=${scores.brandRelationship} influenceSusceptibility=${scores.influenceSusceptibility} emotionalExpression=${scores.emotionalExpression} conflictBehavior=${scores.conflictBehavior} literacyArticulation=${scores.literacyArticulation} socioeconomicFriction=${scores.socioeconomicFriction}
 C — Human Uniqueness: identityFusion=${scores.identityFusion} chronesthesiaCapacity=${scores.chronesthesiaCapacity} tomSelfAwareness=${scores.tomSelfAwareness} tomSocialModeling=${scores.tomSocialModeling} executiveFlexibility=${scores.executiveFlexibility}`;
 
-      // ── Await Source 5 (was running in parallel with DB sources above) ──────
-      const externalOsint = await externalOsintPromise;
+      // ── Source 5: External OSINT (LinkedIn + Instagram via Apify) ───────────
+      // Name cascade: operator override → WA profile name → name expressed in chat
+      const searchName = nameOverride?.trim() || buyer.displayName || expressedName || null;
+      const externalOsint = await runExternalOsint(searchName, inferredRegion, config.APIFY_API_KEY);
 
       // ── LLM call ──────────────────────────────────────────────────────────
       const systemPrompt = `You are a master human intelligence analyst at the Pantheon "human whisperer" standard.
@@ -637,6 +632,8 @@ Rules for genomeAdjustments:
         dialogCache: updatedGenomeRow?.dialogCache ?? null,
         dialogCacheBuiltAt: updatedGenomeRow?.dialogCacheBuiltAt ?? null,
         osintSummary, hasPersisted: true,
+        externalOsintSearched: externalOsint.searched,
+        externalOsintName: externalOsint.nameSearched,
       });
     },
   );

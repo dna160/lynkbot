@@ -209,12 +209,26 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
   };
 
   const handleOsint = async () => {
+    // If no display name, ask operator for a name to search
+    let nameOverride: string | undefined;
+    if (!buyer.displayName) {
+      const input = window.prompt(
+        `No WhatsApp profile name for this contact.\nEnter a name to search LinkedIn & Instagram (or cancel to run on in-system data only):`,
+      );
+      if (input && input.trim().length >= 2) {
+        nameOverride = input.trim();
+      }
+    }
     setRunningOsint(true);
     try {
-      const res = await intelligenceApi.runOsint(buyer.id);
+      const res = await intelligenceApi.runOsint(buyer.id, nameOverride);
       setData(res.data);
       setTab('genome');
-      addToast('Intelligence brief generated — scroll to OSINT section', 'success');
+      const ext = res.data as any;
+      const searchedMsg = ext.externalOsintSearched
+        ? `External: searched as "${ext.externalOsintName}"`
+        : 'External profiles: skipped (no name available)';
+      addToast(`Intelligence brief generated — ${searchedMsg}`, 'success');
     } catch (err: any) {
       addToast(err?.response?.data?.error ?? 'OSINT research failed', 'error');
     }
