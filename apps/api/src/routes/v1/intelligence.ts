@@ -530,7 +530,7 @@ Rules for genomeAdjustments:
 
       const adjustedScores = { ...scores };
       for (const adj of adjustments) {
-        (adjustedScores as Record<string, number>)[adj.trait] = Math.max(1, Math.min(100, Math.round(adj.suggestedScore)));
+        (adjustedScores as unknown as Record<string, number>)[adj.trait] = Math.max(1, Math.min(100, Math.round(adj.suggestedScore)));
       }
 
       // ── Format osint_summary from structured output ───────────────────────
@@ -573,8 +573,8 @@ Rules for genomeAdjustments:
       // ── Log each genome adjustment as a real trait mutation ───────────────
       for (const adj of adjustments) {
         const key = adj.trait as keyof GenomeScores;
-        const oldScore = (scores as Record<string, number>)[adj.trait] ?? 50;
-        const newScore = (adjustedScores as Record<string, number>)[adj.trait];
+        const oldScore = (scores as unknown as Record<string, number>)[adj.trait] ?? 50;
+        const newScore = (adjustedScores as unknown as Record<string, number>)[adj.trait];
         await db.insert(genomeMutations).values({
           buyerId: id, tenantId,
           traitName: key, oldScore, newScore, delta: newScore - oldScore,
