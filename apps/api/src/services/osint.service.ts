@@ -27,8 +27,10 @@
  */
 
 const APIFY_BASE = 'https://api.apify.com/v2';
-// Actor IDs — using alphanumeric IDs for stability (immune to slug renames)
-const ACTOR_GOOGLE_SEARCH = 'apify/google-search-scraper';
+// Actor IDs — Apify REST API uses tilde (~) as owner/name separator, NOT slash.
+// encodeURIComponent('/') → '%2F' which causes 404; encodeURIComponent('~') → '~' (safe).
+// LinkedIn + Instagram use alphanumeric IDs (no separator issue).
+const ACTOR_GOOGLE_SEARCH = 'apify~google-search-scraper';
 const ACTOR_LINKEDIN = 'LpVuK3Zozwuipa5bp';     // harvestapi/linkedin-profile-scraper
 const ACTOR_INSTAGRAM = 'shu8hvrXbJbY3Eb9W';    // apify/instagram-scraper
 
