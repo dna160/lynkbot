@@ -13,11 +13,11 @@ import { db, products, inventory } from '@lynkbot/db';
 import { Queue } from 'bullmq';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { QUEUES } from '@lynkbot/shared';
-import { config } from '../../config';
+import { config, getRedisConnection } from '../../config';
 import path from 'path';
 import fs from 'fs/promises';
 
-const ingestQueue = new Queue(QUEUES.INGEST, { connection: { url: config.REDIS_URL } });
+const ingestQueue = new Queue(QUEUES.INGEST, { connection: getRedisConnection() });
 
 // S3 client — only used when S3_BUCKET is configured
 const s3 = config.S3_BUCKET

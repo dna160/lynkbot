@@ -12,7 +12,7 @@ import { eq, and } from '@lynkbot/db';
 import { MetaClient } from '@lynkbot/meta';
 import { MidtransProvider, XenditProvider } from '@lynkbot/payments';
 import { QUEUES } from '@lynkbot/shared';
-import { config } from '../config';
+import { config, getRedisConnection } from '../config';
 import { InventoryService } from './inventory.service';
 import type { IPaymentProvider } from '@lynkbot/payments';
 
@@ -43,7 +43,7 @@ export class PaymentService {
 
   constructor() {
     this.paymentExpiryQueue = new Queue(QUEUES.PAYMENT_EXPIRY, {
-      connection: { url: config.REDIS_URL },
+      connection: getRedisConnection(),
     });
   }
 

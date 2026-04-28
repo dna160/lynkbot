@@ -12,9 +12,9 @@ import { eq, and, desc } from '@lynkbot/db';
 import { Queue } from 'bullmq';
 import { db, orders, shipments, conversations } from '@lynkbot/db';
 import { QUEUES } from '@lynkbot/shared';
-import { config } from '../../config';
+import { config, getRedisConnection } from '../../config';
 
-const trackingQueue = new Queue(QUEUES.TRACKING, { connection: { url: config.REDIS_URL } });
+const trackingQueue = new Queue(QUEUES.TRACKING, { connection: getRedisConnection() });
 
 const resiSchema = z.object({
   resiNumber: z.string().min(1).max(100),
