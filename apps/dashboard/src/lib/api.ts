@@ -1,6 +1,16 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+declare global {
+  interface Window { __LYNKBOT_API_URL__?: string; }
+}
+
+// Priority: runtime config.js (set by nginx from API_URL env var)
+//           → Vite build-time VITE_API_URL (if someone sets it as a build var)
+//           → localhost fallback for local dev
+const BASE_URL =
+  window.__LYNKBOT_API_URL__ ||
+  import.meta.env.VITE_API_URL ||
+  'http://localhost:3000';
 
 export const api = axios.create({
   baseURL: `${BASE_URL}/api/v1`,
