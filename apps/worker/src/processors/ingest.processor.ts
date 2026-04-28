@@ -3,7 +3,7 @@
  * Package : apps/worker
  * File    : src/processors/ingest.processor.ts
  * Role    : Processes PDF ingestion jobs from QUEUES.INGEST queue.
- *           Downloads PDF from S3, runs RAG pipeline (chunk + embed + store in pgvector),
+ *           Downloads PDF from S3/local, runs RAG pipeline (chunk + store in pgvector),
  *           generates book persona prompt, marks knowledgeStatus='ready'.
  * Imports : @lynkbot/ai, @lynkbot/db
  * Exports : ingestProcessor (BullMQ Processor function)
@@ -12,17 +12,16 @@
  */
 import type { Processor } from 'bullmq';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { db, products } from '@lynkbot/db';
-import { ingest } from '@lynkbot/ai';
-import { eq } from '@lynkbot/db';
+import { db, products, productChunks, eq, sql } from '@lynkbot/db';
+import { extractPdfText, chunkText, getLLMClient } from '@lynkbot/ai';
 import { readFile } from 'fs/promises';
 
 const s3 = new S3Client({
   region: process.env.S3_REGION ?? 'us-east-1',
   ...(process.env.S3_ENDPOINT ? { endpoint: process.env.S3_ENDPOINT } : {}),
   credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
   },
 });
 
@@ -31,85 +30,129 @@ export interface IngestJobData {
   tenantId: string;
 }
 
+/** Rejects after ms milliseconds with a clear timeout error. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms)
+    ),
+  ]);
+}
+
 export const ingestProcessor: Processor = async (job) => {
   const { productId, tenantId } = job.data as IngestJobData;
 
-  job.log(`Starting PDF ingest for product=${productId} tenant=${tenantId}`);
-
-  // 1. Mark as processing so the API can report progress to the Lynker
-  await db
-    .update(products)
-    .set({ knowledgeStatus: 'processing' })
-    .where(eq(products.id, productId));
+  const saveError = async (msg: string) => {
+    await db.update(products)
+      .set({ knowledgeStatus: 'failed', knowledgeError: msg, updatedAt: new Date() })
+      .where(eq(products.id, productId));
+  };
 
   try {
-    // 2. Load product record to find the S3 key
-    const product = await db.query.products.findFirst({
-      where: eq(products.id, productId),
-    });
+    job.log(`[1/6] Loading product record: ${productId}`);
+    const product = await withTimeout(
+      db.query.products.findFirst({ where: eq(products.id, productId) }),
+      10_000, 'DB product lookup'
+    );
+    if (!product) throw new Error(`Product ${productId} not found in database`);
+    if (!product.pdfS3Key) throw new Error(`Product ${productId} has no PDF uploaded`);
 
-    if (!product) {
-      throw new Error(`Product ${productId} not found`);
-    }
-
-    if (!product.pdfS3Key) {
-      throw new Error(`Product ${productId} has no pdfS3Key — cannot ingest`);
-    }
-
+    // ── PDF download ──────────────────────────────────────────────────────────
     let pdfBuffer: Buffer;
-
     if (product.pdfS3Key.startsWith('local://')) {
-      // Local filesystem storage (development / no S3 configured)
       const localPath = product.pdfS3Key.replace('local://', '');
-      job.log(`Reading PDF from local disk: ${localPath}`);
-      pdfBuffer = await readFile(localPath);
+      job.log(`[2/6] Reading PDF from local disk: ${localPath}`);
+      pdfBuffer = await withTimeout(readFile(localPath), 30_000, 'local file read');
     } else {
-      // S3 storage
-      job.log(`Downloading PDF from S3: bucket=${process.env.S3_BUCKET} key=${product.pdfS3Key}`);
-
-      const command = new GetObjectCommand({
-        Bucket: process.env.S3_BUCKET!,
-        Key: product.pdfS3Key,
-      });
-
-      const s3Response = await s3.send(command);
-
-      if (!s3Response.Body) {
-        throw new Error(`S3 returned empty body for key=${product.pdfS3Key}`);
-      }
-
+      job.log(`[2/6] Downloading PDF from S3 key=${product.pdfS3Key}`);
+      const s3Response = await withTimeout(
+        s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: product.pdfS3Key })),
+        60_000, 'S3 download'
+      );
+      if (!s3Response.Body) throw new Error('S3 returned empty body');
       const chunks: Uint8Array[] = [];
-      for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) {
-        chunks.push(chunk);
-      }
+      for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
       pdfBuffer = Buffer.concat(chunks);
     }
+    job.log(`[2/6] PDF ready: ${pdfBuffer.byteLength} bytes`);
 
-    job.log(`PDF downloaded: ${pdfBuffer.byteLength} bytes. Running RAG pipeline...`);
+    // ── PDF text extraction ───────────────────────────────────────────────────
+    job.log(`[3/6] Extracting text from PDF...`);
+    const pages = await withTimeout(extractPdfText(pdfBuffer), 60_000, 'pdf-parse text extraction');
+    job.log(`[3/6] Extracted ${pages.length} pages`);
 
-    // 4. Run the full RAG ingest pipeline:
-    //    - Parse PDF text
-    //    - Chunk into overlapping segments
-    //    - Embed each chunk with OpenAI text-embedding-3-small
-    //    - Upsert into pgvector (document_chunks table)
-    //    - Generate a book persona system prompt and store on the product
-    //    - Set knowledgeStatus = 'ready'
-    await ingest(productId, tenantId, pdfBuffer);
+    // ── Chunking ──────────────────────────────────────────────────────────────
+    job.log(`[4/6] Chunking text...`);
+    const chunks = chunkText(pages, { maxTokens: 512, overlap: 50 });
+    if (chunks.length === 0) throw new Error('PDF produced no text chunks — may be image-only or encrypted');
+    job.log(`[4/6] Produced ${chunks.length} chunks`);
+
+    // ── DB upsert (FTS mode — no embeddings required) ─────────────────────────
+    job.log(`[5/6] Upserting ${chunks.length} chunks to database...`);
+    const rows = chunks.map((c) => ({
+      productId,
+      tenantId,
+      chunkIndex: c.chunkIndex,
+      contentText: c.text,
+      pageNumber: c.pageNumber,
+      chapterTitle: c.chapterTitle,
+      tokenCount: c.tokenCount,
+    }));
+
+    for (let i = 0; i < rows.length; i += 50) {
+      const batch = rows.slice(i, i + 50);
+      await withTimeout(
+        db.insert(productChunks).values(batch).onConflictDoUpdate({
+          target: [productChunks.productId, productChunks.chunkIndex],
+          set: {
+            contentText: sql`excluded.content_text`,
+            tokenCount: sql`excluded.token_count`,
+          },
+        }),
+        30_000, `DB upsert batch ${i}-${i + batch.length}`
+      );
+    }
+    job.log(`[5/6] All chunks stored`);
+
+    // ── Mark ready FIRST — then attempt persona generation ───────────────────
+    // Mark ready before the LLM call so a slow/failed persona never blocks the product.
+    await db.update(products).set({
+      knowledgeStatus: 'ready',
+      knowledgeError: null,
+      updatedAt: new Date(),
+    }).where(eq(products.id, productId));
+    job.log(`[6/6] Product marked ready. Generating AI persona (non-blocking)...`);
+
+    // ── Book persona (best-effort, 90s timeout) ───────────────────────────────
+    try {
+      const sampleContent = chunks.slice(0, 10).map((c) => c.text).join('\n\n');
+      const llm = getLLMClient();
+      const res = await withTimeout(
+        llm.chat(
+          [{ role: 'user', content: `Book: "${product.name}"\n\nSample:\n${sampleContent.slice(0, 2000)}\n\nGenerate a concise WhatsApp sales bot persona (max 200 words) that is knowledgeable about this book.` }],
+          { system: 'You are an AI persona generator for book sales bots.', maxTokens: 400 }
+        ),
+        90_000, 'LLM persona generation'
+      );
+      await db.update(products)
+        .set({ bookPersonaPrompt: res.content, updatedAt: new Date() })
+        .where(eq(products.id, productId));
+      job.log(`[6/6] Persona generated (${res.tokensUsed} tokens, ${res.latencyMs}ms)`);
+    } catch (personaErr) {
+      // Persona failure does NOT revert ready status — product knowledge is still usable
+      job.log(`[6/6] Persona generation failed (non-fatal): ${(personaErr as Error).message}`);
+    }
 
     job.log(`Ingest complete for product=${productId}`);
+
   } catch (err) {
-    // Store the full error message so the dashboard can surface exactly what went wrong
     const errorMessage = err instanceof Error
-      ? `${err.name}: ${err.message}${err.stack ? '\n' + err.stack.split('\n').slice(1, 4).join('\n') : ''}`
+      ? `${err.name}: ${err.message}${err.stack ? '\n' + err.stack.split('\n').slice(1, 3).join('\n') : ''}`
       : String(err);
 
-    job.log(`Ingest FAILED for product=${productId}: ${errorMessage}`);
-
-    await db
-      .update(products)
-      .set({ knowledgeStatus: 'failed', knowledgeError: errorMessage, updatedAt: new Date() })
-      .where(eq(products.id, productId));
-
-    throw err; // Re-throw so BullMQ marks the job as failed and applies retry policy
+    job.log(`FAILED at product=${productId}: ${errorMessage}`);
+    await saveError(errorMessage);
+    throw err;
   }
 };
