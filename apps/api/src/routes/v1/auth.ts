@@ -30,28 +30,34 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const { lynkUserId } = parsed.data;
 
-    // Look up or auto-create tenant so JWT carries the real UUID
-    let tenant = await db.query.tenants.findFirst({
-      where: eq(tenants.lynkUserId, lynkUserId),
-    });
-    if (!tenant) {
-      const [created] = await db.insert(tenants).values({
-        lynkUserId,
-        storeName: lynkUserId,
-      }).returning();
-      tenant = created;
+    try {
+      // Look up or auto-create tenant so JWT carries the real UUID
+      let tenant = await db.query.tenants.findFirst({
+        where: eq(tenants.lynkUserId, lynkUserId),
+      });
+      if (!tenant) {
+        const [created] = await db.insert(tenants).values({
+          lynkUserId,
+          storeName: lynkUserId,
+        }).returning();
+        tenant = created;
+      }
+
+      const token = fastify.jwt.sign(
+        { tenantId: tenant!.id, lynkUserId },
+        { expiresIn: '7d' }
+      );
+
+      return reply.send({
+        token,
+        expiresIn: 7 * 24 * 60 * 60,
+        tokenType: 'Bearer',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      fastify.log.error({ err }, 'Login error');
+      return reply.status(500).send({ error: msg, statusCode: 500 });
     }
-
-    const token = fastify.jwt.sign(
-      { tenantId: tenant!.id, lynkUserId },
-      { expiresIn: '7d' }
-    );
-
-    return reply.send({
-      token,
-      expiresIn: 7 * 24 * 60 * 60,
-      tokenType: 'Bearer',
-    });
   });
 
   fastify.get(
