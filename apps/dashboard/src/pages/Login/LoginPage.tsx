@@ -16,10 +16,29 @@ export function LoginPage() {
       await login({ email, password });
       navigate('/dashboard');
     } catch (err: unknown) {
-      const axiosMsg =
-        (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data?.error ??
-        (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data?.message;
-      setError(axiosMsg ?? (err instanceof Error ? err.message : 'Login failed'));
+      const e = err as {
+        response?: { status?: number; data?: { error?: string; message?: string } };
+        request?: unknown;
+        message?: string;
+        code?: string;
+      };
+
+      if (e.response) {
+        // Server responded with a non-2xx status
+        const msg = e.response.data?.error ?? e.response.data?.message;
+        setError(`Server error ${e.response.status}: ${msg ?? 'Unknown error'}`);
+      } else if (e.request) {
+        // Request was sent but no response received — CORS, network, or API down
+        const apiUrl = (window as { __LYNKBOT_API_URL__?: string }).__LYNKBOT_API_URL__ ?? '(API_URL not set)';
+        setError(
+          `Cannot reach API. Possible causes:\n` +
+          `• API is down (check Railway → API service logs)\n` +
+          `• CORS blocked (OPTIONS preflight failed)\n` +
+          `• Wrong API URL — currently targeting: ${apiUrl}`
+        );
+      } else {
+        setError(e.message ?? 'Login failed');
+      }
     }
   }
 
@@ -54,7 +73,11 @@ export function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)} placeholder="(not required in dev)"
                 className="w-full bg-bg border border-border rounded-lg px-4 py-2.5 text-sm text-primary placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition" />
             </div>
-            {error && <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-sm text-red-300">{error}</div>}
+            {error && (
+              <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-sm text-red-300 whitespace-pre-line">
+                {error}
+              </div>
+            )}
             <button type="submit" disabled={loginPending}
               className="w-full bg-accent hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg transition-colors">
               {loginPending ? <span className="flex items-center justify-center gap-2">
