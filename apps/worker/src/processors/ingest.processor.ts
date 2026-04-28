@@ -28,6 +28,7 @@ const s3 = new S3Client({
 export interface IngestJobData {
   productId: string;
   tenantId: string;
+  pdfBase64?: string; // set when no S3 — API passes raw bytes to avoid cross-container disk access
 }
 
 /** Rejects after ms milliseconds with a clear timeout error. */
@@ -41,7 +42,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 export const ingestProcessor: Processor = async (job) => {
-  const { productId, tenantId } = job.data as IngestJobData;
+  const jobData = job.data as IngestJobData;
+  const { productId, tenantId } = jobData;
 
   const saveError = async (msg: string) => {
     await db.update(products)
@@ -56,15 +58,19 @@ export const ingestProcessor: Processor = async (job) => {
       10_000, 'DB product lookup'
     );
     if (!product) throw new Error(`Product ${productId} not found in database`);
-    if (!product.pdfS3Key) throw new Error(`Product ${productId} has no PDF uploaded`);
 
-    // ── PDF download ──────────────────────────────────────────────────────────
+    // ── PDF source ────────────────────────────────────────────────────────────
     let pdfBuffer: Buffer;
-    if (product.pdfS3Key.startsWith('local://')) {
+
+    if (jobData.pdfBase64) {
+      // Inline mode: API passed raw bytes in job payload (no S3, no shared disk)
+      job.log(`[2/6] Reading PDF from job payload (inline mode)`);
+      pdfBuffer = Buffer.from(jobData.pdfBase64, 'base64');
+    } else if (product.pdfS3Key?.startsWith('local://')) {
       const localPath = product.pdfS3Key.replace('local://', '');
       job.log(`[2/6] Reading PDF from local disk: ${localPath}`);
       pdfBuffer = await withTimeout(readFile(localPath), 30_000, 'local file read');
-    } else {
+    } else if (product.pdfS3Key) {
       job.log(`[2/6] Downloading PDF from S3 key=${product.pdfS3Key}`);
       const s3Response = await withTimeout(
         s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: product.pdfS3Key })),
@@ -74,6 +80,8 @@ export const ingestProcessor: Processor = async (job) => {
       const chunks: Uint8Array[] = [];
       for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
       pdfBuffer = Buffer.concat(chunks);
+    } else {
+      throw new Error('No PDF available: no inline payload, no S3 key, no local path');
     }
     job.log(`[2/6] PDF ready: ${pdfBuffer.byteLength} bytes`);
 

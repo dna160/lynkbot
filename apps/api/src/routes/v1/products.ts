@@ -210,19 +210,31 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
         });
         await s3.send(command);
         storage = 's3';
-      } else {
-        // Save to local disk (development / no S3 configured)
-        const uploadsDir = path.join(process.cwd(), 'uploads', 'products', id);
-        await fs.mkdir(uploadsDir, { recursive: true });
-        const localPath = path.join(uploadsDir, 'pdf.pdf');
-        await fs.writeFile(localPath, fileBuffer);
-        s3Key = `local://${localPath}`;
-        storage = 'local';
-      }
 
-      await db.update(products)
-        .set({ pdfS3Key: s3Key, updatedAt: new Date() })
-        .where(eq(products.id, id));
+        await db.update(products)
+          .set({ pdfS3Key: s3Key, updatedAt: new Date() })
+          .where(eq(products.id, id));
+      } else {
+        // No S3 — store a placeholder key so the product record is updated,
+        // then pass the raw PDF bytes in the job payload.
+        // The worker (separate container) cannot access the API's local disk,
+        // so we never write to disk at all.
+        s3Key = `inline://${id}`;
+        storage = 'local';
+
+        await db.update(products)
+          .set({ pdfS3Key: s3Key, knowledgeStatus: 'processing', updatedAt: new Date() })
+          .where(eq(products.id, id));
+
+        // Enqueue immediately with base64-encoded PDF — worker reads from job data
+        await ingestQueue.add('ingest-product', {
+          productId: id,
+          tenantId,
+          pdfBase64: fileBuffer.toString('base64'),
+        });
+
+        return reply.send({ s3Key, storage, ingestQueued: true });
+      }
 
       return reply.send({ s3Key, storage });
     },
