@@ -17,12 +17,12 @@ const envSchema = z.object({
   REDIS_URL: z.string(),
   JWT_SECRET: z.string().min(32),
   LYNK_INTERNAL_API_KEY: z.string().min(10),
-  XAI_API_KEY: z.string().default(''),
+  XAI_API_KEY: z.string().min(1),
   XAI_BASE_URL: z.string().url().default('https://api.x.ai/v1'),
-  LLM_MODEL: z.string().default('grok-4-1-fast-reasoning'),
+  LLM_MODEL: z.string().default('grok-3-fast'),
   LLM_PROVIDER: z.string().default('xai'),
   LLM_FALLBACK_MODEL: z.string().default('grok-3'),
-  XAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
+  XAI_EMBEDDING_MODEL: z.string().default('v1'),
   // ── Meta WhatsApp Cloud API ──────────────────────────────────────────────────
   // System User Access Token from Meta Business Manager
   META_ACCESS_TOKEN: z.string().default(''),

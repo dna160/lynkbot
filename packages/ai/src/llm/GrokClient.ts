@@ -23,11 +23,13 @@ export class GrokClient implements ILLMClient {
   private fallbackModel: string;
 
   constructor() {
+    const apiKey = process.env.XAI_API_KEY;
+    if (!apiKey) throw new Error('XAI_API_KEY is not set');
     this.client = makeOpenAI({
-      apiKey: process.env.XAI_API_KEY!,
+      apiKey,
       baseURL: process.env.XAI_BASE_URL ?? 'https://api.x.ai/v1',
     });
-    this.model = process.env.LLM_MODEL ?? 'grok-4-1-fast-reasoning';
+    this.model = process.env.LLM_MODEL ?? 'grok-3-fast';
     this.fallbackModel = process.env.LLM_FALLBACK_MODEL ?? 'grok-3';
   }
 
