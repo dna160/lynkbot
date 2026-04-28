@@ -307,13 +307,13 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
    *
    * Post-LLM: adjustments become real genome mutations. OSINT run logged as sentinel entry.
    */
-  fastify.post<{ Params: { id: string }; Body: { nameOverride?: string } }>(
+  fastify.post<{ Params: { id: string }; Body: { nameOverride?: string; linkedinUrl?: string; instagramUsername?: string } }>(
     '/v1/buyers/:id/osint',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
-      const { nameOverride } = request.body ?? {};
+      const { nameOverride, linkedinUrl, instagramUsername } = request.body ?? {};
 
       const buyer = await db.query.buyers.findFirst({
         where: and(eq(buyers.id, id), eq(buyers.tenantId, tenantId)),
@@ -443,7 +443,13 @@ C — Human Uniqueness: identityFusion=${scores.identityFusion} chronesthesiaCap
       // ── Source 5: External OSINT (LinkedIn + Instagram via Apify) ───────────
       // Name cascade: operator override → WA profile name → name expressed in chat
       const searchName = nameOverride?.trim() || buyer.displayName || expressedName || null;
-      const externalOsint = await runExternalOsint(searchName, inferredRegion, config.APIFY_API_KEY);
+      const externalOsint = await runExternalOsint(
+        searchName,
+        inferredRegion,
+        config.APIFY_API_KEY,
+        linkedinUrl ?? null,
+        instagramUsername ?? null,
+      );
 
       // ── LLM call ──────────────────────────────────────────────────────────
       const systemPrompt = `You are a master human intelligence analyst at the Pantheon "human whisperer" standard.

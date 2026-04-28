@@ -209,19 +209,24 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
   };
 
   const handleOsint = async () => {
-    // If no display name, ask operator for a name to search
-    let nameOverride: string | undefined;
+    const opts: { nameOverride?: string; linkedinUrl?: string; instagramUsername?: string } = {};
+
     if (!buyer.displayName) {
       const input = window.prompt(
-        `No WhatsApp profile name for this contact.\nEnter a name to search LinkedIn & Instagram (or cancel to run on in-system data only):`,
+        `No WhatsApp profile name found.\nEnter the person's full name to search (or leave blank to skip external search):`,
       );
-      if (input && input.trim().length >= 2) {
-        nameOverride = input.trim();
-      }
+      if (input && input.trim().length >= 2) opts.nameOverride = input.trim();
     }
+
+    const li = window.prompt('LinkedIn profile URL (optional — leave blank to auto-guess from name):');
+    if (li && li.trim()) opts.linkedinUrl = li.trim();
+
+    const ig = window.prompt('Instagram username (optional — leave blank to search by name):');
+    if (ig && ig.trim()) opts.instagramUsername = ig.trim().replace(/^@/, '');
+
     setRunningOsint(true);
     try {
-      const res = await intelligenceApi.runOsint(buyer.id, nameOverride);
+      const res = await intelligenceApi.runOsint(buyer.id, opts);
       setData(res.data);
       setTab('genome');
       const ext = res.data as any;

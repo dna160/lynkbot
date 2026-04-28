@@ -2,22 +2,19 @@
  * @CLAUDE_CONTEXT
  * Package : apps/api
  * File    : src/services/osint.service.ts
- * Role    : External OSINT via Apify — scrapes LinkedIn and Instagram profiles
- *           by searching for the buyer's name via Google, then scraping found URLs.
+ * Role    : External OSINT via Apify — scrapes LinkedIn and Instagram profiles directly.
+ *           No Google Search intermediary.
  *
  * Data flow:
- *   1. Google Search (apify/google-search-scraper)
- *      → find linkedin.com/in/* and instagram.com/* URLs for the given name
- *   2. LinkedIn Profile Scraper (harvestapi/linkedin-profile-scraper)
- *      → headline, about, experience, education, skills, location
- *      Actor ID: LpVuK3Zozwuipa5bp
- *      Input:  { url: "https://linkedin.com/in/..." }
- *      Output: firstName, lastName, headline, about, location, experience[], education[], skills[], connectionsCount
- *   3. Instagram Profile Scraper (apify/instagram-scraper)
- *      → bio, follower/following counts, post count, isPrivate, verified
- *      Actor ID: shu8hvrXbJbY3Eb9W
- *      Input:  { directUrls: ["https://instagram.com/username/"], resultsType: "details" }
- *      Output: username, fullName, biography, followersCount, followingCount, postsCount, isPrivate, verified, externalUrl
+ *   1. LinkedIn Profile Scraper (harvestapi~linkedin-profile-scraper)
+ *      → Input: { url: "https://linkedin.com/in/firstname-lastname" }
+ *        URL is operator-supplied OR auto-constructed from buyer name.
+ *      → Output: headline, about, experience, education, skills, location
+ *
+ *   2. Instagram Profile Scraper (apify~instagram-scraper)
+ *      → Input: { searchTerm: name, searchType: "user", resultsType: "details", resultsLimit: 3 }
+ *        Operator can also supply an exact username to skip the search step.
+ *      → Output: biography, follower/following counts, post count, isPrivate, verified
  *
  * All calls are fully optional — failures return null and are noted in the result.
  * Never throws. If APIFY_API_KEY is empty, returns a skipped result immediately.
@@ -27,12 +24,9 @@
  */
 
 const APIFY_BASE = 'https://api.apify.com/v2';
-// Actor IDs — Apify REST API uses tilde (~) as owner/name separator, NOT slash.
-// encodeURIComponent('/') → '%2F' which causes 404; encodeURIComponent('~') → '~' (safe).
-// LinkedIn + Instagram use alphanumeric IDs (no separator issue).
-const ACTOR_GOOGLE_SEARCH = 'apify~google-search-scraper';
-const ACTOR_LINKEDIN = 'LpVuK3Zozwuipa5bp';     // harvestapi/linkedin-profile-scraper
-const ACTOR_INSTAGRAM = 'shu8hvrXbJbY3Eb9W';    // apify/instagram-scraper
+// Apify REST API uses tilde (~) as owner/name separator.
+const ACTOR_LINKEDIN = 'harvestapi~linkedin-profile-scraper';
+const ACTOR_INSTAGRAM = 'apify~instagram-scraper';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,7 +56,7 @@ export interface InstagramProfile {
 }
 
 export interface ExternalOsintResult {
-  searched: boolean;        // false if APIFY_API_KEY not set or name unavailable
+  searched: boolean;
   nameSearched: string | null;
   linkedin: LinkedInProfile | null;
   linkedinSearchError: string | null;
@@ -72,11 +66,6 @@ export interface ExternalOsintResult {
 
 // ─── Apify helper ─────────────────────────────────────────────────────────────
 
-/**
- * Run an Apify actor synchronously and return dataset items.
- * Uses run-sync-get-dataset-items which waits for completion and returns results directly.
- * Times out after timeoutSec seconds (actor) + 15s (network buffer).
- */
 async function apifyRun(
   actorId: string,
   input: unknown,
@@ -109,93 +98,51 @@ async function apifyRun(
   }
 }
 
-// ─── Google Search helper ─────────────────────────────────────────────────────
-
-interface GoogleResult {
-  url: string;
-  title?: string;
-  description?: string;
-}
-
-async function googleSearch(query: string, apiKey: string): Promise<GoogleResult[]> {
-  const items = await apifyRun(
-    ACTOR_GOOGLE_SEARCH,
-    { queries: query, maxPagesPerQuery: 1, resultsPerPage: 5, languageCode: '' },
-    apiKey,
-    45,
-  ) as Record<string, unknown>[];
-
-  // Response shape: [{ searchQuery, organicResults: [...] }]
-  const firstPage = items[0] as Record<string, unknown> | undefined;
-  const organic = firstPage?.organicResults as GoogleResult[] | undefined;
-  return Array.isArray(organic) ? organic : [];
-}
-
-/** Extract first matching URL from Google results */
-function extractUrl(results: GoogleResult[], pattern: RegExp): string | null {
-  for (const r of results) {
-    if (r.url && pattern.test(r.url)) return r.url;
-  }
-  return null;
-}
-
 // ─── LinkedIn ─────────────────────────────────────────────────────────────────
+
+/**
+ * Construct a best-guess LinkedIn profile URL from a full name.
+ * e.g. "Ahmad Rizky Pratama" → "https://www.linkedin.com/in/ahmad-rizky-pratama"
+ */
+function nameToLinkedInUrl(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-');
+  return `https://www.linkedin.com/in/${slug}`;
+}
 
 async function scrapeLinkedIn(
   name: string,
-  region: string,
+  linkedinUrl: string | null,
   apiKey: string,
-): Promise<{ profile: LinkedInProfile | null; error: string | null }> {
+): Promise<{ profile: LinkedInProfile | null; error: string | null; urlUsed: string }> {
+  const urlUsed = linkedinUrl ?? nameToLinkedInUrl(name);
   try {
-    // Step 1: Google to find profile URL
-    const query = region !== 'Unknown'
-      ? `"${name}" site:linkedin.com/in ${region}`
-      : `"${name}" site:linkedin.com/in`;
-
-    const googleResults = await googleSearch(query, apiKey);
-    const profileUrl = extractUrl(googleResults, /linkedin\.com\/in\//i);
-
-    if (!profileUrl) {
-      return { profile: null, error: `No LinkedIn profile found in Google results for "${name}"` };
-    }
-
-    // Step 2: Scrape the profile
-    // harvestapi/linkedin-profile-scraper accepts { url: "https://..." }
     const items = await apifyRun(
       ACTOR_LINKEDIN,
-      { url: profileUrl },
+      { url: urlUsed },
       apiKey,
       60,
     ) as Record<string, unknown>[];
 
     if (!items.length) {
-      return { profile: null, error: `LinkedIn scraper returned no data for ${profileUrl}` };
+      return { profile: null, error: `LinkedIn scraper returned no data for ${urlUsed}`, urlUsed };
     }
 
     const raw = items[0] as Record<string, unknown>;
 
-    // Normalise experience entries — harvestapi uses position/company (object or string)
     type ExpEntry = {
-      title?: string;
-      position?: string;
-      companyName?: string;
-      company?: string | { name?: string };
-      duration?: string;
-      period?: string;
+      title?: string; position?: string;
+      companyName?: string; company?: string | { name?: string };
+      duration?: string; period?: string;
       description?: string;
     };
     const experience = (Array.isArray(raw.experience) ? raw.experience : []) as ExpEntry[];
 
     type EduEntry = {
-      degreeName?: string;
-      degree?: string;
-      fieldOfStudy?: string;
-      schoolName?: string;
-      school?: string | { name?: string };
+      degreeName?: string; degree?: string; fieldOfStudy?: string;
+      schoolName?: string; school?: string | { name?: string };
     };
     const education = (Array.isArray(raw.education) ? raw.education : []) as EduEntry[];
 
-    // Skills may be an array of strings or objects { name, endorsements }
     type SkillEntry = string | { name?: string };
     const rawSkills = Array.isArray(raw.skills) ? (raw.skills as SkillEntry[]) : [];
     const skills = rawSkills
@@ -203,27 +150,31 @@ async function scrapeLinkedIn(
       .filter(Boolean)
       .slice(0, 20);
 
-    // Location may be string or nested { city, country, ... }
     const loc = raw.location;
     const locationStr: string | null = typeof loc === 'string'
       ? loc
-      : (loc && typeof loc === 'object' ? Object.values(loc as Record<string, unknown>).filter(Boolean).join(', ') : null);
+      : (loc && typeof loc === 'object'
+          ? Object.values(loc as Record<string, unknown>).filter(Boolean).join(', ')
+          : null);
+
+    const firstName = (raw.firstName as string | null | undefined) ?? '';
+    const lastName = (raw.lastName as string | null | undefined) ?? '';
+    const fullNameFromParts = `${firstName} ${lastName}`.trim();
 
     const profile: LinkedInProfile = {
-      profileUrl: (raw.linkedinUrl ?? raw.url ?? raw.profileUrl ?? profileUrl) as string,
-      name: (
-        ((raw.firstName ?? '') as string + ' ' + (raw.lastName ?? '') as string).trim()
-        || (raw.fullName as string | null)
-        || null
-      ),
-      headline: (raw.headline as string | null) ?? null,
+      profileUrl: (raw.linkedinUrl as string | null | undefined)
+        ?? (raw.url as string | null | undefined)
+        ?? (raw.profileUrl as string | null | undefined)
+        ?? urlUsed,
+      name: fullNameFromParts || (raw.fullName as string | null | undefined) || null,
+      headline: (raw.headline as string | null | undefined) ?? null,
       about: (raw.about as string | null | undefined) ?? (raw.summary as string | null | undefined) ?? null,
       location: locationStr,
       experience: experience.map(e => ({
         title: (e.title ?? e.position ?? 'Unknown role') as string,
         company: typeof e.company === 'object' && e.company !== null
           ? ((e.company as { name?: string }).name ?? 'Unknown')
-          : (e.companyName ?? (e.company as string) ?? 'Unknown') as string,
+          : ((e.companyName ?? (e.company as string | undefined) ?? 'Unknown')) as string,
         duration: e.duration ?? e.period ?? undefined,
         description: e.description ?? undefined,
       })),
@@ -232,18 +183,20 @@ async function scrapeLinkedIn(
         fieldOfStudy: e.fieldOfStudy ?? undefined,
         school: typeof e.school === 'object' && e.school !== null
           ? ((e.school as { name?: string }).name ?? 'Unknown')
-          : (e.schoolName ?? (e.school as string) ?? 'Unknown') as string,
+          : ((e.schoolName ?? (e.school as string | undefined) ?? 'Unknown')) as string,
       })),
       skills,
       connectionsCount: typeof raw.connectionsCount === 'number' ? raw.connectionsCount
-        : typeof raw.followerCount === 'number' ? raw.followerCount as number : null,
+        : typeof raw.followerCount === 'number' ? (raw.followerCount as number)
+        : null,
     };
 
-    return { profile, error: null };
+    return { profile, error: null, urlUsed };
   } catch (err) {
     return {
       profile: null,
       error: err instanceof Error ? err.message : String(err),
+      urlUsed,
     };
   }
 }
@@ -252,72 +205,61 @@ async function scrapeLinkedIn(
 
 async function scrapeInstagram(
   name: string,
-  region: string,
+  instagramUsername: string | null,
   apiKey: string,
 ): Promise<{ profile: InstagramProfile | null; error: string | null }> {
   try {
-    // Step 1: Google to find Instagram profile URL
-    const query = region !== 'Unknown'
-      ? `"${name}" site:instagram.com ${region}`
-      : `"${name}" site:instagram.com`;
+    let items: Record<string, unknown>[];
 
-    const googleResults = await googleSearch(query, apiKey);
-    const profileUrl = extractUrl(googleResults, /instagram\.com\/[^/?\s]+\/?$/i);
-
-    if (!profileUrl) {
-      return { profile: null, error: `No Instagram profile found in Google results for "${name}"` };
+    if (instagramUsername) {
+      // Exact username provided — scrape profile directly
+      const canonicalUrl = `https://www.instagram.com/${instagramUsername.replace(/^@/, '')}/`;
+      items = await apifyRun(
+        ACTOR_INSTAGRAM,
+        { directUrls: [canonicalUrl], resultsType: 'details', resultsLimit: 1 },
+        apiKey,
+        60,
+      ) as Record<string, unknown>[];
+    } else {
+      // No username — search Instagram by name
+      items = await apifyRun(
+        ACTOR_INSTAGRAM,
+        { searchTerm: name, searchType: 'user', resultsType: 'details', resultsLimit: 3 },
+        apiKey,
+        60,
+      ) as Record<string, unknown>[];
     }
-
-    // Extract username from URL: instagram.com/username or instagram.com/username/
-    const usernameMatch = profileUrl.match(/instagram\.com\/([^/?#]+)/i);
-    const username = usernameMatch?.[1];
-    if (!username || ['p', 'reels', 'explore', 'accounts', 'stories'].includes(username.toLowerCase())) {
-      return { profile: null, error: `Could not extract valid Instagram username from ${profileUrl}` };
-    }
-
-    // Normalise to canonical profile URL
-    const canonicalUrl = `https://www.instagram.com/${username}/`;
-
-    // Step 2: Scrape the profile
-    // apify/instagram-scraper: use directUrls with resultsType: 'details' for profile data
-    const items = await apifyRun(
-      ACTOR_INSTAGRAM,
-      {
-        directUrls: [canonicalUrl],
-        resultsType: 'details',
-        resultsLimit: 1,
-      },
-      apiKey,
-      60,
-    ) as Record<string, unknown>[];
 
     if (!items.length) {
-      return { profile: null, error: `Instagram scraper returned no data for @${username}` };
+      return { profile: null, error: `Instagram scraper returned no results for "${instagramUsername ?? name}"` };
     }
 
     const raw = items[0] as Record<string, unknown>;
+    const username = (raw.username as string | null | undefined) ?? instagramUsername ?? 'unknown';
 
-    // postsCount — may be nested under edge_owner_to_timeline_media.count
     const postsCount: number | null =
       typeof raw.postsCount === 'number' ? raw.postsCount
-      : typeof raw.mediaCount === 'number' ? raw.mediaCount as number
+      : typeof raw.mediaCount === 'number' ? (raw.mediaCount as number)
       : (raw.edge_owner_to_timeline_media != null && typeof raw.edge_owner_to_timeline_media === 'object')
-        ? ((raw.edge_owner_to_timeline_media as Record<string, unknown>).count as number | null) ?? null
+        ? (((raw.edge_owner_to_timeline_media as Record<string, unknown>).count) as number | null) ?? null
       : null;
 
     const profile: InstagramProfile = {
       profileUrl: `https://instagram.com/${username}`,
-      username: (raw.username as string | null) ?? username,
+      username,
       fullName: (raw.fullName as string | null | undefined) ?? (raw.full_name as string | null | undefined) ?? null,
       biography: (raw.biography as string | null | undefined) ?? (raw.bio as string | null | undefined) ?? null,
       followersCount: typeof raw.followersCount === 'number' ? raw.followersCount
-        : typeof raw.followers === 'number' ? raw.followers as number : null,
+        : typeof raw.followers === 'number' ? (raw.followers as number) : null,
       followingCount: typeof raw.followingCount === 'number' ? raw.followingCount
-        : typeof raw.following === 'number' ? raw.following as number : null,
+        : typeof raw.following === 'number' ? (raw.following as number) : null,
       postsCount,
       isPrivate: Boolean(raw.private ?? raw.isPrivate ?? raw.is_private),
       isVerified: Boolean(raw.verified ?? raw.isVerified ?? raw.is_verified),
-      externalUrl: (raw.externalUrl as string | null | undefined) ?? (raw.external_url as string | null | undefined) ?? (raw.website as string | null | undefined) ?? null,
+      externalUrl: (raw.externalUrl as string | null | undefined)
+        ?? (raw.external_url as string | null | undefined)
+        ?? (raw.website as string | null | undefined)
+        ?? null,
     };
 
     return { profile, error: null };
@@ -333,14 +275,17 @@ async function scrapeInstagram(
 
 /**
  * Run external OSINT for a buyer by name.
- * @param name         Full name to search (display name or expressed name from conversation)
- * @param region       Inferred region string (e.g. "Indonesia") to narrow Google results
- * @param apiKey       Apify API key — if empty, returns { searched: false }
+ * @param name               Full name to search
+ * @param apiKey             Apify API key — if empty, returns { searched: false }
+ * @param linkedinUrl        Optional: exact LinkedIn profile URL (skips URL construction)
+ * @param instagramUsername  Optional: exact Instagram username (skips name search)
  */
 export async function runExternalOsint(
   name: string | null,
-  region: string,
+  _region: string,
   apiKey: string,
+  linkedinUrl?: string | null,
+  instagramUsername?: string | null,
 ): Promise<ExternalOsintResult> {
   if (!apiKey || !name || name.trim().length < 2) {
     return {
@@ -355,10 +300,9 @@ export async function runExternalOsint(
 
   const cleanName = name.trim();
 
-  // Run LinkedIn and Instagram scraping in parallel
   const [linkedinResult, instagramResult] = await Promise.all([
-    scrapeLinkedIn(cleanName, region, apiKey),
-    scrapeInstagram(cleanName, region, apiKey),
+    scrapeLinkedIn(cleanName, linkedinUrl ?? null, apiKey),
+    scrapeInstagram(cleanName, instagramUsername ?? null, apiKey),
   ]);
 
   return {
@@ -373,15 +317,13 @@ export async function runExternalOsint(
 
 // ─── Format for LLM prompt ────────────────────────────────────────────────────
 
-/** Render ExternalOsintResult as a readable text block for the LLM prompt */
 export function formatExternalOsintForPrompt(result: ExternalOsintResult): string {
   if (!result.searched) {
     return `External OSINT: SKIPPED — ${result.linkedinSearchError ?? 'unknown reason'}`;
   }
 
-  const lines: string[] = [`Name searched: "${result.nameSearched}" | Region context: used for Google search disambiguation`];
+  const lines: string[] = [`Name searched: "${result.nameSearched}"`];
 
-  // LinkedIn
   if (result.linkedin) {
     const li = result.linkedin;
     lines.push(`\nLINKEDIN PROFILE: ${li.profileUrl}`);
@@ -411,7 +353,6 @@ export function formatExternalOsintForPrompt(result: ExternalOsintResult): strin
     lines.push(`\nLINKEDIN: Not found — ${result.linkedinSearchError ?? 'unknown error'}`);
   }
 
-  // Instagram
   if (result.instagram) {
     const ig = result.instagram;
     lines.push(`\nINSTAGRAM PROFILE: ${ig.profileUrl}`);
