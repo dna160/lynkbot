@@ -185,9 +185,15 @@ export class ConversationService {
     });
 
     if (!conv) {
+      // Auto-assign the tenant's first active + ready product so the AI has product context from message 1
+      const defaultProduct = await db.query.products.findFirst({
+        where: and(eq(products.tenantId, tenantId), eq(products.isActive, true), eq(products.knowledgeStatus, 'ready')),
+      });
+
       const [created] = await db.insert(conversations).values({
         tenantId,
         buyerId: buyer.id,
+        productId: defaultProduct?.id ?? null,
         state: 'INIT',
         language: 'id',
         messageCount: 0,
@@ -196,6 +202,15 @@ export class ConversationService {
         lastMessageAt: new Date(),
       }).returning();
       conv = created;
+    } else if (!conv.productId) {
+      // Existing conversation without a product — try to assign one now (handles pre-fix conversations)
+      const defaultProduct = await db.query.products.findFirst({
+        where: and(eq(products.tenantId, tenantId), eq(products.isActive, true), eq(products.knowledgeStatus, 'ready')),
+      });
+      if (defaultProduct) {
+        await db.update(conversations).set({ productId: defaultProduct.id }).where(eq(conversations.id, conv.id));
+        conv = { ...conv, productId: defaultProduct.id };
+      }
     }
 
     // Mark message as processed (idempotency record)
@@ -405,7 +420,17 @@ export class ConversationService {
       return;
     }
 
-    await this.sendAiResponse(conv, buyer, text);
+    // RAG context in BROWSING too — product questions land here before state transitions to PRODUCT_INQUIRY
+    let ragContext = '';
+    if (conv.productId) {
+      try {
+        ragContext = await ragQuery(conv.productId, conv.tenantId, text);
+      } catch {
+        // RAG unavailable — fall through to base AI
+      }
+    }
+
+    await this.sendAiResponse(conv, buyer, text, ragContext || undefined);
 
     if (detectProductQuestion(text)) {
       await this.transitionState(conv.id, 'PRODUCT_INQUIRY');
