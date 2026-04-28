@@ -17,6 +17,8 @@ import {
   type GenomeScores, type Genome, type MomentType,
 } from '@lynkbot/pantheon';
 import { getLLMClient } from '@lynkbot/ai';
+import { config } from '../../config';
+import { runExternalOsint, formatExternalOsintForPrompt } from '../../services/osint.service';
 
 // ─── Helper: row → Genome ─────────────────────────────────────────────────────
 
@@ -338,6 +340,14 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
         `Last order date: ${buyer.lastOrderAt ? buyer.lastOrderAt.toISOString().split('T')[0] : '(no orders yet)'}`,
       ].join('\n');
 
+      // ── Source 5: External OSINT — kick off early to run in parallel with DB ─
+      // Use display name (most reliable) or fall back to phone-expressed name once available
+      const externalOsintPromise = runExternalOsint(
+        buyer.displayName ?? null,
+        inferredRegion,
+        config.APIFY_API_KEY,
+      );
+
       // ── Source 2: Full conversation corpus ────────────────────────────────
       const allConvs = await db.query.conversations.findMany({
         where: and(eq(conversations.buyerId, id), eq(conversations.tenantId, tenantId)),
@@ -437,6 +447,9 @@ A — OCEAN: openness=${scores.openness} conscientiousness=${scores.conscientiou
 B — Behavioral: communicationStyle=${scores.communicationStyle} decisionMaking=${scores.decisionMaking} brandRelationship=${scores.brandRelationship} influenceSusceptibility=${scores.influenceSusceptibility} emotionalExpression=${scores.emotionalExpression} conflictBehavior=${scores.conflictBehavior} literacyArticulation=${scores.literacyArticulation} socioeconomicFriction=${scores.socioeconomicFriction}
 C — Human Uniqueness: identityFusion=${scores.identityFusion} chronesthesiaCapacity=${scores.chronesthesiaCapacity} tomSelfAwareness=${scores.tomSelfAwareness} tomSocialModeling=${scores.tomSocialModeling} executiveFlexibility=${scores.executiveFlexibility}`;
 
+      // ── Await Source 5 (was running in parallel with DB sources above) ──────
+      const externalOsint = await externalOsintPromise;
+
       // ── LLM call ──────────────────────────────────────────────────────────
       const systemPrompt = `You are a master human intelligence analyst at the Pantheon "human whisperer" standard.
 You receive structured data from four in-system sources and produce a JSON intelligence package.
@@ -460,13 +473,16 @@ ${commerceFacts}
 === SOURCE 4: GENOME (scores 1–100) ===
 ${genomeFacts}
 
+=== SOURCE 5: EXTERNAL PROFILE RESEARCH (LinkedIn + Instagram via Apify) ===
+${formatExternalOsintForPrompt(externalOsint)}
+
 ---
 
 Return this exact JSON structure:
 
 {
   "informationInventory": {
-    "knownFacts": ["bullet: every confirmed data point from the four sources"],
+    "knownFacts": ["bullet: every confirmed data point from all five sources — include LinkedIn headline/role/company and Instagram bio/follower count if found in Source 5"],
     "inferences": ["bullet: what can be reasonably inferred from the signals"],
     "gaps": ["bullet: what we do NOT know — honest blind spots that would sharpen the profile if known"],
     "dataQuality": "LOW | MEDIUM | HIGH — one sentence explaining the rating"
@@ -506,7 +522,7 @@ Rules for genomeAdjustments:
         const llm = getLLMClient();
         const res = await llm.chat(
           [{ role: 'user', content: userPrompt }],
-          { system: systemPrompt, maxTokens: 2500, responseFormat: 'json_object' }
+          { system: systemPrompt, maxTokens: 3000, responseFormat: 'json_object' }
         );
         llmResult = JSON.parse(res.content) as LLMResult;
       } catch (err) {
@@ -592,6 +608,9 @@ Rules for genomeAdjustments:
         evidenceSummary: [
           `Sources: ${allMessages.length} msgs across ${allConvs.length} convs`,
           `${buyerOrders.length} orders (IDR ${confirmedSpend.toLocaleString('id-ID')} confirmed)`,
+          externalOsint.searched
+            ? `LinkedIn: ${externalOsint.linkedin ? externalOsint.linkedin.profileUrl : 'not found'} | Instagram: ${externalOsint.instagram ? externalOsint.instagram.profileUrl : 'not found'}`
+            : `External OSINT: skipped (${externalOsint.linkedinSearchError ?? 'no API key'})`,
           `${adjustments.length} genome traits adjusted`,
           `Data quality: ${inv.dataQuality ?? 'unknown'}`,
         ].join(' · '),

@@ -53,6 +53,9 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().optional(),
   CORS_ORIGIN: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  // ── Apify (external OSINT — LinkedIn + Instagram scraping) ──────────────────
+  // Optional. If not set, external profile scraping is skipped gracefully.
+  APIFY_API_KEY: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);
