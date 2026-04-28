@@ -242,8 +242,15 @@ export class ConversationService {
     if (handled) return;
 
     // Location message — route separately
+    // Coerce lat/lng to number: Meta SDK types them as number but compiled dist may be stale
     if (isLocationMessage(payload) && payload.location) {
-      await this.handleLocationShare(conv, payload.location);
+      const loc = payload.location;
+      await this.handleLocationShare(conv, {
+        latitude: Number(loc.latitude),
+        longitude: Number(loc.longitude),
+        name: loc.name,
+        address: loc.address,
+      });
       return;
     }
 

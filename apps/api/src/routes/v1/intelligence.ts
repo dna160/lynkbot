@@ -7,8 +7,8 @@
  * Exports : intelligenceRoutes (Fastify plugin)
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, and, gt } from '@lynkbot/db';
-import { db, buyers, buyerGenomes, genomeMutations, conversations, messages } from '@lynkbot/db';
+import { eq, and, gt, desc } from '@lynkbot/db';
+import { db, buyers, buyerGenomes, genomeMutations, conversations, messages, orders, products } from '@lynkbot/db';
 import {
   extractSignals, deriveScores, scoreConfidence, applyConfidencePenalty,
   mergeScores, classifyMoment, selectDialog, computeRWI,
@@ -290,14 +290,20 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /v1/buyers/:id/osint
-   * Run deep psychological intelligence research on a buyer to the Pantheon "human whisperer" standard.
-   * Synthesises all conversation signals + genome scores into a structured intelligence brief:
-   *   - Psychological archetype & core identity
-   *   - Buying psychology & decision triggers
-   *   - Communication blueprint
-   *   - Trust mechanics & resistance patterns
-   *   - Optimal engagement strategy
-   * Result is saved to buyer_genomes.osint_summary and logged as a genome_mutation event.
+   * Deep intelligence research — Pantheon "human whisperer" standard.
+   *
+   * DATA SOURCES (all in-system):
+   *   1. Identity   — WA display name, phone (country→region), language, tags, notes, first seen
+   *   2. Corpus     — ALL conversations × ALL messages; latency, emoji, price/objection signals
+   *   3. Commerce   — full order history, product names, spend, LTV tier
+   *   4. Genome     — 18-parameter scores, confidence, observation count
+   *
+   * LLM returns structured JSON:
+   *   informationInventory — explicit known facts, inferences, blind spots, data quality rating
+   *   intelligenceBrief   — 7-section Pantheon brief
+   *   genomeAdjustments   — per-trait score revisions supported by evidence (≥5pt change only)
+   *
+   * Post-LLM: adjustments become real genome mutations. OSINT run logged as sentinel entry.
    */
   fastify.post<{ Params: { id: string } }>(
     '/v1/buyers/:id/osint',
@@ -311,114 +317,198 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
       });
       if (!buyer) return reply.status(404).send({ error: 'Buyer not found' });
 
-      // Load genome — must exist to run OSINT (need baseline scores)
-      const genomeRow = await db.query.buyerGenomes.findFirst({
-        where: and(eq(buyerGenomes.buyerId, id), eq(buyerGenomes.tenantId, tenantId)),
-      });
+      // ── Source 1: Identity ────────────────────────────────────────────────
+      const regionMap: Record<string, string> = {
+        '62': 'Indonesia', '1': 'USA/Canada', '44': 'UK', '65': 'Singapore',
+        '60': 'Malaysia', '61': 'Australia', '91': 'India', '971': 'UAE',
+        '966': 'Saudi Arabia', '855': 'Cambodia', '66': 'Thailand',
+      };
+      const phone = buyer.waPhone ?? '';
+      const inferredRegion = Object.entries(regionMap).find(([code]) => phone.startsWith(code))?.[1] ?? 'Unknown';
+      const bTags = Array.isArray(buyer.tags) && (buyer.tags as string[]).length
+        ? (buyer.tags as string[]).join(', ') : '(none)';
 
-      // Gather all conversations + recent messages as raw signal data
+      const identityFacts = [
+        `WA Display Name: ${buyer.displayName ?? '(not set)'}`,
+        `Phone: +${phone} → Inferred Region: ${inferredRegion}`,
+        `Preferred Language: ${(buyer as Record<string, unknown>).preferredLanguage ?? 'unknown'}`,
+        `Tags: ${bTags}`,
+        `Operator Notes: ${buyer.notes ?? '(none)'}`,
+        `First seen: ${buyer.createdAt?.toISOString().split('T')[0] ?? 'unknown'}`,
+        `Last order date: ${buyer.lastOrderAt ? buyer.lastOrderAt.toISOString().split('T')[0] : '(no orders yet)'}`,
+      ].join('\n');
+
+      // ── Source 2: Full conversation corpus ────────────────────────────────
       const allConvs = await db.query.conversations.findMany({
         where: and(eq(conversations.buyerId, id), eq(conversations.tenantId, tenantId)),
-        orderBy: (c, { desc }) => desc(c.lastMessageAt),
-        limit: 5,
+        orderBy: (c, { desc: d }) => d(c.lastMessageAt),
       });
 
-      const convMessages: string[] = [];
+      type MsgRow = { direction: string; textContent: string | null; createdAt: Date };
+      const allMessages: MsgRow[] = [];
       for (const conv of allConvs) {
         const msgs = await db.query.messages.findMany({
           where: eq(messages.conversationId, conv.id),
           orderBy: (m, { asc }) => asc(m.createdAt),
-          limit: 60,
-        });
-        for (const m of msgs) {
-          if (m.textContent && m.textContent.trim()) {
-            const role = m.direction === 'inbound' ? 'BUYER' : 'BOT';
-            convMessages.push(`[${role}] ${m.textContent.trim()}`);
-          }
-        }
+          limit: 80,
+        }) as unknown as MsgRow[];
+        allMessages.push(...msgs);
       }
 
+      const inboundTexts = allMessages
+        .filter(m => m.direction === 'inbound' && m.textContent?.trim())
+        .map(m => m.textContent!.trim());
+
+      const inboundTs = allMessages
+        .filter(m => m.direction === 'inbound')
+        .map(m => m.createdAt.getTime());
+      let avgLatencyMs = 0;
+      if (inboundTs.length >= 2) {
+        const gaps = inboundTs.slice(1).map((t, i) => t - inboundTs[i]);
+        avgLatencyMs = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      }
+      const latencyLabel = avgLatencyMs < 30_000 ? 'Fast (<30s avg)'
+        : avgLatencyMs < 300_000 ? 'Medium (<5min avg)'
+        : avgLatencyMs > 0 ? 'Slow (>5min avg)' : 'Unknown';
+
+      const allText = inboundTexts.join(' ');
+      const emojiCount = (allText.match(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}]/gu) ?? []).length;
+      const priceMsgs = inboundTexts.filter(t => /harga|berapa|price|cost|murah|mahal|diskon|promo|cashback/i.test(t)).length;
+      const objectionMsgs = inboundTexts.filter(t => /tapi|but|ragu|tidak yakin|belum|nanti|mikir|expensive/i.test(t)).length;
+      const urgencyMsgs = inboundTexts.filter(t => /sekarang|buruan|cepat|urgent|asap|today|hari ini/i.test(t)).length;
+      const expressedName = allText.match(/(?:nama saya|my name is|i'm|panggil saya)\s+([A-Za-z]+)/i)?.[1] ?? null;
+
+      const corpusFacts = [
+        `Total conversations: ${allConvs.length}`,
+        `Total messages: ${allMessages.length} (${inboundTexts.length} inbound from buyer, ${allMessages.length - inboundTexts.length} outbound from bot)`,
+        `Response latency: ${latencyLabel}`,
+        `Emoji usage: ${emojiCount} emojis total across all buyer messages`,
+        `Price/cost-related messages: ${priceMsgs}`,
+        `Objection/hesitation signals: ${objectionMsgs} messages`,
+        `Urgency signals: ${urgencyMsgs} messages`,
+        `Buyer expressed their name in chat: ${expressedName ?? '(not detected)'}`,
+        `Average buyer message length: ${inboundTexts.length ? Math.round(inboundTexts.reduce((s, t) => s + t.length, 0) / inboundTexts.length) : 0} chars`,
+      ].join('\n');
+
+      const convTranscript = allMessages
+        .filter(m => m.textContent?.trim())
+        .slice(-150)
+        .map(m => `[${m.direction === 'inbound' ? 'BUYER' : 'BOT'}] ${m.textContent!.trim()}`)
+        .join('\n') || '(No conversation history)';
+
+      // ── Source 3: Order / commercial history ──────────────────────────────
+      const buyerOrders = await db.query.orders.findMany({
+        where: and(eq(orders.buyerId, id), eq(orders.tenantId, tenantId)),
+        orderBy: (o, { desc: d }) => d(o.createdAt),
+        limit: 20,
+      });
+
+      const productIds = [...new Set(buyerOrders.map(o => o.productId))];
+      const productRows = productIds.length
+        ? await db.query.products.findMany({ where: (p, { inArray }) => inArray(p.id, productIds) })
+        : [];
+      const productMap = Object.fromEntries(productRows.map(p => [p.id, p.name]));
+
+      const confirmedSpend = buyerOrders
+        .filter(o => ['payment_confirmed', 'processing', 'shipped', 'delivered'].includes(o.status))
+        .reduce((sum, o) => sum + o.totalAmountIdr, 0);
+      const ltvTier = confirmedSpend >= 5_000_000 ? 'HIGH (≥IDR 5jt)'
+        : confirmedSpend >= 1_000_000 ? 'MEDIUM (IDR 1–5jt)'
+        : confirmedSpend > 0 ? 'LOW (<IDR 1jt)' : 'ZERO (no confirmed spend)';
+
+      const commerceFacts = [
+        `Total orders placed: ${buyerOrders.length}`,
+        `Delivered: ${buyerOrders.filter(o => o.status === 'delivered').length} | Shipped: ${buyerOrders.filter(o => o.status === 'shipped').length} | Cancelled: ${buyerOrders.filter(o => o.status === 'cancelled').length}`,
+        `Total confirmed spend: IDR ${confirmedSpend.toLocaleString('id-ID')}`,
+        `Lifetime value tier: ${ltvTier}`,
+        `Products purchased: ${buyerOrders.length ? buyerOrders.map(o => productMap[o.productId] ?? 'Unknown').join(', ') : '(none)'}`,
+        `Latest order: ${buyerOrders[0] ? `${buyerOrders[0].status} — ${productMap[buyerOrders[0].productId] ?? 'Unknown'} (${buyerOrders[0].createdAt.toISOString().split('T')[0]})` : '(no orders)'}`,
+      ].join('\n');
+
+      // ── Source 4: Genome ──────────────────────────────────────────────────
+      const genomeRow = await db.query.buyerGenomes.findFirst({
+        where: and(eq(buyerGenomes.buyerId, id), eq(buyerGenomes.tenantId, tenantId)),
+      });
       const genome = genomeRow ? rowToGenome(genomeRow) : defaultGenome(id, tenantId, buyer.waPhone ?? undefined);
       const scores = genome.scores;
 
-      // ── Build Pantheon-standard OSINT brief via LLM ────────────────────────
-      const genomeContext = `
-GENOME SCORES (1=low, 100=high):
-Cluster A — OCEAN:
-  Openness: ${scores.openness} | Conscientiousness: ${scores.conscientiousness} | Extraversion: ${scores.extraversion}
-  Agreeableness: ${scores.agreeableness} | Neuroticism: ${scores.neuroticism}
-Cluster B — Behavioral:
-  Communication Style: ${scores.communicationStyle} (1=terse/emoji, 100=formal/verbose)
-  Decision Making: ${scores.decisionMaking} (1=impulsive, 100=deliberate)
-  Brand Relationship: ${scores.brandRelationship} (1=skeptical, 100=brand-loyal)
-  Influence Susceptibility: ${scores.influenceSusceptibility} (1=immune, 100=highly influenced)
-  Emotional Expression: ${scores.emotionalExpression} (1=flat, 100=expressive)
-  Conflict Behavior: ${scores.conflictBehavior} (1=avoidant, 100=confrontational)
-  Literacy / Articulation: ${scores.literacyArticulation} (1=simple, 100=sophisticated)
-  Socioeconomic Friction: ${scores.socioeconomicFriction} (1=price-insensitive, 100=very price-sensitive)
-Cluster C — Human Uniqueness:
-  Identity Fusion: ${scores.identityFusion} (product identity alignment strength)
-  Chronesthesia: ${scores.chronesthesiaCapacity} (future vs. present thinking)
-  Self-Awareness (ToM): ${scores.tomSelfAwareness}
-  Social Modeling (ToM): ${scores.tomSocialModeling}
-  Executive Flexibility: ${scores.executiveFlexibility} (willingness to change mind)
-Confidence: ${genome.confidence} | Observations: ${genome.observationCount} messages`.trim();
+      const genomeFacts = `Confidence: ${genome.confidence} | Observations: ${genome.observationCount} messages
+A — OCEAN: openness=${scores.openness} conscientiousness=${scores.conscientiousness} extraversion=${scores.extraversion} agreeableness=${scores.agreeableness} neuroticism=${scores.neuroticism}
+B — Behavioral: communicationStyle=${scores.communicationStyle} decisionMaking=${scores.decisionMaking} brandRelationship=${scores.brandRelationship} influenceSusceptibility=${scores.influenceSusceptibility} emotionalExpression=${scores.emotionalExpression} conflictBehavior=${scores.conflictBehavior} literacyArticulation=${scores.literacyArticulation} socioeconomicFriction=${scores.socioeconomicFriction}
+C — Human Uniqueness: identityFusion=${scores.identityFusion} chronesthesiaCapacity=${scores.chronesthesiaCapacity} tomSelfAwareness=${scores.tomSelfAwareness} tomSocialModeling=${scores.tomSocialModeling} executiveFlexibility=${scores.executiveFlexibility}`;
 
-      const conversationContext = convMessages.length > 0
-        ? convMessages.slice(-120).join('\n')
-        : '(No conversation history available — profile based on genome priors only)';
+      // ── LLM call ──────────────────────────────────────────────────────────
+      const systemPrompt = `You are a master human intelligence analyst at the Pantheon "human whisperer" standard.
+You receive structured data from four in-system sources and produce a JSON intelligence package.
+Be concrete and specific to THIS person. No generic tropes. No hedging. No markdown outside string values.
+Output ONLY valid JSON — no fences, no commentary.`;
 
-      const buyerMeta = [
-        buyer.displayName ? `Name: ${buyer.displayName}` : null,
-        buyer.waPhone ? `Phone: +${buyer.waPhone}` : null,
-        (buyer as any).preferredLanguage ? `Language: ${(buyer as any).preferredLanguage}` : null,
-      ].filter(Boolean).join(' | ');
+      const userPrompt = `OSINT RESEARCH — BUYER INTELLIGENCE PACKAGE
 
-      const systemPrompt = `You are a master human intelligence analyst operating at the Pantheon "human whisperer" standard.
-Your function is to synthesize psychological genome scores and raw conversation transcripts into a precise, actionable intelligence brief.
-This is not a surface-level bio. It is a deep psychological map that enables a salesperson to establish instant resonance, navigate resistance, and guide this specific human toward a confident purchase decision.
-Write in English. Be concrete. Be specific to THIS person — not generic personality tropes.
-Structure your output EXACTLY as instructed. No disclaimers. No hedging. This is intelligence work.`;
+=== SOURCE 1: IDENTITY ===
+${identityFacts}
 
-      const userPrompt = `BUYER INTELLIGENCE BRIEF REQUEST
+=== SOURCE 2: CONVERSATION CORPUS ===
+${corpusFacts}
 
-Buyer: ${buyerMeta || 'Unknown'}
-${genomeContext}
+TRANSCRIPT (last 150 messages, oldest first):
+${convTranscript}
 
-CONVERSATION TRANSCRIPT:
-${conversationContext}
+=== SOURCE 3: COMMERCIAL HISTORY ===
+${commerceFacts}
 
-Produce a structured Pantheon Intelligence Brief with EXACTLY these seven sections:
+=== SOURCE 4: GENOME (scores 1–100) ===
+${genomeFacts}
 
-## 1. Psychological Archetype
-State their core psychological archetype (1–2 sentences). Name the archetype. Explain what drives this person at their core — their fundamental motivation engine. Be precise about how this maps to their genome cluster scores.
+---
 
-## 2. Identity Signals & Self-Concept
-What does this person believe about themselves? What roles, values, or identities have they revealed (explicitly or implicitly) through how they communicate? How do they want to be perceived? What does buying or NOT buying say about their identity?
+Return this exact JSON structure:
 
-## 3. Buying Psychology & Decision Triggers
-How does this person make purchasing decisions? What internal process do they follow? What are their primary YES triggers (what makes them say yes fast) and their primary STOP triggers (what makes them freeze or walk away)? Be specific about what argument structure works for them.
+{
+  "informationInventory": {
+    "knownFacts": ["bullet: every confirmed data point from the four sources"],
+    "inferences": ["bullet: what can be reasonably inferred from the signals"],
+    "gaps": ["bullet: what we do NOT know — honest blind spots that would sharpen the profile if known"],
+    "dataQuality": "LOW | MEDIUM | HIGH — one sentence explaining the rating"
+  },
+  "intelligenceBrief": {
+    "section1_archetype": "Named archetype + 2-3 sentences mapping to genome scores",
+    "section2_identity": "What they believe about themselves. Roles, values, self-concept. What buying/not-buying signals about identity.",
+    "section3_buyingPsychology": "Decision process. Primary YES triggers. Primary STOP triggers. Winning argument structure.",
+    "section4_communicationBlueprint": "Exact tone, pace, vocabulary, message length, formality. What to NEVER do.",
+    "section5_trustArchitecture": "What builds trust. What destroys it. Proof elements. Trust timeline.",
+    "section6_resistanceMap": "Top 3-5 objections ranked by probability. Genome-tailored reframe for each.",
+    "section7_engagementPlaybook": "Concrete 3-step operator opening. First message. Target emotional state at offer moment."
+  },
+  "genomeAdjustments": [
+    {
+      "trait": "camelCase trait name (one of the 18 genome params)",
+      "currentScore": 50,
+      "suggestedScore": 68,
+      "rationale": "One sentence — specific evidence from the sources that justifies this shift"
+    }
+  ]
+}
 
-## 4. Communication Blueprint
-Precise instructions for HOW to communicate with this buyer: tone, pace, vocabulary level, message length, formality, use of data vs. emotion vs. story, and what to NEVER do. This is the operator's tactical guide.
+Rules for genomeAdjustments:
+- Only include traits where evidence clearly supports ≥5 point change
+- Do not adjust traits without specific evidence — omit them entirely
+- suggestedScore must be 1–100`;
 
-## 5. Trust Architecture
-What specifically builds trust with this person? What destroys it? What proof elements do they need (social proof, data, authority, relationship, guarantee)? What is their trust timeline — how many touchpoints before they feel safe?
+      type LLMResult = {
+        informationInventory: { knownFacts: string[]; inferences: string[]; gaps: string[]; dataQuality: string };
+        intelligenceBrief: Record<string, string>;
+        genomeAdjustments: Array<{ trait: string; currentScore: number; suggestedScore: number; rationale: string }>;
+      };
 
-## 6. Resistance Map
-Map their likely objections in order of probability. For each, provide the exact reframe that works for their psychological profile. Do NOT give generic objection-handling — tailor to their genome.
-
-## 7. Engagement Playbook
-A concrete 3-step opening strategy for a human operator picking up this conversation. What to say first, how to position, and what outcome to aim for in the first 2 minutes. Include the specific emotional state you want them in when you make the offer.`;
-
-      let osintSummary: string;
+      let llmResult: LLMResult;
       try {
         const llm = getLLMClient();
         const res = await llm.chat(
           [{ role: 'user', content: userPrompt }],
-          { system: systemPrompt, maxTokens: 1800 }
+          { system: systemPrompt, maxTokens: 2500, responseFormat: 'json_object' }
         );
-        osintSummary = res.content;
+        llmResult = JSON.parse(res.content) as LLMResult;
       } catch (err) {
         fastify.log.error({ err }, 'OSINT LLM call failed');
         return reply.status(503).send({ error: 'Intelligence analysis service unavailable. Please retry.' });
@@ -426,67 +516,108 @@ A concrete 3-step opening strategy for a human operator picking up this conversa
 
       const now = new Date();
 
-      // Save OSINT summary to genome (upsert if genome doesn't exist yet)
+      // ── Apply genome adjustments ──────────────────────────────────────────
+      const validTraits = new Set([
+        'openness', 'conscientiousness', 'extraversion', 'agreeableness', 'neuroticism',
+        'communicationStyle', 'decisionMaking', 'brandRelationship', 'influenceSusceptibility',
+        'emotionalExpression', 'conflictBehavior', 'literacyArticulation', 'socioeconomicFriction',
+        'identityFusion', 'chronesthesiaCapacity', 'tomSelfAwareness', 'tomSocialModeling', 'executiveFlexibility',
+      ]);
+
+      const adjustments = (llmResult.genomeAdjustments ?? []).filter(
+        a => validTraits.has(a.trait) && Math.abs(a.suggestedScore - a.currentScore) >= 5
+      );
+
+      const adjustedScores = { ...scores };
+      for (const adj of adjustments) {
+        (adjustedScores as Record<string, number>)[adj.trait] = Math.max(1, Math.min(100, Math.round(adj.suggestedScore)));
+      }
+
+      // ── Format osint_summary from structured output ───────────────────────
+      const inv = llmResult.informationInventory ?? {} as LLMResult['informationInventory'];
+      const brief = llmResult.intelligenceBrief ?? {};
+      const osintSummary = [
+        `## Information Inventory`,
+        `**Data Quality:** ${inv.dataQuality ?? 'Unknown'}`,
+        (inv.knownFacts ?? []).length ? `\n**Known facts:**\n${(inv.knownFacts as string[]).map(f => `• ${f}`).join('\n')}` : '',
+        (inv.inferences ?? []).length ? `\n**Inferences:**\n${(inv.inferences as string[]).map(f => `• ${f}`).join('\n')}` : '',
+        (inv.gaps ?? []).length ? `\n**Blind spots:**\n${(inv.gaps as string[]).map(f => `• ${f}`).join('\n')}` : '',
+        adjustments.length ? `\n**Genome adjustments from OSINT:** ${adjustments.map(a => `${a.trait} ${a.currentScore}→${a.suggestedScore}`).join(' | ')}` : '',
+        `\n## 1. Psychological Archetype\n${brief.section1_archetype ?? ''}`,
+        `\n## 2. Identity Signals & Self-Concept\n${brief.section2_identity ?? ''}`,
+        `\n## 3. Buying Psychology & Decision Triggers\n${brief.section3_buyingPsychology ?? ''}`,
+        `\n## 4. Communication Blueprint\n${brief.section4_communicationBlueprint ?? ''}`,
+        `\n## 5. Trust Architecture\n${brief.section5_trustArchitecture ?? ''}`,
+        `\n## 6. Resistance Map\n${brief.section6_resistanceMap ?? ''}`,
+        `\n## 7. Engagement Playbook\n${brief.section7_engagementPlaybook ?? ''}`,
+      ].filter(Boolean).join('\n');
+
+      // ── Persist genome with adjusted scores ───────────────────────────────
       if (genomeRow) {
         await db.update(buyerGenomes)
-          .set({ osintSummary, lastSignalExtractedAt: now, updatedAt: now })
+          .set({ ...scoresToDbFields(adjustedScores), osintSummary, lastSignalExtractedAt: now, updatedAt: now })
           .where(and(eq(buyerGenomes.buyerId, id), eq(buyerGenomes.tenantId, tenantId)));
       } else {
-        // No genome row yet — seed one with cultural priors + attach OSINT
         const seeded = buildSeededGenome(id, tenantId, buyer.waPhone ?? undefined);
         await db.insert(buyerGenomes).values({
-          buyerId: id,
-          tenantId,
-          confidence: seeded.confidence,
-          observationCount: seeded.observationCount,
-          ...scoresToDbFields(seeded.scores),
-          formationInvariants: [],
-          osintSummary,
-          lastSignalExtractedAt: now,
-          updatedAt: now,
+          buyerId: id, tenantId,
+          confidence: seeded.confidence, observationCount: seeded.observationCount,
+          ...scoresToDbFields(adjustedScores), formationInvariants: [],
+          osintSummary, lastSignalExtractedAt: now, updatedAt: now,
         }).onConflictDoUpdate({
           target: [buyerGenomes.buyerId, buyerGenomes.tenantId],
-          set: { osintSummary, updatedAt: now },
+          set: { ...scoresToDbFields(adjustedScores), osintSummary, updatedAt: now },
         });
       }
 
-      // Log OSINT completion to genome_mutations so it appears in the History tab
-      // traitName = 'osint_research' — sentinel value; delta=0 means no score change, only enrichment
+      // ── Log each genome adjustment as a real trait mutation ───────────────
+      for (const adj of adjustments) {
+        const key = adj.trait as keyof GenomeScores;
+        const oldScore = (scores as Record<string, number>)[adj.trait] ?? 50;
+        const newScore = (adjustedScores as Record<string, number>)[adj.trait];
+        await db.insert(genomeMutations).values({
+          buyerId: id, tenantId,
+          traitName: key, oldScore, newScore, delta: newScore - oldScore,
+          evidenceSummary: `[OSINT] ${adj.rationale}`,
+          confidence: genome.confidence,
+          conversationId: allConvs[0]?.id ?? null,
+          createdAt: now,
+        });
+      }
+
+      // ── Log OSINT run as sentinel entry ───────────────────────────────────
       await db.insert(genomeMutations).values({
-        buyerId: id,
-        tenantId,
-        traitName: 'osint_research',
-        oldScore: 0,
-        newScore: 0,
-        delta: 0,
-        evidenceSummary: `OSINT intelligence brief generated. ${convMessages.length} conversation lines analyzed. Genome confidence: ${genome.confidence}.`,
+        buyerId: id, tenantId,
+        traitName: 'osint_research', oldScore: 0, newScore: 0, delta: 0,
+        evidenceSummary: [
+          `Sources: ${allMessages.length} msgs across ${allConvs.length} convs`,
+          `${buyerOrders.length} orders (IDR ${confirmedSpend.toLocaleString('id-ID')} confirmed)`,
+          `${adjustments.length} genome traits adjusted`,
+          `Data quality: ${inv.dataQuality ?? 'unknown'}`,
+        ].join(' · '),
         confidence: genome.confidence,
         conversationId: allConvs[0]?.id ?? null,
         createdAt: now,
       });
 
-      // Return updated genome response (same shape as GET /genome)
+      // ── Return ────────────────────────────────────────────────────────────
       const updatedGenomeRow = await db.query.buyerGenomes.findFirst({
         where: and(eq(buyerGenomes.buyerId, id), eq(buyerGenomes.tenantId, tenantId)),
       });
       const updatedMutations = await db.query.genomeMutations.findMany({
         where: and(eq(genomeMutations.buyerId, id), eq(genomeMutations.tenantId, tenantId)),
+        orderBy: (m, { desc: d }) => d(m.createdAt),
       });
 
       return reply.send({
         genome: updatedGenomeRow ? rowToGenome(updatedGenomeRow) : genome,
         mutations: updatedMutations.map(m => ({
-          traitName: m.traitName,
-          oldScore: m.oldScore,
-          newScore: m.newScore,
-          delta: m.delta,
-          evidenceSummary: m.evidenceSummary,
-          createdAt: m.createdAt,
+          traitName: m.traitName, oldScore: m.oldScore, newScore: m.newScore,
+          delta: m.delta, evidenceSummary: m.evidenceSummary, createdAt: m.createdAt,
         })),
         dialogCache: updatedGenomeRow?.dialogCache ?? null,
         dialogCacheBuiltAt: updatedGenomeRow?.dialogCacheBuiltAt ?? null,
-        osintSummary,
-        hasPersisted: true,
+        osintSummary, hasPersisted: true,
       });
     },
   );
