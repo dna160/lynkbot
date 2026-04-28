@@ -191,6 +191,7 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
   const [data, setData] = useState<GenomeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [runningOsint, setRunningOsint] = useState(false);
   const [tab, setTab] = useState<'genome' | 'mutations' | 'cache'>('genome');
 
   useEffect(() => {
@@ -207,6 +208,19 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
     finally { setRefreshing(false); }
   };
 
+  const handleOsint = async () => {
+    setRunningOsint(true);
+    try {
+      const res = await intelligenceApi.runOsint(buyer.id);
+      setData(res.data);
+      setTab('genome');
+      addToast('Intelligence brief generated — scroll to OSINT section', 'success');
+    } catch (err: any) {
+      addToast(err?.response?.data?.error ?? 'OSINT research failed', 'error');
+    }
+    finally { setRunningOsint(false); }
+  };
+
   const genome: Genome | null = data?.genome ?? null;
   const scores = genome?.scores;
 
@@ -219,13 +233,21 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
             <h2 className="text-base font-semibold text-primary">Customer Intelligence Profile</h2>
             <p className="text-xs text-secondary mt-0.5">{buyer.displayName || 'Unnamed'} · +{buyer.waPhone}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={handleRefresh} disabled={refreshing}
+          <div className="flex items-center gap-2">
+            <button onClick={handleRefresh} disabled={refreshing || runningOsint}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-secondary hover:text-primary hover:border-accent/50 disabled:opacity-40 transition-all">
               <svg className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-              {refreshing ? 'Refreshing…' : 'Refresh Genome'}
+              {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
-            <button onClick={onClose} className="text-secondary hover:text-primary transition-colors">
+            <button onClick={handleOsint} disabled={runningOsint || refreshing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-accent/40 bg-accent/10 text-xs text-accent hover:bg-accent/20 disabled:opacity-40 transition-all">
+              {runningOsint ? (
+                <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Researching…</>
+              ) : (
+                <><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>Run OSINT</>
+              )}
+            </button>
+            <button onClick={onClose} className="text-secondary hover:text-primary transition-colors ml-1">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
@@ -286,10 +308,33 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
                     </div>
                   </div>
                 ))}
-                {data.osintSummary && (
+                {data.osintSummary ? (
                   <div>
-                    <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-2">OSINT Summary</h3>
-                    <p className="text-xs text-secondary leading-relaxed bg-white/3 rounded-lg p-3">{data.osintSummary}</p>
+                    <h3 className="text-xs font-semibold text-accent uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                      Intelligence Brief
+                    </h3>
+                    <div className="bg-white/3 border border-accent/20 rounded-lg overflow-hidden">
+                      {data.osintSummary.split(/\n(?=## )/).filter(Boolean).map((section, i) => {
+                        const lines = section.trim().split('\n');
+                        const header = lines[0].replace(/^##\s*\d+\.\s*/, '').trim();
+                        const body = lines.slice(1).join('\n').trim();
+                        return (
+                          <div key={i} className={`px-4 py-3 ${i > 0 ? 'border-t border-border/40' : ''}`}>
+                            <div className="text-xs font-semibold text-accent mb-1.5">{header}</div>
+                            <p className="text-xs text-secondary leading-relaxed whitespace-pre-wrap">{body}</p>
+                          </div>
+                        );
+                      })}
+                      {!data.osintSummary.includes('##') && (
+                        <p className="text-xs text-secondary leading-relaxed p-4 whitespace-pre-wrap">{data.osintSummary}</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border border-dashed border-border/50 rounded-lg p-4 text-center">
+                    <p className="text-xs text-secondary/60">No intelligence brief yet.</p>
+                    <p className="text-xs text-secondary/40 mt-1">Click <span className="text-accent">Run OSINT</span> to generate a deep psychological profile.</p>
                   </div>
                 )}
               </div>
@@ -302,21 +347,35 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
                   <p className="text-sm text-secondary text-center py-8">No significant trait changes recorded yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {data.mutations.map((m, i) => (
-                      <div key={i} className="bg-white/3 border border-border/50 rounded-lg p-3 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-primary">{TRAIT_LABELS[m.traitName] ?? m.traitName}</span>
-                          <span className={`text-xs font-mono font-semibold ${m.delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{m.delta > 0 ? '+' : ''}{m.delta}</span>
+                    {[...data.mutations].reverse().map((m, i) => {
+                      const isOsint = m.traitName === 'osint_research';
+                      return isOsint ? (
+                        <div key={i} className="bg-accent/5 border border-accent/30 rounded-lg p-3 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 text-xs font-semibold text-accent">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                              OSINT Research Run
+                            </span>
+                            <span className="text-xs text-secondary">{formatDate(m.createdAt)}</span>
+                          </div>
+                          {m.evidenceSummary && <p className="text-xs text-secondary/70">{m.evidenceSummary}</p>}
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-secondary">
-                          <span className="font-mono">{m.oldScore}</span>
-                          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                          <span className="font-mono text-primary">{m.newScore}</span>
-                          <span className="ml-auto">{formatDate(m.createdAt)}</span>
+                      ) : (
+                        <div key={i} className="bg-white/3 border border-border/50 rounded-lg p-3 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-primary">{TRAIT_LABELS[m.traitName] ?? m.traitName}</span>
+                            <span className={`text-xs font-mono font-semibold ${m.delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{m.delta > 0 ? '+' : ''}{m.delta}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-secondary">
+                            <span className="font-mono">{m.oldScore}</span>
+                            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                            <span className="font-mono text-primary">{m.newScore}</span>
+                            <span className="ml-auto">{formatDate(m.createdAt)}</span>
+                          </div>
+                          {m.evidenceSummary && <p className="text-xs text-secondary/70 italic">{m.evidenceSummary}</p>}
                         </div>
-                        {m.evidenceSummary && <p className="text-xs text-secondary/70 italic">{m.evidenceSummary}</p>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
