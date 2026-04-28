@@ -101,10 +101,28 @@ export class ConversationService {
    * per-tenant webhook URL), so we look it up from the tenants table.
    */
   async resolveTenantByPhoneNumberId(phoneNumberId: string): Promise<string | null> {
+    // Primary: find tenant with matching metaPhoneNumberId
     const tenant = await db.query.tenants.findFirst({
       where: (t, { eq }) => eq(t.metaPhoneNumberId, phoneNumberId),
     });
-    return tenant?.id ?? null;
+    if (tenant) return tenant.id;
+
+    // Fallback: if incoming phoneNumberId matches the configured META_PHONE_NUMBER_ID,
+    // find the first tenant without a phone number and stamp it (handles first-login case)
+    if (config.META_PHONE_NUMBER_ID && phoneNumberId === config.META_PHONE_NUMBER_ID) {
+      const unlinked = await db.query.tenants.findFirst({
+        where: (t, { isNull }) => isNull(t.metaPhoneNumberId),
+      });
+      if (unlinked) {
+        await db.update(tenants).set({
+          metaPhoneNumberId: phoneNumberId,
+          displayPhoneNumber: `+${phoneNumberId}`,
+        }).where(eq(tenants.id, unlinked.id));
+        return unlinked.id;
+      }
+    }
+
+    return null;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

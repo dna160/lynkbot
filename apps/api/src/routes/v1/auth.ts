@@ -12,6 +12,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { db, tenants } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
+import { config } from '../../config';
 
 const loginBodySchema = z.object({
   lynkUserId: z.string().min(1),
@@ -35,12 +36,28 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       let tenant = await db.query.tenants.findFirst({
         where: eq(tenants.lynkUserId, lynkUserId),
       });
+
+      // Fields to stamp from env config (phone number links webhook → tenant)
+      const metaPhoneNumberId = config.META_PHONE_NUMBER_ID || null;
+      const displayPhoneNumber = config.META_PHONE_NUMBER_ID
+        ? `+${config.META_PHONE_NUMBER_ID}` : null;
+
       if (!tenant) {
         const [created] = await db.insert(tenants).values({
           lynkUserId,
           storeName: lynkUserId,
+          metaPhoneNumberId,
+          displayPhoneNumber,
         }).returning();
         tenant = created;
+      } else if (!tenant.metaPhoneNumberId && metaPhoneNumberId) {
+        // Existing tenant missing phone number — stamp it now
+        const [updated] = await db
+          .update(tenants)
+          .set({ metaPhoneNumberId, displayPhoneNumber })
+          .where(eq(tenants.id, tenant.id))
+          .returning();
+        tenant = updated;
       }
 
       const token = fastify.jwt.sign(
