@@ -155,9 +155,9 @@ async function scrapeLinkedIn(
           ? Object.values(loc as Record<string, unknown>).filter(Boolean).join(', ')
           : null);
 
-    const firstName = (raw.firstName as string | null | undefined) ?? '';
-    const lastName = (raw.lastName as string | null | undefined) ?? '';
-    const fullNameFromParts = `${firstName} ${lastName}`.trim();
+    const rawFirstName = (raw.firstName as string | null | undefined) ?? '';
+    const rawLastName = (raw.lastName as string | null | undefined) ?? '';
+    const fullNameFromParts = `${rawFirstName} ${rawLastName}`.trim();
 
     const profile: LinkedInProfile = {
       profileUrl: (raw.linkedinUrl as string | null | undefined)
