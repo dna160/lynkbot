@@ -78,7 +78,7 @@ ENV API_URL=http://localhost:3000
 EXPOSE 80
 
 # At startup:
-# 1. Generate /config.js with the runtime API URL so the React app doesn't need a build variable
+# 1. Inject API_URL directly into index.html (inline script, never cached separately)
 # 2. Substitute __PORT__ in nginx config
 # 3. Start nginx
-CMD ["/bin/sh", "-c", "echo \"window.__LYNKBOT_API_URL__ = '${API_URL}';\" > /usr/share/nginx/html/config.js && sed \"s/__PORT__/${PORT}/g\" /tmp/nginx.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "sed -i \"s|__LYNKBOT_API_URL__|${API_URL}|g\" /usr/share/nginx/html/index.html && sed \"s/__PORT__/${PORT}/g\" /tmp/nginx.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
