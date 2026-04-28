@@ -215,7 +215,7 @@ async function scrapeLinkedIn(
         || null
       ),
       headline: (raw.headline as string | null) ?? null,
-      about: (raw.about ?? raw.summary as string | null) ?? null,
+      about: (raw.about as string | null | undefined) ?? (raw.summary as string | null | undefined) ?? null,
       location: locationStr,
       experience: experience.map(e => ({
         title: (e.title ?? e.position ?? 'Unknown role') as string,
@@ -306,8 +306,8 @@ async function scrapeInstagram(
     const profile: InstagramProfile = {
       profileUrl: `https://instagram.com/${username}`,
       username: (raw.username as string | null) ?? username,
-      fullName: (raw.fullName ?? raw.full_name as string | null) ?? null,
-      biography: (raw.biography ?? raw.bio as string | null) ?? null,
+      fullName: (raw.fullName as string | null | undefined) ?? (raw.full_name as string | null | undefined) ?? null,
+      biography: (raw.biography as string | null | undefined) ?? (raw.bio as string | null | undefined) ?? null,
       followersCount: typeof raw.followersCount === 'number' ? raw.followersCount
         : typeof raw.followers === 'number' ? raw.followers as number : null,
       followingCount: typeof raw.followingCount === 'number' ? raw.followingCount
@@ -315,7 +315,7 @@ async function scrapeInstagram(
       postsCount,
       isPrivate: Boolean(raw.private ?? raw.isPrivate ?? raw.is_private),
       isVerified: Boolean(raw.verified ?? raw.isVerified ?? raw.is_verified),
-      externalUrl: (raw.externalUrl ?? raw.external_url ?? raw.website as string | null) ?? null,
+      externalUrl: (raw.externalUrl as string | null | undefined) ?? (raw.external_url as string | null | undefined) ?? (raw.website as string | null | undefined) ?? null,
     };
 
     return { profile, error: null };
