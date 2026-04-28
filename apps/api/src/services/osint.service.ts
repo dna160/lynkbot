@@ -114,9 +114,10 @@ async function scrapeLinkedIn(
   try {
     const { firstName, lastName } = splitName(name);
 
+    // profileScraperMode is required — "Short" returns core profile fields fast
     const items = await apifyRun(
       ACTOR_LINKEDIN,
-      { firstName, lastName, maxItems: 1 },
+      { firstName, lastName, maxItems: 1, profileScraperMode: 'Short' },
       apiKey,
       60,
     ) as Record<string, unknown>[];
@@ -206,33 +207,27 @@ async function scrapeInstagram(
   apiKey: string,
 ): Promise<{ profile: InstagramProfile | null; error: string | null }> {
   try {
-    let items: Record<string, unknown>[];
+    // Instagram public user search is disabled — must use directUrls.
+    // If no username supplied, construct best-guess from name: "Ahmad Rizky" → "ahmad.rizky"
+    const resolvedUsername = instagramUsername
+      ? instagramUsername.replace(/^@/, '')
+      : name.trim().toLowerCase().replace(/[^a-z0-9]/g, '.').replace(/\.{2,}/g, '.').replace(/^\.|\.$/g, '');
 
-    if (instagramUsername) {
-      // Exact username provided — scrape profile directly
-      const canonicalUrl = `https://www.instagram.com/${instagramUsername.replace(/^@/, '')}/`;
-      items = await apifyRun(
-        ACTOR_INSTAGRAM,
-        { directUrls: [canonicalUrl], resultsType: 'details', resultsLimit: 1 },
-        apiKey,
-        60,
-      ) as Record<string, unknown>[];
-    } else {
-      // No username — search Instagram by name
-      items = await apifyRun(
-        ACTOR_INSTAGRAM,
-        { searchTerm: name, searchType: 'user', resultsType: 'details', resultsLimit: 3 },
-        apiKey,
-        60,
-      ) as Record<string, unknown>[];
-    }
+    const canonicalUrl = `https://www.instagram.com/${resolvedUsername}/`;
 
-    if (!items.length) {
-      return { profile: null, error: `Instagram scraper returned no results for "${instagramUsername ?? name}"` };
+    const items = await apifyRun(
+      ACTOR_INSTAGRAM,
+      { directUrls: [canonicalUrl], resultsType: 'details', resultsLimit: 1 },
+      apiKey,
+      60,
+    ) as Record<string, unknown>[];
+
+    if (!items.length || (items[0] as Record<string, unknown>).error) {
+      return { profile: null, error: `Instagram: no profile found for @${resolvedUsername}` };
     }
 
     const raw = items[0] as Record<string, unknown>;
-    const username = (raw.username as string | null | undefined) ?? instagramUsername ?? 'unknown';
+    const username = (raw.username as string | null | undefined) ?? resolvedUsername;
 
     const postsCount: number | null =
       typeof raw.postsCount === 'number' ? raw.postsCount
@@ -253,10 +248,12 @@ async function scrapeInstagram(
       postsCount,
       isPrivate: Boolean(raw.private ?? raw.isPrivate ?? raw.is_private),
       isVerified: Boolean(raw.verified ?? raw.isVerified ?? raw.is_verified),
-      externalUrl: (raw.externalUrl as string | null | undefined)
-        ?? (raw.external_url as string | null | undefined)
-        ?? (raw.website as string | null | undefined)
-        ?? null,
+      // externalUrls is an array of { url, title } objects; grab first url
+      externalUrl: Array.isArray(raw.externalUrls) && (raw.externalUrls as Record<string, unknown>[]).length
+        ? ((raw.externalUrls as Record<string, unknown>[])[0].url as string | null | undefined) ?? null
+        : (raw.externalUrl as string | null | undefined)
+          ?? (raw.external_url as string | null | undefined)
+          ?? null,
     };
 
     return { profile, error: null };
