@@ -126,4 +126,26 @@ export class MetaClient {
       return { ok: false, error: msg };
     }
   }
+
+  /**
+   * Fetch all Meta-approved message templates for a WABA.
+   * Only returns templates with status APPROVED.
+   * wabaId = META_WABA_ID from env.
+   */
+  async listTemplates(wabaId: string): Promise<Array<{
+    name: string;
+    status: string;
+    language: string;
+    category: string;
+    components: Array<{ type: string; text?: string; format?: string; buttons?: unknown[] }>;
+  }>> {
+    const { data } = await this.http.get(`/${wabaId}/message_templates`, {
+      params: { fields: 'name,status,language,category,components', limit: 100 },
+    });
+    const templates = (data.data ?? []) as Array<{
+      name: string; status: string; language: string; category: string;
+      components: Array<{ type: string; text?: string; format?: string; buttons?: unknown[] }>;
+    }>;
+    return templates.filter(t => t.status === 'APPROVED');
+  }
 }

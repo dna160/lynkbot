@@ -321,7 +321,7 @@ export const aiApi = {
     }),
 };
 
-export interface BroadcastTemplate { key: string; name: string; params: string[]; }
+export interface BroadcastTemplate { key: string; name: string; language: string; category?: string; params: string[]; }
 
 export interface Broadcast {
   id: string;
@@ -331,16 +331,19 @@ export interface Broadcast {
   recipientCount: number;
   sentCount: number;
   failedCount: number;
+  errorLog?: string[] | null;
   createdAt: string;
+  completedAt?: string | null;
 }
 
 export const broadcastsApi = {
-  templates: () => api.get<{ templates: BroadcastTemplate[] }>('/broadcasts/templates'),
+  templates: () => api.get<{ templates: BroadcastTemplate[]; warning?: string }>('/broadcasts/templates'),
   list: (params?: { page?: number; limit?: number }) =>
     api.get<{ items: Broadcast[]; page: number; limit: number }>('/broadcasts', { params }),
   create: (data: { templateKey: string; parameters: string[]; audienceFilter?: { tags?: string[] } }) =>
     api.post<{ id: string; recipientCount: number; status: string }>('/broadcasts', data),
   get: (id: string) => api.get<Broadcast>(`/broadcasts/${id}`),
+  metaHealth: () => api.get<{ ok: boolean; phoneNumber?: string; error?: string }>('/broadcasts/meta-health'),
 };
 
 // ── Pantheon Intelligence ────────────────────────────────────────────────────
