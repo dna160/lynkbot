@@ -13,8 +13,7 @@
     "@lynkbot/shared": "workspace:*",
     "@lynkbot/db": "workspace:*",
     "openai": "^4.47.0",
-    "pdf-parse": "^1.1.1",
-    "tiktoken": "^1.0.15"
+    "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
