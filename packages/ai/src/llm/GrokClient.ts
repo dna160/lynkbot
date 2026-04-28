@@ -29,7 +29,7 @@ export class GrokClient implements ILLMClient {
       apiKey,
       baseURL: process.env.XAI_BASE_URL ?? 'https://api.x.ai/v1',
     });
-    this.model = process.env.LLM_MODEL ?? 'grok-3-fast';
+    this.model = process.env.LLM_MODEL ?? 'grok-4-1-fast-reasoning';
     this.fallbackModel = process.env.LLM_FALLBACK_MODEL ?? 'grok-3';
   }
 
@@ -59,14 +59,16 @@ export class GrokClient implements ILLMClient {
       ? [{ role: 'system', content: opts.system }, ...messages]
       : messages;
 
+    // Reasoning models (e.g. grok-4-1-fast-reasoning) do not accept temperature
+    // or response_format — omit them to avoid API rejections
+    const isReasoningModel = model.includes('reasoning');
+
     const res = await this.client.chat.completions.create({
       model,
       messages: fullMessages,
       max_tokens: opts.maxTokens ?? 1024,
-      temperature: opts.temperature ?? 0.7,
-      response_format: opts.responseFormat === 'json_object'
-        ? { type: 'json_object' }
-        : { type: 'text' },
+      ...(!isReasoningModel && { temperature: opts.temperature ?? 0.7 }),
+      ...(!isReasoningModel && opts.responseFormat === 'json_object' && { response_format: { type: 'json_object' as const } }),
     });
     return {
       content: res.choices[0]?.message?.content ?? '',

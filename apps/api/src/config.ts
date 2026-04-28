@@ -19,7 +19,7 @@ const envSchema = z.object({
   LYNK_INTERNAL_API_KEY: z.string().min(10),
   XAI_API_KEY: z.string().min(1),
   XAI_BASE_URL: z.string().url().default('https://api.x.ai/v1'),
-  LLM_MODEL: z.string().default('grok-3-fast'),
+  LLM_MODEL: z.string().default('grok-4-1-fast-reasoning'),
   LLM_PROVIDER: z.string().default('xai'),
   LLM_FALLBACK_MODEL: z.string().default('grok-3'),
   XAI_EMBEDDING_MODEL: z.string().default('v1'),
