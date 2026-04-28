@@ -111,7 +111,7 @@ async function bootstrap(): Promise<void> {
     }
     const statusCode = error.statusCode ?? 500;
     return reply.status(statusCode).send({
-      error: statusCode >= 500 ? 'Internal server error' : error.message,
+      error: error.message ?? 'Internal server error',
       statusCode,
     });
   });
