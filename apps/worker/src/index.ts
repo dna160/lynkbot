@@ -37,7 +37,9 @@ function getRedisConnection() {
 const redisConnection = getRedisConnection();
 
 const workers = [
-  new Worker(QUEUES.INGEST,         ingestProcessor,        { connection: redisConnection, concurrency: 2 }),
+  // lockDuration: 5 min — ingest involves PDF parse + LLM (reasoning model can take 60s+).
+  // Default 30s causes BullMQ to mark jobs stalled and re-queue them, keeping status 'processing' forever.
+  new Worker(QUEUES.INGEST,         ingestProcessor,        { connection: redisConnection, concurrency: 2, lockDuration: 300_000 }),
   new Worker(QUEUES.TRACKING,       trackingProcessor,      { connection: redisConnection, concurrency: 10 }),
   new Worker(QUEUES.PAYMENT_EXPIRY, paymentExpiryProcessor, { connection: redisConnection, concurrency: 5 }),
   new Worker(QUEUES.STOCK_RELEASE,  stockReleaseProcessor,  { connection: redisConnection, concurrency: 5 }),

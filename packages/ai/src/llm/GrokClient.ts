@@ -28,6 +28,8 @@ export class GrokClient implements ILLMClient {
     this.client = makeOpenAI({
       apiKey,
       baseURL: process.env.XAI_BASE_URL ?? 'https://api.x.ai/v1',
+      timeout: 120_000, // 2 min — reasoning models can be slow; fail cleanly rather than hanging forever
+      maxRetries: 0,    // BullMQ handles retries; don't double-retry inside the SDK
     });
     this.model = process.env.LLM_MODEL ?? 'grok-4-1-fast-reasoning';
     this.fallbackModel = process.env.LLM_FALLBACK_MODEL ?? 'grok-3';
