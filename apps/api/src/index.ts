@@ -69,8 +69,9 @@ async function bootstrap(): Promise<void> {
     { parseAs: 'buffer' },
     (req, body, done) => {
       try {
-        (req as unknown as { rawBody: Buffer }).rawBody = body;
-        done(null, JSON.parse(body.toString('utf8')));
+        const buf = Buffer.isBuffer(body) ? body : Buffer.from(body as string);
+        (req as unknown as { rawBody: Buffer }).rawBody = buf;
+        done(null, JSON.parse(buf.toString('utf8')));
       } catch (err) {
         done(err as Error, undefined);
       }
