@@ -62,6 +62,21 @@ async function bootstrap(): Promise<void> {
   // --- Run DB migrations before accepting traffic ---
   await runMigrations();
 
+  // --- Capture raw body for HMAC signature verification (Meta, Midtrans, Xendit webhooks) ---
+  // Must be registered before any content-type parser or plugin that reads the body.
+  server.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req, body, done) => {
+      try {
+        (req as unknown as { rawBody: Buffer }).rawBody = body;
+        done(null, JSON.parse(body.toString('utf8')));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
   // --- Core plugins ---
   await server.register(corsPlugin);
   await server.register(rateLimitPlugin);
