@@ -218,9 +218,6 @@ function IntelligenceDrawer({ buyer, onClose }: { buyer: Buyer; onClose: () => v
       if (input && input.trim().length >= 2) opts.nameOverride = input.trim();
     }
 
-    const li = window.prompt('LinkedIn profile URL (optional — leave blank to auto-guess from name):');
-    if (li && li.trim()) opts.linkedinUrl = li.trim();
-
     const ig = window.prompt('Instagram username (optional — leave blank to search by name):');
     if (ig && ig.trim()) opts.instagramUsername = ig.trim().replace(/^@/, '');
 

@@ -2,18 +2,18 @@
  * @CLAUDE_CONTEXT
  * Package : apps/api
  * File    : src/services/osint.service.ts
- * Role    : External OSINT via Apify — scrapes LinkedIn and Instagram profiles directly.
+ * Role    : External OSINT via Apify — searches LinkedIn and scrapes Instagram by name.
  *           No Google Search intermediary.
  *
  * Data flow:
- *   1. LinkedIn Profile Scraper (harvestapi~linkedin-profile-scraper)
- *      → Input: { url: "https://linkedin.com/in/firstname-lastname" }
- *        URL is operator-supplied OR auto-constructed from buyer name.
- *      → Output: headline, about, experience, education, skills, location
+ *   1. LinkedIn Name Search (harvestapi~linkedin-profile-search-by-name)
+ *      → Input: { firstName, lastName, maxItems: 1 }
+ *      → Output: linkedinUrl, headline, about, experience, education, skills, location,
+ *                connectionsCount, followerCount
  *
  *   2. Instagram Profile Scraper (apify~instagram-scraper)
  *      → Input: { searchTerm: name, searchType: "user", resultsType: "details", resultsLimit: 3 }
- *        Operator can also supply an exact username to skip the search step.
+ *        OR { directUrls: [...], resultsType: "details" } when exact username is provided.
  *      → Output: biography, follower/following counts, post count, isPrivate, verified
  *
  * All calls are fully optional — failures return null and are noted in the result.
@@ -25,7 +25,7 @@
 
 const APIFY_BASE = 'https://api.apify.com/v2';
 // Apify REST API uses tilde (~) as owner/name separator.
-const ACTOR_LINKEDIN = 'harvestapi~linkedin-profile-scraper';
+const ACTOR_LINKEDIN = 'harvestapi~linkedin-profile-search-by-name';
 const ACTOR_INSTAGRAM = 'apify~instagram-scraper';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -100,31 +100,29 @@ async function apifyRun(
 
 // ─── LinkedIn ─────────────────────────────────────────────────────────────────
 
-/**
- * Construct a best-guess LinkedIn profile URL from a full name.
- * e.g. "Ahmad Rizky Pratama" → "https://www.linkedin.com/in/ahmad-rizky-pratama"
- */
-function nameToLinkedInUrl(name: string): string {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-');
-  return `https://www.linkedin.com/in/${slug}`;
+/** Split "Ahmad Rizky Pratama" → { firstName: "Ahmad", lastName: "Rizky Pratama" } */
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
 }
 
 async function scrapeLinkedIn(
   name: string,
-  linkedinUrl: string | null,
   apiKey: string,
-): Promise<{ profile: LinkedInProfile | null; error: string | null; urlUsed: string }> {
-  const urlUsed = linkedinUrl ?? nameToLinkedInUrl(name);
+): Promise<{ profile: LinkedInProfile | null; error: string | null }> {
   try {
+    const { firstName, lastName } = splitName(name);
+
     const items = await apifyRun(
       ACTOR_LINKEDIN,
-      { url: urlUsed },
+      { firstName, lastName, maxItems: 1 },
       apiKey,
       60,
     ) as Record<string, unknown>[];
 
     if (!items.length) {
-      return { profile: null, error: `LinkedIn scraper returned no data for ${urlUsed}`, urlUsed };
+      return { profile: null, error: `LinkedIn search returned no results for "${name}"` };
     }
 
     const raw = items[0] as Record<string, unknown>;
@@ -165,7 +163,7 @@ async function scrapeLinkedIn(
       profileUrl: (raw.linkedinUrl as string | null | undefined)
         ?? (raw.url as string | null | undefined)
         ?? (raw.profileUrl as string | null | undefined)
-        ?? urlUsed,
+        ?? `https://www.linkedin.com/in/${(raw.publicIdentifier as string | null | undefined) ?? 'unknown'}`,
       name: fullNameFromParts || (raw.fullName as string | null | undefined) || null,
       headline: (raw.headline as string | null | undefined) ?? null,
       about: (raw.about as string | null | undefined) ?? (raw.summary as string | null | undefined) ?? null,
@@ -191,12 +189,11 @@ async function scrapeLinkedIn(
         : null,
     };
 
-    return { profile, error: null, urlUsed };
+    return { profile, error: null };
   } catch (err) {
     return {
       profile: null,
       error: err instanceof Error ? err.message : String(err),
-      urlUsed,
     };
   }
 }
@@ -277,14 +274,13 @@ async function scrapeInstagram(
  * Run external OSINT for a buyer by name.
  * @param name               Full name to search
  * @param apiKey             Apify API key — if empty, returns { searched: false }
- * @param linkedinUrl        Optional: exact LinkedIn profile URL (skips URL construction)
  * @param instagramUsername  Optional: exact Instagram username (skips name search)
  */
 export async function runExternalOsint(
   name: string | null,
   _region: string,
   apiKey: string,
-  linkedinUrl?: string | null,
+  _linkedinUrl?: string | null,
   instagramUsername?: string | null,
 ): Promise<ExternalOsintResult> {
   if (!apiKey || !name || name.trim().length < 2) {
@@ -301,7 +297,7 @@ export async function runExternalOsint(
   const cleanName = name.trim();
 
   const [linkedinResult, instagramResult] = await Promise.all([
-    scrapeLinkedIn(cleanName, linkedinUrl ?? null, apiKey),
+    scrapeLinkedIn(cleanName, apiKey),
     scrapeInstagram(cleanName, instagramUsername ?? null, apiKey),
   ]);
 
