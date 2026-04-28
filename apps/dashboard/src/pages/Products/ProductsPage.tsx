@@ -8,6 +8,7 @@ import { useToast } from '../../components/ToastProvider';
 interface Product {
   id: string; name: string; sku?: string; priceIdr: number; weightGrams: number;
   isActive: boolean; knowledgeStatus: 'pending' | 'processing' | 'ready' | 'failed';
+  knowledgeError?: string;
   description?: string; coverImageUrl?: string; createdAt: string;
 }
 interface InventoryItem {
@@ -82,9 +83,12 @@ function KnowledgeUploadModal({ product, onClose, onDone }: {
             product.knowledgeStatus === 'processing' ? 'bg-yellow-400 animate-pulse' :
             product.knowledgeStatus === 'failed' ? 'bg-red-400' : 'bg-slate-500'
           }`} />
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-xs text-slate-400">Current AI knowledge status</p>
             <p className="text-sm text-white font-medium capitalize">{product.knowledgeStatus}</p>
+            {product.knowledgeStatus === 'failed' && product.knowledgeError && (
+              <p className="text-xs text-red-400 mt-1 font-mono break-all whitespace-pre-wrap">{product.knowledgeError}</p>
+            )}
           </div>
           {alreadyHasKnowledge && (
             <span className="ml-auto text-xs text-slate-500 italic">Uploading a new file will replace existing knowledge</span>
@@ -421,7 +425,19 @@ export function ProductsPage() {
                     <td className="px-4 py-3 text-center">
                       <button onClick={() => toggleActive.mutate(p)} className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${p.isActive ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-slate-600/20 text-slate-400 hover:bg-slate-600/30'}`}>{p.isActive ? 'Active' : 'Inactive'}</button>
                     </td>
-                    <td className="px-4 py-3 text-center"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${ks.color}`}>{ks.label}</span></td>
+                    <td className="px-4 py-3 text-center">
+                      {p.knowledgeStatus === 'failed' && p.knowledgeError ? (
+                        <button
+                          title={p.knowledgeError}
+                          onClick={() => alert(`Ingest failed for "${p.name}":\n\n${p.knowledgeError}`)}
+                          className={`text-xs px-2.5 py-1 rounded-full font-medium ${ks.color} underline decoration-dotted cursor-pointer`}
+                        >
+                          {ks.label} ⓘ
+                        </button>
+                      ) : (
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${ks.color}`}>{ks.label}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => setUploadProduct(p)}

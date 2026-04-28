@@ -98,10 +98,16 @@ export const ingestProcessor: Processor = async (job) => {
 
     job.log(`Ingest complete for product=${productId}`);
   } catch (err) {
-    // Mark as failed so the Lynker dashboard can surface the error and allow retry
+    // Store the full error message so the dashboard can surface exactly what went wrong
+    const errorMessage = err instanceof Error
+      ? `${err.name}: ${err.message}${err.stack ? '\n' + err.stack.split('\n').slice(1, 4).join('\n') : ''}`
+      : String(err);
+
+    job.log(`Ingest FAILED for product=${productId}: ${errorMessage}`);
+
     await db
       .update(products)
-      .set({ knowledgeStatus: 'failed' })
+      .set({ knowledgeStatus: 'failed', knowledgeError: errorMessage, updatedAt: new Date() })
       .where(eq(products.id, productId));
 
     throw err; // Re-throw so BullMQ marks the job as failed and applies retry policy

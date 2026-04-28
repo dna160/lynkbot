@@ -47,6 +47,7 @@ export const products = pgTable('products', {
   coverImageUrl: text('cover_image_url'),
   pdfS3Key: text('pdf_s3_key'),
   knowledgeStatus: knowledgeStatusEnum('knowledge_status').default('pending'),
+  knowledgeError: text('knowledge_error'),
   bookPersonaPrompt: text('book_persona_prompt'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
