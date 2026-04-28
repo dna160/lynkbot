@@ -307,13 +307,13 @@ export const intelligenceRoutes: FastifyPluginAsync = async (fastify) => {
    *
    * Post-LLM: adjustments become real genome mutations. OSINT run logged as sentinel entry.
    */
-  fastify.post<{ Params: { id: string }; Body: { nameOverride?: string; linkedinUrl?: string; instagramUsername?: string } }>(
+  fastify.post<{ Params: { id: string }; Body: { nameOverride?: string } }>(
     '/v1/buyers/:id/osint',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
-      const { nameOverride, linkedinUrl, instagramUsername } = request.body ?? {};
+      const { nameOverride } = request.body ?? {};
 
       const buyer = await db.query.buyers.findFirst({
         where: and(eq(buyers.id, id), eq(buyers.tenantId, tenantId)),
@@ -447,15 +447,136 @@ C — Human Uniqueness: identityFusion=${scores.identityFusion} chronesthesiaCap
         searchName,
         inferredRegion,
         config.APIFY_API_KEY,
-        linkedinUrl ?? null,
-        instagramUsername ?? null,
+        config.SERPER_API_KEY,
+        config.XAI_API_KEY,
+        config.XAI_BASE_URL,
       );
 
       // ── LLM call ──────────────────────────────────────────────────────────
       const systemPrompt = `You are a master human intelligence analyst at the Pantheon "human whisperer" standard.
-You receive structured data from four in-system sources and produce a JSON intelligence package.
+You receive structured data from five sources — in-system signals AND external profile scrapes — and produce a comprehensive JSON intelligence package.
 Be concrete and specific to THIS person. No generic tropes. No hedging. No markdown outside string values.
-Output ONLY valid JSON — no fences, no commentary.`;
+Output ONLY valid JSON — no fences, no commentary.
+
+═══ GENOME INFERENCE GUIDE ═══
+All 18 genome parameters are scored 1–100. 50 = population baseline. Apply these mappings when external OSINT data is present:
+
+CLUSTER A — OCEAN:
+• openness (1=rigid/conventional, 100=highly creative/curious)
+  LinkedIn: Creative industry role or multidisciplinary career → +15 to +25
+  Instagram: Diverse content themes, travel, art, experimentation → +10 to +20
+  Posts: Thought leadership on diverse topics, philosophical/intellectual content → +10
+
+• conscientiousness (1=spontaneous/disorganised, 100=highly disciplined)
+  LinkedIn: Long tenures (3+ yrs each role), consistent career progression → +15
+  LinkedIn: Founder/CEO who scaled a company → +20
+  Instagram: Consistent posting schedule (daily/weekly for 6+ months) → +10
+  Absence of job-hopping (all roles 2+ yrs) → +15
+
+• extraversion (1=introverted/reserved, 100=highly social)
+  LinkedIn: 500+ connections → +20; 1000+ → +25
+  LinkedIn: Frequent posts with high engagement → +15
+  Instagram: 10K+ followers → +20; 100K+ → +30
+  Instagram: Posting frequency daily/weekly → +15
+  Private Instagram account → -20
+
+• agreeableness (1=competitive/challenging, 100=cooperative/warm)
+  Instagram: Family, community, collaboration content → +15
+  LinkedIn: Volunteer work, mentoring, nonprofit → +10
+  Posts: Confrontational/debate-seeking content → -15
+  Posts: Supportive/appreciative language → +10
+
+• neuroticism (1=emotionally stable, 100=anxious/reactive)
+  Private Instagram (hidden from public) → +15
+  Erratic posting frequency (bursts then silence) → +10
+  Posts: Emotional venting, anxiety/stress content → +20
+  LinkedIn: Frequent job changes (<1 yr each) → +10
+
+CLUSTER B — BEHAVIORAL:
+• communicationStyle (1=very informal/emoji-heavy, 100=very formal/corporate)
+  LinkedIn: C-suite title, corporate career → +20
+  LinkedIn: Posts in formal grammatically correct language → +15
+  Instagram: Casual captions, heavy emoji → -20
+  Instagram: Professional/brand account style → +15
+
+• decisionMaking (1=impulsive/emotional, 100=analytical/methodical)
+  LinkedIn: Engineering, finance, data, legal roles → +20
+  LinkedIn: Long career stability, methodical progression → +15
+  Instagram: Impulse purchases/lifestyle splurge content → -15
+  Posts: Evidence-based, data-citing content → +20
+
+• brandRelationship (1=price-driven/no loyalty, 100=premium brand loyalist)
+  Instagram: Luxury brand tags, aspirational lifestyle → +20 to +30
+  Instagram: Discount/promo content, budget lifestyle → -20
+  Image analysis: Luxury setting, premium brands visible → +20
+  Image analysis: Budget/mass-market setting → -10
+
+• influenceSusceptibility (1=fully independent, 100=highly social-proof driven)
+  Instagram: Heavy engagement with influencer content, many follows vs followers → +15
+  Instagram: Posts referencing trends, viral content → +15
+  LinkedIn: Follows thought leaders, engaged with trending topics → +10
+  High follower count (they ARE the influencer) → -15
+
+• emotionalExpression (1=stoic/unexpressive, 100=openly emotional)
+  Instagram: Personal stories, vulnerable captions → +20
+  Instagram: Celebration, life milestones shared publicly → +15
+  LinkedIn: Clinical career-only posts, no personal content → -15
+  Image analysis: Emotional tone "joyful" or "vulnerable" → +15
+
+• conflictBehavior (1=avoidant/passive, 100=confrontational/assertive)
+  LinkedIn: Debate-style posts, challenging industry norms → +20
+  LinkedIn: Founder disrupting an industry → +15
+  Instagram: No controversial content, peaceful aesthetic → -10
+  Posts: Direct criticism of competitors/status quo → +20
+
+• literacyArticulation (1=basic/simple communication, 100=highly articulate/eloquent)
+  LinkedIn: Published articles, long-form posts → +20
+  LinkedIn: Advanced degree (PhD, Master's) → +15
+  Instagram: Captions with rich vocabulary, nuanced ideas → +15
+  LinkedIn: One-liner posts, minimal engagement depth → -10
+
+• socioeconomicFriction (1=premium buyer/no price concern, 100=extreme price sensitivity)
+  Instagram: Luxury lifestyle, premium brands visible → -25
+  Instagram: Budget brands, discount content → +20
+  Image analysis: Luxury setting → -20; budget setting → +15
+  LinkedIn: Senior executive compensation signals → -15
+  Indonesian cultural prior baseline: +12 (already baked in)
+
+CLUSTER C — HUMAN UNIQUENESS:
+• identityFusion (1=flexible/context-adapting, 100=identity fused to brand/role/cause)
+  LinkedIn: "I AM a founder" language, identity-first bio → +25
+  Instagram: Personal brand built around a lifestyle/cause/role → +20
+  Consistent aesthetic and theme across ALL posts → +15
+  Career of 10+ years in same field → +15
+
+• chronesthesiaCapacity (1=purely present-focused, 100=strong future orientation)
+  LinkedIn: Vision-driven posts, long-term goals stated → +20
+  LinkedIn: Active investor, mentor for next generation → +15
+  Instagram: Goal-setting, aspirational future-state content → +15
+  Posts: Reflective, narrative of personal growth → +10
+
+• tomSelfAwareness (1=low self-awareness, 100=deep self-reflection)
+  LinkedIn: Candid lessons-learned posts, admits failures → +20
+  Instagram: Vulnerable personal growth content → +15
+  Posts: Meta-commentary on own behavior/thinking → +20
+  No reflective content anywhere → -10
+
+• tomSocialModeling (1=struggles to read others, 100=expert social modeler)
+  LinkedIn: 500+ connections + active networking → +15
+  LinkedIn: Sales, consulting, coaching, leadership roles → +20
+  Instagram: High engagement rate (likes/followers ratio >3%) → +15
+  Content that demonstrates reading others' needs → +15
+
+• executiveFlexibility (1=rigid/single-approach, 100=highly adaptive/multi-modal)
+  LinkedIn: Career spanning multiple industries → +20
+  LinkedIn: Pivoted roles successfully (e.g., engineer → CEO) → +20
+  Instagram: Content style varies (education, entertainment, personal) → +10
+  Evidence of handling complex, ambiguous situations → +15
+
+═══ CITATION REQUIREMENT ═══
+Every genomeAdjustments entry MUST include a "sources" array. Each source cites the EXACT data point:
+Example: "sources": ["LinkedIn: headline 'Founder & CEO at TechCorp'", "Instagram: 14.2K followers", "Post image 3: luxury restaurant setting, Hermès bag visible"]
+Sources must be specific — no vague citations like "LinkedIn profile" without detail.`;
 
       const userPrompt = `OSINT RESEARCH — BUYER INTELLIGENCE PACKAGE
 
@@ -471,51 +592,61 @@ ${convTranscript}
 === SOURCE 3: COMMERCIAL HISTORY ===
 ${commerceFacts}
 
-=== SOURCE 4: GENOME (scores 1–100) ===
+=== SOURCE 4: GENOME (scores 1–100, current state before OSINT) ===
 ${genomeFacts}
 
-=== SOURCE 5: EXTERNAL PROFILE RESEARCH (LinkedIn + Instagram via Apify) ===
+=== SOURCE 5: EXTERNAL PROFILE RESEARCH (LinkedIn + Instagram via Serper + Apify + xAI Vision) ===
 ${formatExternalOsintForPrompt(externalOsint)}
 
 ---
 
-Return this exact JSON structure:
+Return this exact JSON structure (no fences, no commentary — pure JSON):
 
 {
   "informationInventory": {
     "knownFacts": ["bullet: every confirmed data point from all five sources — include LinkedIn headline/role/company and Instagram bio/follower count if found in Source 5"],
-    "inferences": ["bullet: what can be reasonably inferred from the signals"],
+    "inferences": ["bullet: what can be reasonably inferred from the combined signals"],
     "gaps": ["bullet: what we do NOT know — honest blind spots that would sharpen the profile if known"],
     "dataQuality": "LOW | MEDIUM | HIGH — one sentence explaining the rating"
   },
+  "osintReport": {
+    "linkedinPersona": "2-3 sentences synthesising career arc, professional identity, and what the LinkedIn data reveals about this person's self-concept and professional values. Cite specific roles, tenures, and post themes.",
+    "instagramPersona": "2-3 sentences synthesising lifestyle, values, and social identity from Instagram posts, follower count, posting frequency, and image analysis signals. Cite specific posts or images.",
+    "synthesizedExternalPersona": "3-4 sentences merging LinkedIn + Instagram into a unified external-facing identity portrait. Where do the two platforms agree? Where do they reveal different facets? What does this person want the world to think about them?",
+    "keyExternalSignals": ["bullet: the single most significant genome-relevant signal from each source — e.g. 'LinkedIn: CEO for 7 years → identityFusion HIGH', 'Instagram post 2: Rolex visible in gym photo → brandRelationship HIGH, socioeconomicFriction LOW'"]
+  },
   "intelligenceBrief": {
-    "section1_archetype": "Named archetype + 2-3 sentences mapping to genome scores",
-    "section2_identity": "What they believe about themselves. Roles, values, self-concept. What buying/not-buying signals about identity.",
-    "section3_buyingPsychology": "Decision process. Primary YES triggers. Primary STOP triggers. Winning argument structure.",
-    "section4_communicationBlueprint": "Exact tone, pace, vocabulary, message length, formality. What to NEVER do.",
-    "section5_trustArchitecture": "What builds trust. What destroys it. Proof elements. Trust timeline.",
-    "section6_resistanceMap": "Top 3-5 objections ranked by probability. Genome-tailored reframe for each.",
-    "section7_engagementPlaybook": "Concrete 3-step operator opening. First message. Target emotional state at offer moment."
+    "section1_archetype": "Named archetype + 2-3 sentences mapping to genome scores and external profile signals",
+    "section2_identity": "What they believe about themselves. Roles, values, self-concept. What the external profiles add to the WA conversation picture.",
+    "section3_buyingPsychology": "Decision process. Primary YES triggers. Primary STOP triggers. Winning argument structure — calibrated to BOTH conversation signals AND external profile data.",
+    "section4_communicationBlueprint": "Exact tone, pace, vocabulary, message length, formality. What to NEVER do. How does the external profile refine this?",
+    "section5_trustArchitecture": "What builds trust. What destroys it. Proof elements that resonate with THIS person's identity (use external profile signals). Trust timeline.",
+    "section6_resistanceMap": "Top 3-5 objections ranked by probability. Genome-tailored reframe for each — reference external data where relevant.",
+    "section7_engagementPlaybook": "Concrete 3-step operator opening. First message. Target emotional state at offer moment. Reference specific angles from external profile."
   },
   "genomeAdjustments": [
     {
       "trait": "camelCase trait name (one of the 18 genome params)",
       "currentScore": 50,
       "suggestedScore": 68,
-      "rationale": "One sentence — specific evidence from the sources that justifies this shift"
+      "rationale": "One sentence — specific evidence from the sources that justifies this shift",
+      "sources": ["exact citation 1 e.g. 'LinkedIn: headline Founder & CEO'", "exact citation 2 e.g. 'Instagram: 14.2K followers'"]
     }
   ]
 }
 
 Rules for genomeAdjustments:
-- Only include traits where evidence clearly supports ≥5 point change
-- Do not adjust traits without specific evidence — omit them entirely
-- suggestedScore must be 1–100`;
+- Only include traits where external OSINT evidence (Source 5) clearly supports ≥5 point change
+- Do not adjust traits using only conversation data — that is handled by the refresh endpoint
+- suggestedScore must be 1–100
+- "sources" array must have ≥1 citation per adjustment — never empty
+- Use the Genome Inference Guide in the system prompt to calibrate adjustment magnitude`;
 
       type LLMResult = {
         informationInventory: { knownFacts: string[]; inferences: string[]; gaps: string[]; dataQuality: string };
+        osintReport: { linkedinPersona: string; instagramPersona: string; synthesizedExternalPersona: string; keyExternalSignals: string[] };
         intelligenceBrief: Record<string, string>;
-        genomeAdjustments: Array<{ trait: string; currentScore: number; suggestedScore: number; rationale: string }>;
+        genomeAdjustments: Array<{ trait: string; currentScore: number; suggestedScore: number; rationale: string; sources: string[] }>;
       };
 
       let llmResult: LLMResult;
@@ -523,7 +654,7 @@ Rules for genomeAdjustments:
         const llm = getLLMClient();
         const res = await llm.chat(
           [{ role: 'user', content: userPrompt }],
-          { system: systemPrompt, maxTokens: 3000, responseFormat: 'json_object' }
+          { system: systemPrompt, maxTokens: 5000, responseFormat: 'json_object' }
         );
         llmResult = JSON.parse(res.content) as LLMResult;
       } catch (err) {
@@ -552,6 +683,7 @@ Rules for genomeAdjustments:
 
       // ── Format osint_summary from structured output ───────────────────────
       const inv = llmResult.informationInventory ?? {} as LLMResult['informationInventory'];
+      const report = llmResult.osintReport ?? {} as LLMResult['osintReport'];
       const brief = llmResult.intelligenceBrief ?? {};
       const osintSummary = [
         `## Information Inventory`,
@@ -559,7 +691,15 @@ Rules for genomeAdjustments:
         (inv.knownFacts ?? []).length ? `\n**Known facts:**\n${(inv.knownFacts as string[]).map(f => `• ${f}`).join('\n')}` : '',
         (inv.inferences ?? []).length ? `\n**Inferences:**\n${(inv.inferences as string[]).map(f => `• ${f}`).join('\n')}` : '',
         (inv.gaps ?? []).length ? `\n**Blind spots:**\n${(inv.gaps as string[]).map(f => `• ${f}`).join('\n')}` : '',
-        adjustments.length ? `\n**Genome adjustments from OSINT:** ${adjustments.map(a => `${a.trait} ${a.currentScore}→${a.suggestedScore}`).join(' | ')}` : '',
+        adjustments.length
+          ? `\n**Genome adjustments from OSINT (${adjustments.length} traits):**\n${adjustments.map(a => `• ${a.trait} ${a.currentScore}→${a.suggestedScore} | ${a.rationale}${(a.sources ?? []).length ? ` [Sources: ${a.sources.join('; ')}]` : ''}`).join('\n')}`
+          : '',
+        report.linkedinPersona ? `\n## External Profile Report\n**LinkedIn:** ${report.linkedinPersona}` : '',
+        report.instagramPersona ? `\n**Instagram:** ${report.instagramPersona}` : '',
+        report.synthesizedExternalPersona ? `\n**Synthesized:** ${report.synthesizedExternalPersona}` : '',
+        (report.keyExternalSignals ?? []).length
+          ? `\n**Key external signals:**\n${(report.keyExternalSignals as string[]).map(s => `• ${s}`).join('\n')}`
+          : '',
         `\n## 1. Psychological Archetype\n${brief.section1_archetype ?? ''}`,
         `\n## 2. Identity Signals & Self-Concept\n${brief.section2_identity ?? ''}`,
         `\n## 3. Buying Psychology & Decision Triggers\n${brief.section3_buyingPsychology ?? ''}`,
@@ -595,7 +735,7 @@ Rules for genomeAdjustments:
         await db.insert(genomeMutations).values({
           buyerId: id, tenantId,
           traitName: key, oldScore, newScore, delta: newScore - oldScore,
-          evidenceSummary: `[OSINT] ${adj.rationale}`,
+          evidenceSummary: `[OSINT] ${adj.rationale}${(adj.sources ?? []).length ? ` | Sources: ${adj.sources.join('; ')}` : ''}`,
           confidence: genome.confidence,
           conversationId: allConvs[0]?.id ?? null,
           createdAt: now,
@@ -611,7 +751,7 @@ Rules for genomeAdjustments:
           `${buyerOrders.length} orders (IDR ${confirmedSpend.toLocaleString('id-ID')} confirmed)`,
           externalOsint.searched
             ? `LinkedIn: ${externalOsint.linkedin ? externalOsint.linkedin.profileUrl : 'not found'} | Instagram: ${externalOsint.instagram ? externalOsint.instagram.profileUrl : 'not found'}`
-            : `External OSINT: skipped (${externalOsint.linkedinSearchError ?? 'no API key'})`,
+            : `External OSINT: skipped (${externalOsint.linkedinError ?? 'no API key'})`,
           `${adjustments.length} genome traits adjusted`,
           `Data quality: ${inv.dataQuality ?? 'unknown'}`,
         ].join(' · '),
@@ -640,6 +780,7 @@ Rules for genomeAdjustments:
         osintSummary, hasPersisted: true,
         externalOsintSearched: externalOsint.searched,
         externalOsintName: externalOsint.nameSearched,
+        externalOsintReport: llmResult.osintReport ?? null,
       });
     },
   );

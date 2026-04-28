@@ -56,6 +56,9 @@ const envSchema = z.object({
   // ── Apify (external OSINT — LinkedIn + Instagram scraping) ──────────────────
   // Optional. If not set, external profile scraping is skipped gracefully.
   APIFY_API_KEY: z.string().default(''),
+  // ── Serper (Google Search API — finds LinkedIn/Instagram profile URLs by name) ─
+  // Optional. If not set, URL discovery step is skipped.
+  SERPER_API_KEY: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);
