@@ -15,6 +15,7 @@ import { trackingProcessor } from './processors/tracking.processor';
 import { paymentExpiryProcessor } from './processors/paymentExpiry.processor';
 import { stockReleaseProcessor } from './processors/stockRelease.processor';
 import { restockProcessor } from './processors/restock.processor';
+import { flowExecutionProcessor } from './processors/flowExecution.processor';
 
 // Parse REDIS_URL if provided (preferred over individual vars)
 function getRedisConnection() {
@@ -43,8 +44,8 @@ const workers = [
   new Worker(QUEUES.PAYMENT_EXPIRY, paymentExpiryProcessor, { connection: redisConnection, concurrency: 5 }),
   new Worker(QUEUES.STOCK_RELEASE,  stockReleaseProcessor,  { connection: redisConnection, concurrency: 5 }),
   new Worker(QUEUES.RESTOCK_NOTIFY, restockProcessor,       { connection: redisConnection, concurrency: 5 }),
-  // Flow Engine processors are registered in Phases 2–4 of the build plan.
-  // FLOW_EXECUTION, TEMPLATE_SYNC, RISK_SCORE queue constants are ready in @lynkbot/shared.
+  // Flow Engine — Phase 2
+  new Worker(QUEUES.FLOW_EXECUTION, flowExecutionProcessor,  { connection: redisConnection, concurrency: 20, lockDuration: 60_000 }),
 ];
 
 workers.forEach((w) => {
