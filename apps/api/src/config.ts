@@ -59,6 +59,18 @@ const envSchema = z.object({
   // ── Serper (Google Search API — finds LinkedIn/Instagram profile URLs by name) ─
   // Optional. If not set, URL discovery step is skipped.
   SERPER_API_KEY: z.string().default(''),
+  // ── Flow Engine v2.1 — AES-256-GCM key for tenant Meta access tokens ────────
+  // Required. Must be 64 hex chars (= 32 bytes).
+  WABA_POOL_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'WABA_POOL_ENCRYPTION_KEY must be 64 hex chars (32 bytes)'),
+  // ── Flow Engine v2.1 — feature flags (default ON) ───────────────────────────
+  // Tier-based feature gating is stubbed in middleware/featureGate.ts; flip to
+  // 'false' to hard-disable a surface area while business rules are finalized.
+  FEATURE_FLOW_BUILDER: z.string().default('true'),
+  FEATURE_TEMPLATE_STUDIO: z.string().default('true'),
+  FEATURE_FLOW_REENGAGEMENT: z.string().default('true'),
+  FEATURE_AI_FLOW_GENERATOR: z.string().default('true'),
 });
 
 const parsed = envSchema.safeParse(process.env);
