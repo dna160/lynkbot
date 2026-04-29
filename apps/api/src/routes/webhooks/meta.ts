@@ -20,8 +20,23 @@ import { verifyMetaSignature } from '../../middleware/metaSignature';
 import { extractFirstMessage, isStatusUpdate } from '@lynkbot/meta';
 import { ConversationService } from '../../services/conversation.service';
 import { config } from '../../config';
+import { db, buyers, flowExecutions, eq, and } from '@lynkbot/db';
+import { FlowEngine } from '@lynkbot/flow-engine';
+import { getTenantMetaClient } from '../../services/_meta.helper';
+import { getRedisConnection } from '../../config';
+import Redis from 'ioredis';
 
 const conversationService = new ConversationService();
+
+// ── Flow Engine singleton ────────────────────────────────────────────────────
+// Instantiated once per API process; matches ConversationService pattern.
+const redisConn = getRedisConnection();
+const redisClientForFlowEngine = new Redis(redisConn);
+const flowEngine = new FlowEngine({
+  getMetaClient: getTenantMetaClient,
+  redisClient: redisClientForFlowEngine,
+  redisConnection: redisConn,
+});
 
 export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
 
@@ -102,6 +117,64 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
           return;
         }
 
+        // ── Flow Engine: button trigger routing ────────────────────────────
+        // Extract button payload from raw interactive message
+        const interactiveButtonId =
+          payload.messageType === 'interactive'
+            ? (payload.raw?.interactive?.button_reply?.id ?? payload.raw?.interactive?.list_reply?.id)
+            : payload.messageType === 'button'
+            ? payload.raw?.button?.payload
+            : undefined;
+
+        if (typeof interactiveButtonId === 'string' && interactiveButtonId.startsWith('flow:')) {
+          // Resolve buyer id from waId + tenantId
+          const triggerBuyer = await db.query.buyers.findFirst({
+            where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
+            columns: { id: true },
+          });
+
+          if (triggerBuyer) {
+            flowEngine
+              .handleButtonTrigger(tenantId, triggerBuyer.id, interactiveButtonId)
+              .catch((err: unknown) =>
+                request.log.error({ err }, 'Flow button trigger failed'),
+              );
+          }
+          // Return — do NOT also route through ConversationService for button triggers
+          return;
+        }
+
+        // ── Flow Engine: resume WAIT_FOR_REPLY ─────────────────────────────
+        const resumeBuyer = await db.query.buyers.findFirst({
+          where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
+          columns: { id: true },
+        });
+
+        if (resumeBuyer) {
+          const activeExecution = await db.query.flowExecutions.findFirst({
+            where: and(
+              eq(flowExecutions.tenantId, tenantId),
+              eq(flowExecutions.buyerId, resumeBuyer.id),
+              // Note: flowExecutionStatusEnum may not include 'waiting_reply' in current schema
+              // Using a cast here; Phase 1 migration adds this status
+              eq(flowExecutions.status, 'waiting_reply' as 'running'),
+            ),
+            columns: { id: true },
+          });
+
+          if (activeExecution) {
+            const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
+            flowEngine
+              .resumeExecution(activeExecution.id, inboundText)
+              .catch((err: unknown) =>
+                request.log.error({ err }, 'Flow resume failed'),
+              );
+            // Return — do NOT also route through ConversationService
+            return;
+          }
+        }
+
+        // ── Fall through to ConversationService for non-flow messages ──────
         conversationService.handleInbound(tenantId, payload).catch(err => {
           request.log.error({ err, tenantId, waId: payload.waId }, 'Error processing Meta inbound message');
         });
