@@ -21,3 +21,10 @@ export * from './auditLogs';
 export * from './opsTickets';
 export * from './broadcasts';
 export * from './buyerGenomes';
+// Flow Engine v2.1
+export * from './wabaPool';
+export * from './flowDefinitions';
+export * from './flowExecutions';
+export * from './flowTemplates';
+export * from './buyerBroadcastLog';
+export * from './tenantRiskScores';

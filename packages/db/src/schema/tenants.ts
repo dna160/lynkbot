@@ -15,6 +15,7 @@ import {
   text,
   timestamp,
   jsonb,
+  integer,
 } from 'drizzle-orm/pg-core';
 
 export const watiStatusEnum = pgEnum('wati_account_status', [
@@ -50,6 +51,14 @@ export const tenants = pgTable('tenants', {
   /** Meta phone_number_id — routes incoming Meta webhooks to this tenant */
   metaPhoneNumberId: varchar('meta_phone_number_id', { length: 50 }),
   displayPhoneNumber: varchar('display_phone_number', { length: 20 }),
+  /** AES-256-GCM encrypted System User access token for this tenant's WABA */
+  metaAccessToken: text('meta_access_token'),
+  /** Meta messaging tier (1, 2, 3, or unlimited via 4) — drives daily template caps */
+  messagingTier: integer('messaging_tier').notNull().default(1),
+  /** Meta-reported quality rating: GREEN / YELLOW / RED */
+  wabaQualityRating: varchar('waba_quality_rating', { length: 10 }),
+  /** Last time tenant_risk_scores was computed for this tenant */
+  lastRiskScoreAt: timestamp('last_risk_score_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

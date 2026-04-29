@@ -14,6 +14,7 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
+import { flowDefinitions } from './flowDefinitions';
 
 export const broadcasts = pgTable('broadcasts', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -28,6 +29,10 @@ export const broadcasts = pgTable('broadcasts', {
   failedCount: integer('failed_count').notNull().default(0),
   status: varchar('status', { length: 50 }).notNull().default('pending'),
   errorLog: jsonb('error_log'),
+  /** If this broadcast was triggered by a flow, the source flow id */
+  flowId: uuid('flow_id').references(() => flowDefinitions.id, { onDelete: 'set null' }),
+  /** Tenant risk score at the moment the broadcast was dispatched */
+  riskScoreAtSend: integer('risk_score_at_send'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   completedAt: timestamp('completed_at'),
 });

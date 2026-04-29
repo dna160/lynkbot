@@ -34,6 +34,8 @@ export const buyers = pgTable('buyers', {
   tags: jsonb('tags').$type<string[]>(),
   notes: text('notes'),
   doNotContact: boolean('do_not_contact').notNull().default(false),
+  /** Number of currently-running flow_executions targeting this buyer */
+  activeFlowCount: integer('active_flow_count').notNull().default(0),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ({
