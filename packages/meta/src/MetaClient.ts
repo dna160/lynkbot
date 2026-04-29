@@ -36,6 +36,23 @@ export class MetaClient {
   }
 
   /**
+   * Per-tenant factory. Used by services that read the active access token
+   * + phone_number_id off the tenant row.
+   *
+   * Throws if either credential is missing — callers should catch and
+   * surface "tenant not yet onboarded" rather than swallow.
+   */
+  static fromTenant(tenant: {
+    metaAccessToken: string | null;
+    metaPhoneNumberId: string | null;
+  }): MetaClient {
+    if (!tenant.metaAccessToken || !tenant.metaPhoneNumberId) {
+      throw new Error('Tenant has no active WABA credentials');
+    }
+    return new MetaClient(tenant.metaAccessToken, tenant.metaPhoneNumberId);
+  }
+
+  /**
    * Send a freeform text message.
    * Throws if isWithin24hrWindow is false — Meta blocks freeform outside the 24h session window.
    * Use sendTemplate() for outbound re-engagement.
