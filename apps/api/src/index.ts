@@ -37,6 +37,8 @@ import { buyerRoutes } from './routes/v1/buyers';
 import { broadcastRoutes } from './routes/v1/broadcasts';
 import { aiRoutes } from './routes/v1/ai';
 import { intelligenceRoutes } from './routes/v1/intelligence';
+import { onboardingRoutes } from './routes/v1/onboarding';
+import { internalWabaPoolRoutes } from './routes/internal/wabaPool';
 
 // Lazy-load Sentry only when DSN is configured
 if (config.SENTRY_DSN) {
@@ -112,6 +114,8 @@ async function bootstrap(): Promise<void> {
   await server.register(broadcastRoutes, { prefix: '/api' });
   await server.register(aiRoutes, { prefix: '/api' });
   await server.register(intelligenceRoutes, { prefix: '/api' });
+  await server.register(onboardingRoutes, { prefix: '/api' });
+  await server.register(internalWabaPoolRoutes);
 
   // --- Sentry error handler ---
   server.setErrorHandler((error, request, reply) => {

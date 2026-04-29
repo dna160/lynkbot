@@ -13,8 +13,11 @@ export const QUEUES = {
   PAYMENT_EXPIRY: 'lynkbot-payment-expiry',
   STOCK_RELEASE: 'lynkbot-stock-release',
   RESTOCK_NOTIFY: 'lynkbot-restock-notify',
-  WATI_STATUS: 'lynkbot-wati-status',
   SEND_TEMPLATE: 'lynkbot-send-template',
+  // Flow Engine v2.1
+  FLOW_EXECUTION: 'lynkbot-flow-execution',
+  TEMPLATE_SYNC: 'lynkbot-template-sync',
+  RISK_SCORE: 'lynkbot-risk-score',
 } as const;
 
 export type QueueName = typeof QUEUES[keyof typeof QUEUES];

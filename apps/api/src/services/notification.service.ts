@@ -16,14 +16,12 @@
  */
 import { db, buyers, products, waitlist } from '@lynkbot/db';
 import { eq, and } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
-import { config } from '../config';
+import type { MetaClient } from '@lynkbot/meta';
+import { getTenantMetaClient } from './_meta.helper';
 
 export class NotificationService {
-  private client: MetaClient;
-
-  constructor() {
-    this.client = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+  private getMetaClient(tenantId: string): Promise<MetaClient> {
+    return getTenantMetaClient(tenantId);
   }
 
   private normalisePhone(phone: string): string {
@@ -31,7 +29,7 @@ export class NotificationService {
   }
 
   async sendTrackingUpdate(
-    _tenantId: string,
+    tenantId: string,
     shipment: {
       orderId: string;
       orderCode: string;
@@ -46,10 +44,11 @@ export class NotificationService {
   ): Promise<void> {
     const status = shipment.currentStatus;
     const trackingUrl = `https://www.cekresi.com/?noresi=${shipment.resiNumber}`;
+    const client = await this.getMetaClient(tenantId);
 
     if (status === 'in_transit') {
       // "Hi {{1}}, Your order {{2}} has been shipped. Track the progress at {{3}}"
-      await this.client.sendTemplate({
+      await client.sendTemplate({
         to: this.normalisePhone(buyerPhone),
         templateName: 'zoko_shopify__shipping_confirmation_002',
         languageCode: 'en',
@@ -64,7 +63,7 @@ export class NotificationService {
       });
     } else if (status === 'out_for_delivery' || status === 'exception') {
       // "*Delivery Update* There is a shipping update for your order {{1}}. Track at {{2}}"
-      await this.client.sendTemplate({
+      await client.sendTemplate({
         to: this.normalisePhone(buyerPhone),
         templateName: 'zoko_shopify__shipping_update_002',
         languageCode: 'en',
@@ -78,7 +77,7 @@ export class NotificationService {
       });
     } else if (status === 'delivered') {
       // "Hi {{1}}, Thank you for being a valuable customer. Would you consider giving us a review?"
-      await this.client.sendTemplate({
+      await client.sendTemplate({
         to: this.normalisePhone(buyerPhone),
         templateName: 'zoko_order_confirm_and_feedback_image',
         languageCode: 'en',
@@ -91,7 +90,7 @@ export class NotificationService {
   }
 
   async sendPaymentExpired(
-    _tenantId: string,
+    tenantId: string,
     order: { id: string; buyerId: string; productId: string },
   ): Promise<void> {
     const buyer = await db.query.buyers.findFirst({
@@ -103,10 +102,12 @@ export class NotificationService {
 
     if (!buyer || !product) return;
 
+    const client = await this.getMetaClient(tenantId);
+
     // "Hi {{1}}, Payment for your order from {{2}} is still pending.
     //  Click on the link to complete the payment and confirm your order. {{3}}"
     // Re-purposed as payment-expired nudge — buyer can reply to restart.
-    await this.client.sendTemplate({
+    await client.sendTemplate({
       to: this.normalisePhone(buyer.waPhone),
       templateName: 'zoko_shopify__payment_reminder_002',
       languageCode: 'en',
@@ -121,7 +122,7 @@ export class NotificationService {
     });
   }
 
-  async sendRestockNotifications(_tenantId: string, productId: string): Promise<void> {
+  async sendRestockNotifications(tenantId: string, productId: string): Promise<void> {
     const product = await db.query.products.findFirst({
       where: eq(products.id, productId),
     });
@@ -134,11 +135,13 @@ export class NotificationService {
       ),
     });
 
+    const client = await this.getMetaClient(tenantId);
+
     for (const entry of entries) {
       try {
         // "We were told that you ordered {{1}} some time back.
         //  Hope you are enjoying it, but we'd hate for you to run out."
-        await this.client.sendTemplate({
+        await client.sendTemplate({
           to: this.normalisePhone(entry.waPhone),
           templateName: 'zoko_reorder_reminder_01',
           languageCode: 'en',

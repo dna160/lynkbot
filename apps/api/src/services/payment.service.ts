@@ -9,11 +9,12 @@
 import { Queue } from 'bullmq';
 import { db, conversations, orders, buyers, products } from '@lynkbot/db';
 import { eq, and } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
+import type { MetaClient } from '@lynkbot/meta';
 import { MidtransProvider, XenditProvider } from '@lynkbot/payments';
 import { QUEUES } from '@lynkbot/shared';
 import { config, getRedisConnection } from '../config';
 import { InventoryService } from './inventory.service';
+import { getTenantMetaClient } from './_meta.helper';
 import type { IPaymentProvider } from '@lynkbot/payments';
 
 type ConvRow = typeof conversations.$inferSelect;
@@ -56,8 +57,8 @@ export class PaymentService {
     return new XenditProvider();
   }
 
-  private getMetaClient(): MetaClient {
-    return new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+  private getMetaClient(tenantId: string): Promise<MetaClient> {
+    return getTenantMetaClient(tenantId);
   }
 
   async createInvoice(
@@ -137,7 +138,7 @@ export class PaymentService {
       .where(eq(conversations.id, conv.id));
 
     // Send invoice template via WhatsApp (Meta Cloud API)
-    const meta = this.getMetaClient();
+    const meta = await this.getMetaClient(conv.tenantId);
     const expiryStr = invoiceResult.expiresAt.toLocaleString('id-ID', {
       day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
     });
@@ -263,7 +264,7 @@ export class PaymentService {
     const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
     if (buyer && product) {
-      const meta = this.getMetaClient();
+      const meta = await this.getMetaClient(tenantId);
       await meta.sendTemplate({
         to: buyer.waPhone,
         templateName: 'payment_confirmed',
@@ -312,7 +313,7 @@ export class PaymentService {
     const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
     if (buyer && product) {
-      const meta = this.getMetaClient();
+      const meta = await this.getMetaClient(order.tenantId);
       await meta.sendTemplate({
         to: buyer.waPhone,
         templateName: 'payment_expired',

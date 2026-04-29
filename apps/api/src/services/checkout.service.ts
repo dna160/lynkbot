@@ -9,8 +9,8 @@
  */
 import { db, conversations, products, tenants } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
-import { config } from '../config';
+import type { MetaClient } from '@lynkbot/meta';
+import { getTenantMetaClient } from './_meta.helper';
 import { InventoryService } from './inventory.service';
 import { ShippingService } from './shipping.service';
 import type { CourierOption } from '@lynkbot/shared';
@@ -37,14 +37,14 @@ export class CheckoutService {
   private inventoryService = new InventoryService();
   private shippingService = new ShippingService();
 
-  private getMetaClient(): MetaClient {
-    return new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+  private getMetaClient(tenantId: string): Promise<MetaClient> {
+    return getTenantMetaClient(tenantId);
   }
 
   async beginCheckout(conv: ConvRow, buyer: BuyerRow): Promise<void> {
     const { tenantId } = conv;
     if (!conv.productId) {
-      const meta = this.getMetaClient();
+      const meta = await this.getMetaClient(conv.tenantId);
       await meta.sendText({
         to: buyer.waPhone,
         message: 'Produk mana yang ingin kamu beli? Ketik nama produknya ya 😊',
@@ -60,7 +60,7 @@ export class CheckoutService {
         .set({ state: 'OUT_OF_STOCK', lastMessageAt: new Date() })
         .where(eq(conversations.id, conv.id));
 
-      const meta = this.getMetaClient();
+      const meta = await this.getMetaClient(conv.tenantId);
       await meta.sendText({
         to: buyer.waPhone,
         message:
@@ -78,7 +78,7 @@ export class CheckoutService {
       .set({ state: 'ADDRESS_COLLECTION', lastMessageAt: new Date() })
       .where(eq(conversations.id, conv.id));
 
-    const meta = this.getMetaClient();
+    const meta = await this.getMetaClient(conv.tenantId);
     await meta.sendText({
       to: buyer.waPhone,
       message:
@@ -120,7 +120,7 @@ export class CheckoutService {
       .set({ addressDraft: updatedDraft as any, lastMessageAt: new Date() })
       .where(eq(conversations.id, conv.id));
 
-    const meta = this.getMetaClient();
+    const meta = await this.getMetaClient(conv.tenantId);
 
     if (step + 1 >= ADDRESS_STEPS.length) {
       const city = (updatedDraft['city'] as string) ?? '';
@@ -157,7 +157,7 @@ export class CheckoutService {
 
   async presentShippingOptions(conv: ConvRow, buyer: BuyerRow): Promise<void> {
     const draft = conv.addressDraft as Record<string, unknown> | null;
-    const meta = this.getMetaClient();
+    const meta = await this.getMetaClient(conv.tenantId);
     if (!draft?.rajaongkirCityId) {
       await meta.sendText({
         to: buyer.waPhone,
@@ -251,7 +251,7 @@ export class CheckoutService {
       );
     }
 
-    const meta = this.getMetaClient();
+    const meta = await this.getMetaClient(conv.tenantId);
 
     if (!selectedOption) {
       await meta.sendText({

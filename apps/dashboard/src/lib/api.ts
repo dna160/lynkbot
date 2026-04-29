@@ -386,6 +386,13 @@ export interface GenomeResponse {
   hasPersisted: boolean;
 }
 
+export const onboardingApi = {
+  complete: (input: { mode: 'pool' } | { mode: 'manual'; metaPhoneNumberId: string; wabaId: string; metaAccessToken: string }) =>
+    api.post<{ success: true; displayPhone: string }>('/onboarding/complete', input),
+  status: () =>
+    api.get<{ onboarded: boolean; displayPhone: string | null; watiStatus: string }>('/onboarding/status'),
+};
+
 export const intelligenceApi = {
   getGenome: (buyerId: string) =>
     api.get<GenomeResponse>(`/buyers/${buyerId}/genome`),

@@ -6,7 +6,8 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "seed:waba": "tsx infra/scripts/seed-waba-pool.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

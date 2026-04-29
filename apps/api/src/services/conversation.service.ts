@@ -25,12 +25,13 @@ import {
   query as ragQuery,
 } from '@lynkbot/ai';
 import {
-  MetaClient,
   extractText,
   extractMessageId,
   isLocationMessage,
+  type MetaClient,
   type MetaNormalizedPayload,
 } from '@lynkbot/meta';
+import { getTenantMetaClient } from './_meta.helper';
 import {
   extractSignals,
   extractName,
@@ -91,8 +92,8 @@ export class ConversationService {
   private notificationService = new NotificationService();
   private paymentService = new PaymentService();
 
-  private getMetaClient(): MetaClient {
-    return new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+  private getMetaClient(tenantId: string): Promise<MetaClient> {
+    return getTenantMetaClient(tenantId);
   }
 
   /**
@@ -281,12 +282,14 @@ export class ConversationService {
 
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
-        const meta = this.getMetaClient();
-        await meta.sendText({
-          to: buyer.waPhone,
-          message: 'Kamu telah berhenti. Untuk mulai lagi, chat kami kapan saja.',
-          isWithin24hrWindow: true,
-        }).catch(() => null);
+        const meta = await this.getMetaClient(conv.tenantId).catch(() => null);
+        if (meta) {
+          await meta.sendText({
+            to: buyer.waPhone,
+            message: 'Kamu telah berhenti. Untuk mulai lagi, chat kami kapan saja.',
+            isWithin24hrWindow: true,
+          }).catch(() => null);
+        }
       }
       return true;
     }
@@ -298,9 +301,9 @@ export class ConversationService {
         .set({ state: 'ESCALATED', lastMessageAt: new Date() })
         .where(eq(conversations.id, conv.id));
 
-      const meta = this.getMetaClient();
+      const meta = await this.getMetaClient(conv.tenantId).catch(() => null);
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
-      if (within24h) {
+      if (within24h && meta) {
         await meta.sendText({
           to: buyer.waPhone,
           message: 'Menghubungkan ke tim kami... ⏳',
@@ -327,7 +330,6 @@ export class ConversationService {
 
     const result = await this.shippingService.processLocationShare(conv.id, location);
 
-    const meta = this.getMetaClient();
     const within24h = isWithin24HourWindow(conv.lastMessageAt);
 
     if (result.status === 'success') {
@@ -340,23 +342,29 @@ export class ConversationService {
     } else if (result.status === 'city_not_found') {
       await this.transitionState(conv.id, 'LOCATION_RECEIVED');
       if (within24h) {
-        await meta.sendText({
-          to: (await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) }))?.waPhone ?? '',
-          message:
-            `Lokasi diterima! Tapi nama kota *${result.rawAddress ?? ''}* tidak ditemukan di database ongkir. ` +
-            'Bisa konfirmasi nama kota / kabupaten kamu? (contoh: Jakarta Selatan, Bandung)',
-          isWithin24hrWindow: true,
-        }).catch(() => null);
+        const meta = await this.getMetaClient(conv.tenantId).catch(() => null);
+        if (meta) {
+          await meta.sendText({
+            to: (await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) }))?.waPhone ?? '',
+            message:
+              `Lokasi diterima! Tapi nama kota *${result.rawAddress ?? ''}* tidak ditemukan di database ongkir. ` +
+              'Bisa konfirmasi nama kota / kabupaten kamu? (contoh: Jakarta Selatan, Bandung)',
+            isWithin24hrWindow: true,
+          }).catch(() => null);
+        }
       }
     } else {
       // geocode_failed
       if (within24h) {
-        const buyerRow = await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) });
-        await meta.sendText({
-          to: buyerRow?.waPhone ?? '',
-          message: 'Maaf, tidak bisa membaca lokasi kamu. Bisa ketik alamat lengkap? (nama jalan, kelurahan, kota)',
-          isWithin24hrWindow: true,
-        }).catch(() => null);
+        const meta = await this.getMetaClient(conv.tenantId).catch(() => null);
+        if (meta) {
+          const buyerRow = await db.query.buyers.findFirst({ where: eq(buyers.id, conv.buyerId) });
+          await meta.sendText({
+            to: buyerRow?.waPhone ?? '',
+            message: 'Maaf, tidak bisa membaca lokasi kamu. Bisa ketik alamat lengkap? (nama jalan, kelurahan, kota)',
+            isWithin24hrWindow: true,
+          }).catch(() => null);
+        }
       }
     }
   }
@@ -562,14 +570,16 @@ export class ConversationService {
         createdAt: new Date(),
       }).onConflictDoNothing();
 
-      const meta = this.getMetaClient();
       const within24h = isWithin24HourWindow(conv.lastMessageAt);
       if (within24h) {
-        await meta.sendText({
-          to: buyer.waPhone,
-          message: 'Oke, sudah masuk waitlist! Kami akan langsung kabari kalau stok sudah tersedia 😊',
-          isWithin24hrWindow: true,
-        }).catch(() => null);
+        const meta = await this.getMetaClient(conv.tenantId).catch(() => null);
+        if (meta) {
+          await meta.sendText({
+            to: buyer.waPhone,
+            message: 'Oke, sudah masuk waitlist! Kami akan langsung kabari kalau stok sudah tersedia 😊',
+            isWithin24hrWindow: true,
+          }).catch(() => null);
+        }
       }
     } else {
       await this.sendAiResponse(conv, buyer, text);
@@ -700,7 +710,7 @@ export class ConversationService {
         : '\n\n_(Type STOP to unsubscribe, or AGENT to talk to our team)_';
     }
 
-    const meta = this.getMetaClient();
+    const meta = await this.getMetaClient(conv.tenantId);
     await meta.sendText({
       to: buyer.waPhone,
       message: aiText,

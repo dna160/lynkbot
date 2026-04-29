@@ -9,19 +9,89 @@
  */
 import { db, tenants, opsTickets } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
-import { Queue } from 'bullmq';
-import { QUEUES } from '@lynkbot/shared';
 import { config } from '../config';
 import { createCipheriv, randomBytes } from 'crypto';
+import { encrypt } from '../utils/crypto';
+import { MetaClient } from '@lynkbot/meta';
 import type { OnboardingFormData } from '@lynkbot/shared';
+import { WabaPoolService } from './wabaPool.service';
 
 type TenantRow = typeof tenants.$inferSelect;
 
+export type CompleteOnboardingInput =
+  | { mode: 'pool' }
+  | { mode: 'manual'; metaPhoneNumberId: string; wabaId: string; metaAccessToken: string };
+
+export type CompleteOnboardingResult =
+  | { success: true; displayPhone: string }
+  | { success: false; reason: 'pool_exhausted' | 'invalid_credentials' | 'connection_failed'; message: string };
+
 export class OnboardingService {
+  private wabaPool = new WabaPoolService();
+
+  /**
+   * Two-path WABA connection (PRD §3.3 + user clarification):
+   *   pool   — auto-assign from pre-provisioned waba_pool accounts
+   *   manual — Lynker provides their own Meta WABA credentials
+   */
+  async completeOnboarding(
+    tenantId: string,
+    input: CompleteOnboardingInput,
+  ): Promise<CompleteOnboardingResult> {
+    if (input.mode === 'pool') {
+      const result = await this.wabaPool.assignToTenant(tenantId);
+      if (!result.assigned) {
+        // Fall through to ops ticket — existing manual flow
+        const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+        await db.insert(opsTickets).values({
+          type: 'waba_assignment_required',
+          tenantId,
+          payload: { storeName: tenant?.storeName ?? '' },
+          status: 'open',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        return {
+          success: false,
+          reason: 'pool_exhausted',
+          message: 'We are scaling up capacity. Our team will reach out within 24 hours to connect your WhatsApp.',
+        };
+      }
+      const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+      return { success: true, displayPhone: tenant?.displayPhoneNumber ?? result.phoneNumberId };
+    }
+
+    // Manual mode: validate, encrypt, persist
+    const { metaPhoneNumberId, wabaId, metaAccessToken } = input;
+    if (!metaPhoneNumberId || !wabaId || !metaAccessToken) {
+      return { success: false, reason: 'invalid_credentials', message: 'Phone Number ID, WABA ID, and Access Token are required.' };
+    }
+
+    // Optional connection test
+    let displayPhone = metaPhoneNumberId;
+    try {
+      const client = new MetaClient(metaAccessToken, metaPhoneNumberId);
+      const info = await client.getPhoneNumberInfo();
+      displayPhone = (info as any)?.display_phone_number ?? metaPhoneNumberId;
+    } catch {
+      return { success: false, reason: 'connection_failed', message: 'Could not verify Meta credentials. Check your Phone Number ID and Access Token.' };
+    }
+
+    const encryptedToken = encrypt(metaAccessToken, config.WABA_POOL_ENCRYPTION_KEY);
+    await db.update(tenants).set({
+      metaPhoneNumberId,
+      wabaId,
+      metaAccessToken: encryptedToken,
+      displayPhoneNumber: displayPhone,
+      watiAccountStatus: 'active',
+      updatedAt: new Date(),
+    }).where(eq(tenants.id, tenantId));
+
+    return { success: true, displayPhone };
+  }
 
   /**
    * Called from the tenants route when a Lynker triggers onboarding.
-   * Reads WATI_PARTNER_ENABLED to decide which path to take.
    */
   async startOnboarding(tenant: TenantRow): Promise<void> {
     // Map tenant fields to OnboardingFormData shape with available info
