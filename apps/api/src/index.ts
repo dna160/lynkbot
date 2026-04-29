@@ -38,7 +38,9 @@ import { broadcastRoutes } from './routes/v1/broadcasts';
 import { aiRoutes } from './routes/v1/ai';
 import { intelligenceRoutes } from './routes/v1/intelligence';
 import { onboardingRoutes } from './routes/v1/onboarding';
+import { flowRoutes } from './routes/v1/flows';
 import { internalWabaPoolRoutes } from './routes/internal/wabaPool';
+import { internalCronRoutes } from './routes/internal/cron';
 
 // Lazy-load Sentry only when DSN is configured
 if (config.SENTRY_DSN) {
@@ -115,7 +117,9 @@ async function bootstrap(): Promise<void> {
   await server.register(aiRoutes, { prefix: '/api' });
   await server.register(intelligenceRoutes, { prefix: '/api' });
   await server.register(onboardingRoutes, { prefix: '/api' });
+  await server.register(flowRoutes, { prefix: '/api' });
   await server.register(internalWabaPoolRoutes);
+  await server.register(internalCronRoutes);
 
   // --- Sentry error handler ---
   server.setErrorHandler((error, request, reply) => {
