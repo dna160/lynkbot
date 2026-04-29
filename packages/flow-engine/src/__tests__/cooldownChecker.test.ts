@@ -26,7 +26,7 @@ import { CooldownChecker } from '../cooldownChecker';
 import { db } from '@lynkbot/db';
 
 // Typed mock reference
-const mockDb = db as {
+const mockDb = db as unknown as {
   query: {
     buyers: { findFirst: ReturnType<typeof vi.fn> };
     buyerBroadcastLog: { findFirst: ReturnType<typeof vi.fn> };

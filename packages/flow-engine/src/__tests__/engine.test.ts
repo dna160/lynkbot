@@ -298,10 +298,13 @@ describe('FlowEngine.resumeExecution', () => {
 
     // Check that the update was called with the new messageText
     expect(mockDb.update).toHaveBeenCalled();
-    const updateArgs = setMock.mock.calls[0]?.[0] as Record<string, unknown>;
-    if (updateArgs && updateArgs['context']) {
-      const updatedCtx = updateArgs['context'] as { trigger: { messageText: string } };
-      expect(updatedCtx.trigger.messageText).toBe('ya');
+    const calls = setMock.mock.calls;
+    if (calls.length > 0) {
+      const updateArgs = calls[0]?.[0] as Record<string, unknown> | undefined;
+      if (updateArgs && updateArgs['context']) {
+        const updatedCtx = updateArgs['context'] as { trigger: { messageText: string } };
+        expect(updatedCtx.trigger.messageText).toBe('ya');
+      }
     }
   });
 });
