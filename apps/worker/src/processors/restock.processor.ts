@@ -51,10 +51,13 @@ export const restockProcessor: Processor = async (job) => {
     if (!buyer) continue;
 
     try {
+      // zoko_reorder_reminder_01:
+      // "We were told that you ordered {{1}} some time back. Hope you are enjoying it,
+      //  but we'd hate for you to run out. *Order Again* easily and stay awesome!!"
       await meta.sendTemplate({
-        to: buyer.waPhone,
-        templateName: 'restock_notify',
-        languageCode: 'id',
+        to: buyer.waPhone.replace(/^\+/, ''),
+        templateName: 'zoko_reorder_reminder_01',
+        languageCode: 'en',
         components: [
           {
             type: 'body',

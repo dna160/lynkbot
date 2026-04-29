@@ -60,22 +60,27 @@ export const paymentExpiryProcessor: Processor = async (job) => {
   if (buyer && product) {
     try {
       const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
+      // zoko_shopify__payment_reminder_002:
+      // "Hi {{1}}, Payment for your order from {{2}} is still pending.
+      //  Click on the link to complete the payment and confirm your order. {{3}}"
+      // We re-purpose it as a payment-expired nudge: buyer can reply to restart.
       await meta.sendTemplate({
-        to: buyer.waPhone,
-        templateName: 'payment_expired',
-        languageCode: 'id',
+        to: buyer.waPhone.replace(/^\+/, ''),
+        templateName: 'zoko_shopify__payment_reminder_002',
+        languageCode: 'en',
         components: [
           {
             type: 'body',
             parameters: [
               { type: 'text', text: buyer.displayName ?? 'Kak' },
               { type: 'text', text: product.name },
+              { type: 'text', text: 'Reply to this message to place a new order 😊' },
             ],
           },
         ],
       });
     } catch (err) {
-      job.log(`Failed to send payment_expired template: ${(err as Error).message}`);
+      job.log(`Failed to send payment reminder template: ${(err as Error).message}`);
     }
   }
 

@@ -75,15 +75,49 @@ function mapCarrierStatus(raw: string): ShipmentStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Meta template name per status
+// Meta template config per status — mapped to WABA-approved templates
 // ---------------------------------------------------------------------------
-function templateForStatus(status: ShipmentStatus): string | null {
+interface TemplateConfig {
+  name: string;
+  buildParams: (args: {
+    buyerName: string;
+    orderCode: string;
+    trackingUrl: string;
+  }) => Array<{ type: 'text'; text: string }>;
+}
+
+function templateForStatus(status: ShipmentStatus): TemplateConfig | null {
   switch (status) {
-    case ShipmentStatus.IN_TRANSIT:        return 'order_shipped';
-    case ShipmentStatus.OUT_FOR_DELIVERY:  return 'out_for_delivery';
-    case ShipmentStatus.DELIVERED:         return 'delivered';
-    case ShipmentStatus.EXCEPTION:         return 'shipping_exception';
-    default:                               return null;
+    case ShipmentStatus.IN_TRANSIT:
+      // "Hi {{1}}, Your order {{2}} has been shipped. Track the progress at {{3}}"
+      return {
+        name: 'zoko_shopify__shipping_confirmation_002',
+        buildParams: ({ buyerName, orderCode, trackingUrl }) => [
+          { type: 'text', text: buyerName },
+          { type: 'text', text: orderCode },
+          { type: 'text', text: trackingUrl },
+        ],
+      };
+    case ShipmentStatus.OUT_FOR_DELIVERY:
+    case ShipmentStatus.EXCEPTION:
+      // "*Delivery Update* There is a shipping update for your order {{1}}. Track at {{2}}"
+      return {
+        name: 'zoko_shopify__shipping_update_002',
+        buildParams: ({ orderCode, trackingUrl }) => [
+          { type: 'text', text: orderCode },
+          { type: 'text', text: trackingUrl },
+        ],
+      };
+    case ShipmentStatus.DELIVERED:
+      // "Hi {{1}}, Thank you for being a valuable customer. Would you consider giving us a review?"
+      return {
+        name: 'zoko_order_confirm_and_feedback_image',
+        buildParams: ({ buyerName }) => [
+          { type: 'text', text: buyerName },
+        ],
+      };
+    default:
+      return null;
   }
 }
 
@@ -174,8 +208,8 @@ export const trackingProcessor: Processor = async (job) => {
     .where(eq(shipments.id, shipmentId));
 
   // 9. Send WA notification via Meta Cloud API
-  const templateName = templateForStatus(newStatus);
-  if (templateName) {
+  const templateConfig = templateForStatus(newStatus);
+  if (templateConfig) {
     const conversation = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) });
     const buyer = conversation?.buyerId
       ? await db.query.buyers.findFirst({ where: eq(buyers.id, conversation.buyerId) })
@@ -184,29 +218,23 @@ export const trackingProcessor: Processor = async (job) => {
     if (buyer?.waPhone) {
       const order = await db.query.orders.findFirst({ where: eq(orders.id, shipment.orderId) });
       const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
+      const trackingUrl = `https://www.cekresi.com/?noresi=${shipment.resiNumber}`;
 
       try {
-        await meta.sendTemplate({
-          to: buyer.waPhone,
-          templateName,
-          languageCode: 'id',
-          components: [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: buyer.displayName ?? 'Pembeli' },
-                { type: 'text', text: shipment.resiNumber },
-                { type: 'text', text: shipment.courierCode.toUpperCase() },
-                { type: 'text', text: historyEntry.description },
-                { type: 'text', text: historyEntry.location },
-                ...(order ? [{ type: 'text' as const, text: order.id }] : []),
-              ],
-            },
-          ],
+        const params = templateConfig.buildParams({
+          buyerName: buyer.displayName ?? 'Kak',
+          orderCode: order?.orderCode ?? shipment.resiNumber,
+          trackingUrl,
         });
-        job.log(`Sent ${templateName} to ${buyer.waPhone}`);
+        await meta.sendTemplate({
+          to: buyer.waPhone.replace(/^\+/, ''),
+          templateName: templateConfig.name,
+          languageCode: 'en',
+          components: [{ type: 'body', parameters: params }],
+        });
+        job.log(`Sent ${templateConfig.name} to ${buyer.waPhone}`);
       } catch (err) {
-        job.log(`Failed to send ${templateName}: ${(err as Error).message}`);
+        job.log(`Failed to send ${templateConfig.name}: ${(err as Error).message}`);
       }
     } else {
       job.log(`Could not send template: missing buyer phone`);
