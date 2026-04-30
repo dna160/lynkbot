@@ -25,10 +25,13 @@ export const flowTemplateStatusEnum = pgEnum('flow_template_status', [
   'draft',
   'pending_submission',
   'submitted',
+  'pending_review',
   'approved',
   'rejected',
   'paused',
   'disabled',
+  'flagged',
+  'in_appeal',
 ]);
 
 export const flowTemplates = pgTable(

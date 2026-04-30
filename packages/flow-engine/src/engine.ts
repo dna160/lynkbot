@@ -98,7 +98,7 @@ export class FlowEngine {
         eq(flowExecutions.buyerId, buyerId),
         or(
           eq(flowExecutions.status, 'running'),
-          eq(flowExecutions.status, 'waiting_reply' as 'running'), // cast workaround
+          eq(flowExecutions.status, 'waiting_reply'),
         ),
       ),
     });
@@ -317,7 +317,7 @@ export class FlowEngine {
       await db
         .update(flowExecutions)
         .set({
-          status: 'waiting_reply' as 'running', // cast: schema may not have waiting_reply yet
+          status: 'waiting_reply',
           currentNodeId: nodeId,
           lastStepAt: new Date(),
         })

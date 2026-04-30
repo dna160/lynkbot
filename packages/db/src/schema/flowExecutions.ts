@@ -25,6 +25,7 @@ import { flowDefinitions } from './flowDefinitions';
 
 export const flowExecutionStatusEnum = pgEnum('flow_execution_status', [
   'running',
+  'waiting_reply',
   'completed',
   'cancelled',
   'failed',

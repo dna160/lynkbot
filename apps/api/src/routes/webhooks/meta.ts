@@ -157,7 +157,7 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
               eq(flowExecutions.buyerId, resumeBuyer.id),
               // Note: flowExecutionStatusEnum may not include 'waiting_reply' in current schema
               // Using a cast here; Phase 1 migration adds this status
-              eq(flowExecutions.status, 'waiting_reply' as 'running'),
+              eq(flowExecutions.status, 'waiting_reply'),
             ),
             columns: { id: true },
           });
