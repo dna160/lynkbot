@@ -9,6 +9,8 @@ import { ConversationsPage } from './pages/Conversations/ConversationsPage';
 import { AnalyticsPage } from './pages/Analytics/AnalyticsPage';
 import { BuyersPage } from './pages/Buyers/BuyersPage';
 import { OverviewPage } from './pages/Overview/OverviewPage';
+import { TemplateListPage } from './pages/Templates/TemplateListPage';
+import { TemplateEditorPage } from './pages/Templates/TemplateEditorPage';
 import { getTenantIdFromToken } from './lib/api';
 
 interface EBState {
@@ -115,6 +117,9 @@ export default function App() {
           <Route path="conversations" element={<ConversationsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="buyers" element={<BuyersPage />} />
+          <Route path="templates" element={<TemplateListPage />} />
+          <Route path="templates/new" element={<TemplateEditorPage />} />
+          <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
         </Route>
         <Route path="/" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
         <Route path="*" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />

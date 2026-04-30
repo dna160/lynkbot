@@ -401,3 +401,36 @@ export const intelligenceApi = {
   runOsint: (buyerId: string, opts?: { nameOverride?: string; linkedinUrl?: string; instagramUsername?: string }) =>
     api.post<GenomeResponse & { externalOsintSearched: boolean; externalOsintName: string | null }>(`/buyers/${buyerId}/osint`, opts ?? {}),
 };
+
+export interface CreateTemplatePayload {
+  name: string;
+  displayName?: string;
+  category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
+  language?: string;
+  components: Array<{
+    type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS';
+    format?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+    text?: string;
+    buttons?: Array<{ type: string; text: string; url?: string; phone_number?: string }>;
+  }>;
+  variableLabels?: Record<string, string>;
+}
+
+export const flowTemplatesApi = {
+  list: (params?: { status?: string; category?: string; page?: number; limit?: number }) =>
+    api.get<{ items: any[]; total: number; page: number; limit: number }>('/flow-templates', { params }),
+  get: (id: string) =>
+    api.get<any>(`/flow-templates/${id}`),
+  create: (data: CreateTemplatePayload) =>
+    api.post<any>('/flow-templates', data),
+  update: (id: string, data: Partial<CreateTemplatePayload>) =>
+    api.put<any>(`/flow-templates/${id}`, data),
+  submit: (id: string) =>
+    api.post<any>(`/flow-templates/${id}/submit`),
+  appeal: (id: string) =>
+    api.post<any>(`/flow-templates/${id}/appeal`),
+  pause: (id: string) =>
+    api.post<any>(`/flow-templates/${id}/pause`),
+  delete: (id: string) =>
+    api.delete(`/flow-templates/${id}`),
+};
