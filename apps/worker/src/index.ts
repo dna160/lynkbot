@@ -16,6 +16,7 @@ import { paymentExpiryProcessor } from './processors/paymentExpiry.processor';
 import { stockReleaseProcessor } from './processors/stockRelease.processor';
 import { restockProcessor } from './processors/restock.processor';
 import { flowExecutionProcessor } from './processors/flowExecution.processor';
+import { templateSyncProcessor } from './processors/templateSync.processor';
 
 // Parse REDIS_URL if provided (preferred over individual vars)
 function getRedisConnection() {
@@ -46,6 +47,8 @@ const workers = [
   new Worker(QUEUES.RESTOCK_NOTIFY, restockProcessor,       { connection: redisConnection, concurrency: 5 }),
   // Flow Engine — Phase 2
   new Worker(QUEUES.FLOW_EXECUTION, flowExecutionProcessor,  { connection: redisConnection, concurrency: 20, lockDuration: 60_000 }),
+  // Template Studio — Phase 3
+  new Worker(QUEUES.TEMPLATE_SYNC, templateSyncProcessor, { connection: redisConnection, concurrency: 5 }),
 ];
 
 workers.forEach((w) => {
