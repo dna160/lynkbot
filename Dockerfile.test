@@ -16,5 +16,10 @@ RUN pnpm -F @lynkbot/shared build || true
 RUN pnpm -F @lynkbot/meta build || true
 RUN pnpm -F @lynkbot/db build
 RUN pnpm -F @lynkbot/flow-engine build
+# Build remaining packages so all services are resolvable in vitest
+RUN pnpm -F @lynkbot/pantheon build || true
+RUN pnpm -F @lynkbot/ai build || true
+RUN pnpm -F @lynkbot/payments build || true
+RUN pnpm -F @lynkbot/wati build || true
 
 CMD ["sh"]
