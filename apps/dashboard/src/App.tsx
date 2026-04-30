@@ -11,6 +11,8 @@ import { BuyersPage } from './pages/Buyers/BuyersPage';
 import { OverviewPage } from './pages/Overview/OverviewPage';
 import { TemplateListPage } from './pages/Templates/TemplateListPage';
 import { TemplateEditorPage } from './pages/Templates/TemplateEditorPage';
+import { FlowsListPage } from './pages/Flows/FlowsListPage';
+import { FlowEditorPage } from './pages/Flows/FlowEditorPage';
 import { getTenantIdFromToken } from './lib/api';
 
 interface EBState {
@@ -120,6 +122,9 @@ export default function App() {
           <Route path="templates" element={<TemplateListPage />} />
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
+          <Route path="flows" element={<FlowsListPage />} />
+          <Route path="flows/new" element={<FlowEditorPage />} />
+          <Route path="flows/:id/edit" element={<FlowEditorPage />} />
         </Route>
         <Route path="/" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
         <Route path="*" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
