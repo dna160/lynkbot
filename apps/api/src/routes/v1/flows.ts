@@ -9,8 +9,10 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { db, flowDefinitions, flowExecutions, eq, and, desc, sql, count } from '@lynkbot/db';
-import { computeRiskScore } from '@lynkbot/flow-engine';
 import { requireFeature } from '../../middleware/featureGate';
+import { RiskScoreService } from '../../services/riskScore.service';
+
+const riskScoreService = new RiskScoreService();
 
 const authAndFeature = (fastify: Parameters<FastifyPluginAsync>[0]) => [
   fastify.authenticate,
@@ -223,19 +225,10 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(404).send({ error: 'Flow not found' });
       }
 
-      // Risk score gate for activation
+      // Risk score gate for activation (PRD §8.2 — non-overridable)
       let warning: string | undefined;
       if (status === 'active') {
-        // Compute current risk score (Phase 4 will add real data; using stub inputs for now)
-        const { score, breakdown } = computeRiskScore({
-          broadcastsSent7d: 0,
-          uniqueOptedInBuyers: 0,
-          averageTemplateQualityScore: 1,
-          noReplyRate7d: 0,
-          buyersWithInboundHistory: 0,
-          totalBuyers: 0,
-          averageDelayBetweenNodesMs: 500,
-        });
+        const { score, breakdown } = await riskScoreService.getForTenant(tenantId);
 
         if (score > 80) {
           return reply.status(422).send({
@@ -247,7 +240,7 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         if (score > 60) {
-          warning = `Risk score is ${score} (elevated). Monitor for delivery issues.`;
+          warning = `Risk score is ${score}/100 (Caution). Consider reducing broadcast frequency or improving template quality.`;
         }
       }
 
@@ -410,18 +403,8 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(404).send({ error: 'Flow not found' });
       }
 
-      // Phase 4 will replace this with real inputs from DB
-      const { score, breakdown } = computeRiskScore({
-        broadcastsSent7d: 0,
-        uniqueOptedInBuyers: 0,
-        averageTemplateQualityScore: 1,
-        noReplyRate7d: 0,
-        buyersWithInboundHistory: 0,
-        totalBuyers: 0,
-        averageDelayBetweenNodesMs: 500,
-      });
-
-      return reply.send({ score, breakdown, note: 'Phase 4 will compute real inputs' });
+      const result = await riskScoreService.getForTenant(tenantId);
+      return reply.send(result);
     },
   );
 

@@ -31,8 +31,10 @@ export interface ProcessorDeps {
 /** Minimal ioredis interface needed by processors */
 export interface RedisClientLike {
   incr(key: string): Promise<number>;
+  incrby(key: string, increment: number): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
   get(key: string): Promise<string | null>;
+  set(key: string, value: string | number, ...args: unknown[]): Promise<unknown>;
 }
 
 export type NodeProcessor = (

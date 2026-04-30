@@ -17,6 +17,7 @@ import { stockReleaseProcessor } from './processors/stockRelease.processor';
 import { restockProcessor } from './processors/restock.processor';
 import { flowExecutionProcessor } from './processors/flowExecution.processor';
 import { templateSyncProcessor } from './processors/templateSync.processor';
+import { riskScoreProcessor } from './processors/riskScore.processor';
 
 // Parse REDIS_URL if provided (preferred over individual vars)
 function getRedisConnection() {
@@ -49,6 +50,8 @@ const workers = [
   new Worker(QUEUES.FLOW_EXECUTION, flowExecutionProcessor,  { connection: redisConnection, concurrency: 20, lockDuration: 60_000 }),
   // Template Studio — Phase 3
   new Worker(QUEUES.TEMPLATE_SYNC, templateSyncProcessor, { connection: redisConnection, concurrency: 5 }),
+  // Risk Scoring — Phase 4
+  new Worker(QUEUES.RISK_SCORE, riskScoreProcessor, { connection: redisConnection, concurrency: 3 }),
 ];
 
 workers.forEach((w) => {

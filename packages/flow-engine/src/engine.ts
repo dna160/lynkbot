@@ -14,10 +14,16 @@ import {
   flowDefinitions,
   flowExecutions,
   buyers,
+  tenants,
+  buyerBroadcastLog,
   eq,
   and,
   or,
+  not,
   sql,
+  gte,
+  lte,
+  inArray,
 } from '@lynkbot/db';
 import type { MetaClient } from '@lynkbot/meta';
 import { QUEUES } from '@lynkbot/shared';
@@ -26,7 +32,9 @@ import type {
   FlowNode,
   ExecutionContext,
   BuyerContext,
+  TriggerConfig,
   TriggerContext,
+  SegmentFilter,
 } from './types';
 import { processorRegistry } from './nodeProcessors/index';
 import type { ProcessorDeps, RedisClientLike } from './nodeProcessors/types';
@@ -391,24 +399,156 @@ export class FlowEngine {
   }
 
   /**
-   * Evaluates time-based triggers for all (or one) tenants.
-   * Phase 4 implementation — stub here.
+   * Evaluates time-based triggers for all active flows (or one tenant's flows).
+   * Called every 15 minutes by the `flow.check_time_triggers` BullMQ cron job.
+   *
+   * For each active flow with triggerType='time_based':
+   *  1. Read segmentFilter from triggerConfig
+   *  2. Find eligible buyers (matching filter, not doNotContact, no running execution)
+   *  3. Enqueue one flow.start_execution job per buyer
    */
   async evaluateTimeTriggers(tenantId?: string): Promise<void> {
-    console.log(`[FlowEngine] evaluateTimeTriggers called — tenantId=${tenantId ?? 'all'} (Phase 4 stub)`);
+    // Load all active time-based flows (optionally scoped to one tenant)
+    const activeFlows = await db.query.flowDefinitions.findMany({
+      where: and(
+        eq(flowDefinitions.status, 'active'),
+        eq(flowDefinitions.triggerType, 'time_based'),
+        ...(tenantId ? [eq(flowDefinitions.tenantId, tenantId)] : []),
+      ),
+      columns: {
+        id: true,
+        tenantId: true,
+        triggerConfig: true,
+        definition: true,
+      },
+    });
+
+    for (const flow of activeFlows) {
+      try {
+        const triggerCfg = (flow.triggerConfig ?? {}) as TriggerConfig;
+        const segmentFilter = triggerCfg.segmentFilter ?? {};
+        await this.broadcastToSegment(flow.tenantId, flow.id, segmentFilter);
+      } catch (err) {
+        console.error(
+          `[FlowEngine] evaluateTimeTriggers failed for flow=${flow.id}:`,
+          err,
+        );
+      }
+    }
   }
 
   /**
-   * Broadcast flow to a segment of buyers.
-   * Phase 4 implementation — stub here.
+   * Broadcasts a flow to a segment of buyers.
+   * - Applies segmentFilter (tags, order counts, recency)
+   * - Excludes doNotContact=true buyers
+   * - Excludes buyers with an already-running execution for this flow
+   * - Honors global 1000/hour marketing cap via Redis counter
+   * - Enqueues one flow.start_execution job per eligible buyer
+   *
+   * Rate limit: Redis counter `ratelimit:waba:{wabaId}:marketing:{YYYY-MM-DD-HH}`
    */
   async broadcastToSegment(
     tenantId: string,
     flowId: string,
-    segmentFilter: Record<string, unknown>,
+    segmentFilter: SegmentFilter | Record<string, unknown>,
   ): Promise<void> {
-    console.log(`[FlowEngine] broadcastToSegment called — tenantId=${tenantId} flowId=${flowId} (Phase 4 stub)`);
-    void segmentFilter;
+    const sf = segmentFilter as SegmentFilter;
+
+    // Resolve tenant for WABA rate-limit key
+    const tenant = await db.query.tenants.findFirst({
+      where: eq(tenants.id, tenantId),
+      columns: { wabaId: true },
+    });
+    const wabaId = tenant?.wabaId ?? tenantId;
+
+    // ── Global 1000/hour rate-limit check ────────────────────────────────────
+    const now = new Date();
+    const hourKey = `ratelimit:waba:${wabaId}:marketing:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}-${String(now.getUTCHours()).padStart(2, '0')}`;
+    const currentCount = parseInt(
+      (await this.redisClient.get(hourKey)) ?? '0',
+      10,
+    );
+
+    if (currentCount >= 1000) {
+      console.warn(
+        `[FlowEngine] broadcastToSegment: 1000/hour cap reached for wabaId=${wabaId}. Skipping flow=${flowId}.`,
+      );
+      return;
+    }
+
+    // ── Build buyer query with segment filters ────────────────────────────────
+    const conditions = [
+      eq(buyers.tenantId, tenantId),
+      not(buyers.doNotContact),
+    ];
+
+    if (sf.tags && sf.tags.length > 0) {
+      // Match buyers whose tags JSON array contains any of the specified tags
+      conditions.push(
+        sql`${buyers.tags} ?| ARRAY[${sql.raw(sf.tags.map(t => `'${t.replace(/'/g, "''")}'`).join(','))}]::text[]`,
+      );
+    }
+
+    if (typeof sf.minTotalOrders === 'number') {
+      conditions.push(gte(buyers.totalOrders, sf.minTotalOrders));
+    }
+
+    if (typeof sf.maxTotalOrders === 'number') {
+      conditions.push(lte(buyers.totalOrders, sf.maxTotalOrders));
+    }
+
+    if (typeof sf.lastOrderWithinDays === 'number') {
+      const cutoff = new Date(Date.now() - sf.lastOrderWithinDays * 24 * 60 * 60 * 1000);
+      conditions.push(gte(buyers.lastOrderAt, cutoff));
+    }
+
+    if (sf.preferredLanguage) {
+      conditions.push(eq(buyers.preferredLanguage, sf.preferredLanguage));
+    }
+
+    const eligibleBuyers = await db.query.buyers.findMany({
+      where: and(...(conditions as Parameters<typeof and>)),
+      columns: { id: true },
+    });
+
+    if (eligibleBuyers.length === 0) return;
+
+    // Exclude buyers with a running execution for this flow
+    const runningExecutions = await db.query.flowExecutions.findMany({
+      where: and(
+        eq(flowExecutions.flowId, flowId),
+        or(
+          eq(flowExecutions.status, 'running'),
+          eq(flowExecutions.status, 'waiting_reply'),
+        ),
+      ),
+      columns: { buyerId: true },
+    });
+    const runningBuyerIds = new Set(runningExecutions.map(e => e.buyerId));
+
+    const targetBuyers = eligibleBuyers.filter(b => !runningBuyerIds.has(b.id));
+    if (targetBuyers.length === 0) return;
+
+    // Respect the remaining hourly cap
+    const remaining = Math.max(0, 1000 - currentCount);
+    const toEnqueue = targetBuyers.slice(0, remaining);
+
+    // Enqueue one job per buyer (BullMQ handles rate limiting via concurrency)
+    for (const buyer of toEnqueue) {
+      await this.queue.add(
+        'flow.start_execution',
+        { tenantId, flowId, buyerId: buyer.id, triggerType: 'broadcast' },
+        { removeOnComplete: 100, removeOnFail: 200 },
+      );
+    }
+
+    // Increment Redis counter (TTL: 2 hours to cover the full window)
+    await this.redisClient.incrby(hourKey, toEnqueue.length);
+    await this.redisClient.expire(hourKey, 7200);
+
+    console.log(
+      `[FlowEngine] broadcastToSegment: enqueued ${toEnqueue.length} jobs for flow=${flowId} tenant=${tenantId}`,
+    );
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────

@@ -25,8 +25,12 @@ import { FlowEngine } from '@lynkbot/flow-engine';
 import { getTenantMetaClient } from '../../services/_meta.helper';
 import { getRedisConnection } from '../../config';
 import Redis from 'ioredis';
+import { TemplateStudioService } from '../../services/templateStudio.service';
+import { RiskScoreService } from '../../services/riskScore.service';
 
 const conversationService = new ConversationService();
+const templateStudioService = new TemplateStudioService();
+const riskScoreService = new RiskScoreService();
 
 // ── Flow Engine singleton ────────────────────────────────────────────────────
 // Instantiated once per API process; matches ConversationService pattern.
@@ -91,6 +95,39 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(200).send({ received: true });
 
       try {
+        // ── Notification-type webhooks (field-based routing) ───────────────
+        const entry = (request.body as Record<string, unknown>)?.entry;
+        const firstEntry = Array.isArray(entry) ? entry[0] : undefined;
+        const changes = (firstEntry as Record<string, unknown>)?.changes;
+        const firstChange = Array.isArray(changes) ? changes[0] : undefined;
+        const changeField = (firstChange as Record<string, unknown>)?.field as string | undefined;
+        const changeValue = (firstChange as Record<string, unknown>)?.value;
+
+        if (changeField === 'message_template_status_update') {
+          // Template approval/rejection/disabled events from Meta
+          const val = changeValue as Record<string, unknown>;
+          templateStudioService
+            .handleStatusUpdate({
+              metaTemplateId: val?.message_template_id as string | number,
+              event: val?.event as 'APPROVED' | 'REJECTED' | 'DISABLED' | 'FLAGGED' | 'IN_APPEAL' | 'REINSTATED',
+              reason: val?.reason as string | undefined,
+            })
+            .catch((err: unknown) =>
+              request.log.error({ err }, 'Template status update failed'),
+            );
+          return; // 200 already sent
+        }
+
+        if (changeField === 'phone_number_quality_update') {
+          // Quality rating change — update tenant.wabaQualityRating + recompute risk score
+          riskScoreService
+            .handleQualityUpdate(changeValue as Record<string, unknown>)
+            .catch((err: unknown) =>
+              request.log.error({ err }, 'Quality update handling failed'),
+            );
+          return; // 200 already sent
+        }
+
         // Skip status update callbacks (sent/delivered/read for our own outbound messages)
         if (isStatusUpdate(request.body)) {
           return;

@@ -40,6 +40,7 @@ import { intelligenceRoutes } from './routes/v1/intelligence';
 import { onboardingRoutes } from './routes/v1/onboarding';
 import { flowRoutes } from './routes/v1/flows';
 import { flowTemplateRoutes } from './routes/v1/flowTemplates';
+import { riskScoreRoutes } from './routes/v1/riskScore';
 import { internalWabaPoolRoutes } from './routes/internal/wabaPool';
 import { internalCronRoutes } from './routes/internal/cron';
 
@@ -120,6 +121,7 @@ async function bootstrap(): Promise<void> {
   await server.register(onboardingRoutes, { prefix: '/api' });
   await server.register(flowRoutes, { prefix: '/api' });
   await server.register(flowTemplateRoutes, { prefix: '/api' });
+  await server.register(riskScoreRoutes, { prefix: '/api' });
   await server.register(internalWabaPoolRoutes);
   await server.register(internalCronRoutes);
 
