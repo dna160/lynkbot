@@ -319,6 +319,10 @@ export const aiApi = {
       message: 'Suggest a helpful short reply for the human operator to send in this WhatsApp conversation.',
       context: JSON.stringify(data.messages),
     }),
+  generateFlow: (data: { prompt: string; productId?: string; audienceSegment?: string }) =>
+    api.post('/ai/generate-flow', data),
+  modifyFlow: (data: { flowId: string; instruction: string }) =>
+    api.post('/ai/modify-flow', data),
 };
 
 export interface BroadcastTemplate { key: string; name: string; language: string; category?: string; params: string[]; }
@@ -433,4 +437,38 @@ export const flowTemplatesApi = {
     api.post<any>(`/flow-templates/${id}/pause`),
   delete: (id: string) =>
     api.delete(`/flow-templates/${id}`),
+};
+
+// ── Flow Definitions ─────────────────────────────────────────────────────────
+
+export interface CreateFlowPayload {
+  name: string;
+  triggerType: string;
+  definition: { nodes: any[]; edges: any[] };
+}
+
+export const flowsApi = {
+  list: (params?: { status?: string; page?: number; limit?: number }) =>
+    api.get<{ items: any[]; total: number; page: number; limit: number }>('/flows', { params }),
+  get: (id: string) =>
+    api.get<any>(`/flows/${id}`),
+  create: (data: CreateFlowPayload) =>
+    api.post<any>('/flows', data),
+  update: (id: string, data: Partial<CreateFlowPayload>) =>
+    api.put<any>(`/flows/${id}`, data),
+  updateStatus: (id: string, status: string) =>
+    api.patch<any>(`/flows/${id}/status`, { status }),
+  delete: (id: string) =>
+    api.delete(`/flows/${id}`),
+  getExecutions: (id: string, params?: { status?: string; buyerId?: string }) =>
+    api.get<any>(`/flows/${id}/executions`, { params }),
+  test: (id: string) =>
+    api.post<any>(`/flows/${id}/test`),
+};
+
+// ── Risk Score ───────────────────────────────────────────────────────────────
+
+export const riskScoreApi = {
+  get: () => api.get<{ score: number; level: 'ok' | 'warning' | 'blocked'; computedAt: string; breakdown: any }>('/risk-score'),
+  compute: () => api.post<{ score: number; level: 'ok' | 'warning' | 'blocked'; computedAt: string; breakdown: any }>('/risk-score/compute'),
 };

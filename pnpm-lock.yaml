@@ -129,6 +129,9 @@ importers:
       clsx:
         specifier: ^2.1.0
         version: 2.1.1
+      drawflow:
+        specifier: 0.0.60
+        version: 0.0.60
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -3198,6 +3201,9 @@ packages:
   dotenv@16.6.1:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
+
+  drawflow@0.0.60:
+    resolution: {integrity: sha512-UGj1+1DnWCVY6vJXBb6Ayt7KpPINBGqncVqpYDumVeBdIKxlBGn0tksp2yciVzQjkYsjFwMMDEdoVyWzUa2wkA==}
 
   dreamopt@0.8.0:
     resolution: {integrity: sha512-vyJTp8+mC+G+5dfgsY+r3ckxlz+QMX40VjPQsZc5gxVAxLmi64TBoVkP54A/pRAXMXsbu2GMMBrZPxNv23waMg==}
@@ -8040,6 +8046,8 @@ snapshots:
       dotenv: 16.6.1
 
   dotenv@16.6.1: {}
+
+  drawflow@0.0.60: {}
 
   dreamopt@0.8.0:
     dependencies:
