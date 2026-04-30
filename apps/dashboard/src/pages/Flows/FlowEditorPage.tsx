@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Drawflow from 'drawflow';
-import 'drawflow/src/drawflow.css';
+import 'drawflow/dist/drawflow.min.css';
 import { flowsApi, aiApi } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 

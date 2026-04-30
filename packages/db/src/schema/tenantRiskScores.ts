@@ -13,6 +13,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
@@ -28,6 +29,7 @@ export const tenantRiskScores = pgTable(
     computedAt: timestamp('computed_at').notNull().defaultNow(),
   },
   (t) => ({
+    tenantUnique: uniqueIndex('tenant_risk_scores_tenant_unique').on(t.tenantId),
     tenantIdx: index('tenant_risk_scores_tenant_idx').on(t.tenantId, t.computedAt),
   }),
 );

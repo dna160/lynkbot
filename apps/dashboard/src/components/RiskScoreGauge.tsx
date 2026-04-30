@@ -2,8 +2,8 @@
  * @CLAUDE_CONTEXT
  * Package : apps/dashboard
  * File    : src/components/RiskScoreGauge.tsx
- * Role    : Colored arc gauge for tenant risk score (PRD §13.3).
- *           ok (<60): green, warning (60-80): yellow, blocked (>80): red.
+ * Role    : Colored arc gauge for tenant risk score (PRD §13.5).
+ *           4-band coloring: green (1-30), yellow (31-60), orange (61-80), red (81-100).
  *           Fetches from GET /api/v1/risk-score on mount; also accepts props directly.
  */
 import { useEffect, useState } from 'react';
@@ -22,9 +22,17 @@ interface RiskScoreGaugeProps {
   compact?: boolean;
 }
 
-function getColor(level: 'ok' | 'warning' | 'blocked') {
-  if (level === 'blocked') return { stroke: '#EF4444', text: 'text-red-400', bg: 'bg-red-900/20 border-red-800/40' };
-  if (level === 'warning') return { stroke: '#EAB308', text: 'text-yellow-400', bg: 'bg-yellow-900/20 border-yellow-800/40' };
+/**
+ * Returns color tokens based on score bands (PRD §13.5):
+ *  1-30   → green
+ *  31-60  → yellow
+ *  61-80  → orange
+ *  81-100 → red
+ */
+function getColor(score: number) {
+  if (score > 80) return { stroke: '#EF4444', text: 'text-red-400', bg: 'bg-red-900/20 border-red-800/40' };
+  if (score > 60) return { stroke: '#F97316', text: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-800/40' };
+  if (score > 30) return { stroke: '#EAB308', text: 'text-yellow-400', bg: 'bg-yellow-900/20 border-yellow-800/40' };
   return { stroke: '#22C55E', text: 'text-green-400', bg: 'bg-green-900/20 border-green-800/40' };
 }
 
@@ -136,7 +144,7 @@ export function RiskScoreGauge({ data: propData, compact = false }: RiskScoreGau
     );
   }
 
-  const { stroke, text, bg } = getColor(data.level);
+  const { stroke, text, bg } = getColor(data.score);
 
   if (compact) {
     return (

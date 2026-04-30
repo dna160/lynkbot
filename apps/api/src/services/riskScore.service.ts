@@ -80,7 +80,7 @@ export class RiskScoreService {
 
   /**
    * Queries live DB data, runs the PRD §8.1 formula, and stores the result.
-   * Uses delete-then-insert since the table lacks a unique constraint on tenant_id.
+   * Uses ON CONFLICT DO UPDATE (upsert) on the unique tenant_id index (PRD §10).
    */
   async computeAndStore(tenantId: string): Promise<RiskScoreResult> {
     const now = new Date();
@@ -154,14 +154,23 @@ export class RiskScoreService {
       averageDelayBetweenNodesMs,
     });
 
-    // ── Upsert: delete old row then insert new (no unique constraint on tenant_id) ─
-    await db.delete(tenantRiskScores).where(eq(tenantRiskScores.tenantId, tenantId));
-    await db.insert(tenantRiskScores).values({
-      tenantId,
-      score,
-      factors: breakdown as unknown as Record<string, unknown>,
-      computedAt: now,
-    });
+    // ── Upsert via ON CONFLICT DO UPDATE (unique tenant_id index — PRD §10) ────
+    await db
+      .insert(tenantRiskScores)
+      .values({
+        tenantId,
+        score,
+        factors: breakdown as unknown as Record<string, unknown>,
+        computedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: tenantRiskScores.tenantId,
+        set: {
+          score,
+          factors: breakdown as unknown as Record<string, unknown>,
+          computedAt: now,
+        },
+      });
 
     // Stamp tenants.last_risk_score_at
     await db

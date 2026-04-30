@@ -11,6 +11,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { getLLMClient } from '@lynkbot/ai';
+import { requireFeature } from '../../middleware/featureGate';
 import {
   db,
   flowTemplates,
@@ -161,7 +162,7 @@ export const aiRoutes: FastifyPluginAsync = async (fastify) => {
     Body: { prompt: string; productId?: string; audienceSegment?: string };
   }>(
     '/v1/ai/generate-flow',
-    { preHandler: fastify.authenticate },
+    { preHandler: [fastify.authenticate, requireFeature('ai_flow_generator')] },
     async (request, reply) => {
       const { prompt, productId, audienceSegment } = request.body ?? {};
       if (!prompt?.trim()) {
@@ -284,7 +285,7 @@ export const aiRoutes: FastifyPluginAsync = async (fastify) => {
     Body: { flowId: string; instruction: string };
   }>(
     '/v1/ai/modify-flow',
-    { preHandler: fastify.authenticate },
+    { preHandler: [fastify.authenticate, requireFeature('ai_flow_generator')] },
     async (request, reply) => {
       const { flowId, instruction } = request.body ?? {};
       if (!flowId?.trim()) return reply.status(400).send({ error: 'flowId is required' });
