@@ -343,3 +343,49 @@ Append `## Phase 3 Result` to this file with:
 - **Phase 4 notes**: what Re-engagement + Risk Scoring phase needs to know
 
 Return a final summary under 400 words.
+
+---
+
+## Phase 3 Result
+
+**Status: COMPLETE** — 28/28 tests passing, zero TypeScript errors in Phase 3 files.
+
+### Files Created / Modified
+
+- **`packages/db/src/schema/flowExecutions.ts`** — added `'waiting_reply'` to `flowExecutionStatusEnum`
+- **`packages/db/src/schema/flowTemplates.ts`** — added `'pending_review'`, `'flagged'`, `'in_appeal'` to `flowTemplateStatusEnum`
+- **`packages/flow-engine/src/engine.ts`** — removed `'waiting_reply' as 'running'` cast workaround
+- **`apps/api/src/services/templateStudio.service.ts`** — full TemplateStudioService (createDraft, updateDraft, submit, appeal, pause, handleStatusUpdate, pollPending, syncQualityRatings, validateForFlowUse); fixed `$inferSelect` instead of `InferSelectModel`
+- **`apps/api/src/routes/v1/flowTemplates.ts`** — 8 REST endpoints; DELETE 409 guard; appeal 422 guard
+- **`apps/api/src/index.ts`** — registered `flowTemplateRoutes`
+- **`apps/api/src/routes/__tests__/flowTemplates.test.ts`** — 28 tests using `vi.hoisted()` and separate mock fns per db.query table
+- **`apps/api/vitest.config.ts`** — `pool: 'forks', singleFork: true`
+- **`apps/worker/src/processors/templateSync.processor.ts`** — inline AES-256-GCM decrypt; `template.poll_pending` + `template.sync_quality` jobs
+- **`apps/worker/src/index.ts`** — registered TEMPLATE_SYNC worker (concurrency=5)
+- **`apps/dashboard/src/pages/Templates/TemplateListPage.tsx`** — paginated table, status badges, action buttons
+- **`apps/dashboard/src/pages/Templates/TemplateEditorPage.tsx`** — form with live preview, snake_case auto-derive
+- **`apps/dashboard/src/pages/Templates/components/TemplatePreview.tsx`** — WhatsApp dark-green bubble mockup
+- **`apps/dashboard/src/components/Sidebar.tsx`** — added Templates nav entry
+- **`apps/dashboard/src/App.tsx`** — added 3 template routes
+- **`apps/dashboard/src/lib/api.ts`** — added `flowTemplatesApi` (8 methods)
+- **`Dockerfile.test`** — multi-stage test runner: shared→meta→db→flow-engine builds before vitest
+
+### Skipped
+
+- **Webhook handler for `message_template_status_update`** — not committed in Phase 3; added in Phase 4 (along with `phone_number_quality_update` handler).
+
+### Test Results
+
+`pnpm -F api test` (Docker): **28/28 passed** (20 flowTemplates + 8 crypto)
+
+### Typecheck Status
+
+- `pnpm -F api typecheck`: zero errors in Phase 3 files (pre-existing errors in ai.ts, intelligence.ts, conversation.service.ts, payment.service.ts from unbuilt @lynkbot/ai/@lynkbot/pantheon)
+- `pnpm -F worker typecheck`: zero errors in templateSync.processor.ts
+
+### Phase 4 Notes
+
+- `tenantRiskScores` table has **no UNIQUE constraint on `tenant_id`** in either migration or Drizzle schema (PRD says UNIQUE but migration didn't include it). Use delete-then-insert pattern for upsert.
+- `flowTemplates` schema has **no `qualityRating` column** — use `status` as quality proxy (approved=1, pending_review=0.5, rejected/disabled=0).
+- `RedisClientLike` interface (packages/flow-engine/src/nodeProcessors/types.ts) only had `incr` — needs `incrby` for broadcast segment fan-out counter.
+- Both meta webhook handlers (`message_template_status_update`, `phone_number_quality_update`) were deferred to Phase 4.
