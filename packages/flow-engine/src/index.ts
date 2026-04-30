@@ -15,3 +15,9 @@ export { CooldownChecker } from './cooldownChecker';
 export type { CooldownResult, CooldownBlockReason } from './cooldownChecker';
 export { evaluateConditionGroup } from './conditionEvaluator';
 export { resolveVariables } from './variableResolver';
+export {
+  FLOW_GENERATION_SYSTEM_PROMPT,
+  FLOW_MODIFICATION_SYSTEM_PROMPT,
+  buildFlowGenPrompt,
+  buildFlowModPrompt,
+} from './prompts/flowGeneration';
