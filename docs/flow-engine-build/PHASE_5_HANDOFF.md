@@ -38,17 +38,19 @@
 
 ### Phase 5 (just completed)
 - `packages/flow-engine/src/prompts/flowGeneration.ts` — bilingual system prompt, schema, helpers
-- `apps/api/src/routes/v1/ai.ts` — POST /v1/ai/generate-flow + POST /v1/ai/modify-flow
-- `apps/dashboard/src/components/RiskScoreGauge.tsx` — SVG arc gauge (ok/warning/blocked)
+- `apps/api/src/routes/v1/ai.ts` — POST /v1/ai/generate-flow + POST /v1/ai/modify-flow (with `requireFeature('ai_flow_generator')`)
+- `apps/dashboard/src/components/RiskScoreGauge.tsx` — SVG arc gauge, 4-band coloring: green (1-30), yellow (31-60), orange (61-80), red (81-100)
 - `apps/dashboard/src/pages/Flows/FlowsListPage.tsx` — table + risk banner + actions
-- `apps/dashboard/src/pages/Flows/FlowEditorPage.tsx` — Drawflow canvas + AI panel + config editor
+- `apps/dashboard/src/pages/Flows/FlowEditorPage.tsx` — Drawflow canvas + AI panel + config editor (CSS: `drawflow/dist/drawflow.min.css`)
 - `apps/dashboard/src/components/Sidebar.tsx` — Flows nav entry
 - `apps/dashboard/src/App.tsx` — three Flows routes
 - `apps/dashboard/src/lib/api.ts` — flowsApi, riskScoreApi, aiApi extensions
 - `apps/dashboard/package.json` — `drawflow@0.0.60` pinned
 - `apps/api/vitest.config.ts` — exclude `conversation.service.test.ts` (pre-existing broken mock)
+- `packages/db/src/schema/tenantRiskScores.ts` — `uniqueIndex` on `tenant_id` (PRD §10)
+- `packages/db/src/migrations/0006_unique_tenant_risk_score.sql` — adds unique constraint; safe deduplicate-then-create
 
-**Last commit:** `b8d6fb7` on branch `claude/elegant-brattain-b5512a`
+**Last commit:** `880753d` on branch `claude/elegant-brattain-b5512a`
 
 ---
 
@@ -195,4 +197,13 @@ fe1f782 feat(flow-engine): add FLOW_GENERATION_SYSTEM_PROMPT to prompts/flowGene
 679db12 feat(api): POST /v1/ai/generate-flow + POST /v1/ai/modify-flow routes
 7778600 feat(dashboard): FlowsListPage + FlowEditorPage + RiskScoreGauge
 b8d6fb7 feat(dashboard): add flowsApi, riskScoreApi, aiApi extensions + drawflow dep
+880753d fix(prd-drift): align implementation with PRD spec
 ```
+
+### PRD Drift Fixes (commit 880753d)
+
+Applied after audit against `LynkBot_Flow_Engine_PRD_v2.1.md`:
+- **ai.ts**: Added `requireFeature('ai_flow_generator')` preHandler to generate-flow + modify-flow (PRD §11)
+- **tenantRiskScores**: Added `uniqueIndex` on `tenant_id` + migration `0006_unique_tenant_risk_score.sql` (PRD §10); service updated to use `onConflictDoUpdate`
+- **RiskScoreGauge**: Updated to 4-band coloring (green 1-30 / yellow 31-60 / orange 61-80 / red 81-100) (PRD §13.5)
+- **FlowEditorPage**: CSS import updated to `drawflow/dist/drawflow.min.css` (PRD §13.3)
