@@ -4,26 +4,30 @@
  * File    : src/routes/__tests__/flowTemplates.test.ts
  * Role    : Integration tests for TemplateStudioService (unit-level — mocked DB and Meta API).
  *           Tests PRD §14.2 requirements: CRUD, appeal limits, delete guard, status handling.
- * Tests   : createDraft, updateDraft, submit, appeal (max 2), delete guard, handleStatusUpdate
+ * Tests   : createDraft, updateDraft, submit, appeal (max 2), pause, handleStatusUpdate, validateForFlowUse
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ─── Mock @lynkbot/db before importing the service ───────────────────────────
+// ─── Hoist all mock functions so vi.mock factories can reference them ─────────
+const {
+  mockTemplateFindFirst,
+  mockTenantFindFirst,
+  mockInsertReturning,
+  mockUpdateReturning,
+} = vi.hoisted(() => ({
+  mockTemplateFindFirst: vi.fn(),
+  mockTenantFindFirst: vi.fn(),
+  mockInsertReturning: vi.fn(),
+  mockUpdateReturning: vi.fn(),
+}));
 
-const mockFindFirst = vi.fn();
-const mockFindMany = vi.fn();
-const mockInsertReturning = vi.fn();
-const mockUpdateReturning = vi.fn();
-const mockUpdateWhere = vi.fn();
-const mockSelect = vi.fn();
-const mockDelete = vi.fn();
-
+// ─── Mock @lynkbot/db ─────────────────────────────────────────────────────────
 vi.mock('@lynkbot/db', () => ({
   db: {
     query: {
-      flowTemplates: { findFirst: mockFindFirst },
-      tenants: { findFirst: vi.fn() },
-      flowDefinitions: { findMany: mockFindMany },
+      flowTemplates: { findFirst: mockTemplateFindFirst },
+      tenants: { findFirst: mockTenantFindFirst },
+      flowDefinitions: { findMany: vi.fn() },
     },
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
@@ -39,13 +43,11 @@ vi.mock('@lynkbot/db', () => ({
     })),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn().mockResolvedValue([]),
-        })),
+        where: vi.fn().mockResolvedValue([]),
       })),
     })),
     delete: vi.fn(() => ({
-      where: mockDelete,
+      where: vi.fn().mockResolvedValue([]),
     })),
   },
   flowTemplates: {
@@ -65,8 +67,8 @@ vi.mock('@lynkbot/db', () => ({
     description: 'description',
   },
   tenants: { id: 'id', metaAccessToken: 'metaAccessToken', wabaId: 'wabaId' },
-  eq: vi.fn((_a, _b) => ({ type: 'eq' })),
-  and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+  eq: vi.fn((_a: unknown, _b: unknown) => ({ type: 'eq' })),
+  and: vi.fn((..._args: unknown[]) => ({ type: 'and' })),
   desc: vi.fn(),
   count: vi.fn(() => ({ cnt: 0 })),
   sql: Object.assign(vi.fn(), { empty: vi.fn() }),
@@ -112,11 +114,19 @@ const draftTemplate = {
   updatedAt: new Date(),
 };
 
+const tenantWithWaba = {
+  id: 'tenant-1',
+  wabaId: 'waba-123',
+  metaAccessToken: 'encrypted-token',
+};
+
 describe('TemplateStudioService', () => {
   let svc: TemplateStudioService;
 
   beforeEach(() => {
     svc = new TemplateStudioService();
+    // clearAllMocks preserves factory implementations (db.insert, db.update, etc.)
+    // Queue leaks are prevented by using separate named mocks for each db.query.*
     vi.clearAllMocks();
   });
 
@@ -151,7 +161,7 @@ describe('TemplateStudioService', () => {
 
   describe('updateDraft', () => {
     it('updates a draft template', async () => {
-      mockFindFirst.mockResolvedValueOnce(draftTemplate);
+      mockTemplateFindFirst.mockResolvedValueOnce(draftTemplate);
       const updated = { ...draftTemplate, bodyText: 'Updated body text.' };
       mockUpdateReturning.mockResolvedValueOnce([updated]);
 
@@ -163,7 +173,7 @@ describe('TemplateStudioService', () => {
     });
 
     it('throws 422 if template is approved (not editable)', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'approved' });
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'approved' });
 
       await expect(
         svc.updateDraft('tenant-1', 'tmpl-1', { name: 'new_name' }),
@@ -171,7 +181,7 @@ describe('TemplateStudioService', () => {
     });
 
     it('throws 404 if template not found', async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
+      mockTemplateFindFirst.mockResolvedValueOnce(null);
 
       await expect(
         svc.updateDraft('tenant-1', 'tmpl-1', { name: 'new_name' }),
@@ -182,16 +192,9 @@ describe('TemplateStudioService', () => {
   // ─── submit ─────────────────────────────────────────────────────────────────
 
   describe('submit', () => {
-    const tenantWithWaba = {
-      id: 'tenant-1',
-      wabaId: 'waba-123',
-      metaAccessToken: 'encrypted-token',
-    };
-
     it('posts to Meta and stores metaTemplateId', async () => {
-      mockFindFirst
-        .mockResolvedValueOnce(draftTemplate)  // _requireTemplate
-        .mockResolvedValueOnce(tenantWithWaba); // tenants lookup
+      mockTemplateFindFirst.mockResolvedValueOnce(draftTemplate);
+      mockTenantFindFirst.mockResolvedValueOnce(tenantWithWaba);
 
       vi.mocked(axios.post).mockResolvedValueOnce({ status: 200, data: { id: 'meta-tmpl-456' } });
       const submittedTemplate = { ...draftTemplate, status: 'pending_review', metaTemplateId: 'meta-tmpl-456' };
@@ -208,13 +211,13 @@ describe('TemplateStudioService', () => {
     });
 
     it('throws 400 if template name is not snake_case', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, name: 'Order Confirmation' });
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, name: 'Order Confirmation' });
 
       await expect(svc.submit('tenant-1', 'tmpl-1')).rejects.toMatchObject({ statusCode: 400 });
     });
 
     it('throws 400 if buttons exceed 3', async () => {
-      mockFindFirst.mockResolvedValueOnce({
+      mockTemplateFindFirst.mockResolvedValueOnce({
         ...draftTemplate,
         buttons: [
           { type: 'QUICK_REPLY', text: 'A' },
@@ -228,9 +231,8 @@ describe('TemplateStudioService', () => {
     });
 
     it('throws 502 if Meta returns non-200', async () => {
-      mockFindFirst
-        .mockResolvedValueOnce(draftTemplate)
-        .mockResolvedValueOnce(tenantWithWaba);
+      mockTemplateFindFirst.mockResolvedValueOnce(draftTemplate);
+      mockTenantFindFirst.mockResolvedValueOnce(tenantWithWaba);
 
       vi.mocked(axios.post).mockResolvedValueOnce({
         status: 400,
@@ -244,8 +246,12 @@ describe('TemplateStudioService', () => {
   // ─── appeal ─────────────────────────────────────────────────────────────────
 
   describe('appeal', () => {
-    it('throws 422 if appealCount >= 2 (compliance)', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'rejected', appealCount: 2 });
+    it('throws 422 with code=appeal_limit_reached if appealCount >= 2 (compliance)', async () => {
+      mockTemplateFindFirst.mockResolvedValueOnce({
+        ...draftTemplate,
+        status: 'rejected',
+        appealCount: 2,
+      });
 
       await expect(svc.appeal('tenant-1', 'tmpl-1')).rejects.toMatchObject({
         statusCode: 422,
@@ -254,7 +260,7 @@ describe('TemplateStudioService', () => {
     });
 
     it('throws 422 if template is not rejected', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'draft', appealCount: 0 });
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'draft', appealCount: 0 });
 
       await expect(svc.appeal('tenant-1', 'tmpl-1')).rejects.toMatchObject({ statusCode: 422 });
     });
@@ -264,27 +270,39 @@ describe('TemplateStudioService', () => {
 
   describe('pause', () => {
     it('throws 422 if template is not approved', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'draft' });
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'draft' });
 
       await expect(svc.pause('tenant-1', 'tmpl-1')).rejects.toMatchObject({ statusCode: 422 });
+    });
+
+    it('resolves without throwing if template is approved', async () => {
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'approved' });
+
+      await expect(svc.pause('tenant-1', 'tmpl-1')).resolves.toBeUndefined();
     });
   });
 
   // ─── handleStatusUpdate ─────────────────────────────────────────────────────
 
   describe('handleStatusUpdate', () => {
-    it('sets status=approved and approvedAt on APPROVED event', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'pending_review' });
-      mockUpdateWhere.mockResolvedValueOnce([]);
+    it('returns early without throwing if template not found', async () => {
+      mockTemplateFindFirst.mockResolvedValueOnce(null);
 
-      // Should not throw
+      await expect(
+        svc.handleStatusUpdate({ metaTemplateId: 'unknown', event: 'APPROVED' }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('sets status=approved on APPROVED event without throwing', async () => {
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'pending_review' });
+
       await expect(
         svc.handleStatusUpdate({ metaTemplateId: 'meta-tmpl-456', event: 'APPROVED' }),
       ).resolves.toBeUndefined();
     });
 
-    it('sets status=rejected and rejectionReason on REJECTED event', async () => {
-      mockFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'pending_review' });
+    it('sets status=rejected on REJECTED event without throwing', async () => {
+      mockTemplateFindFirst.mockResolvedValueOnce({ ...draftTemplate, status: 'pending_review' });
 
       await expect(
         svc.handleStatusUpdate({
@@ -295,26 +313,11 @@ describe('TemplateStudioService', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('returns early and does not throw if template not found', async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
-
-      await expect(
-        svc.handleStatusUpdate({ metaTemplateId: 'unknown', event: 'APPROVED' }),
-      ).resolves.toBeUndefined();
-    });
-
-    it('sets status=disabled on DISABLED event and queries active flows', async () => {
+    it('handles DISABLED event and queries for active flows to pause', async () => {
       const approvedTemplate = { ...draftTemplate, status: 'approved', name: 'order_confirmation' };
-      mockFindFirst.mockResolvedValueOnce(approvedTemplate);
+      mockTemplateFindFirst.mockResolvedValueOnce(approvedTemplate);
 
-      // Mock select for affectedFlows
-      const { db } = await import('@lynkbot/db');
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn(() => ({
-          where: vi.fn().mockResolvedValue([]),
-        })),
-      } as any);
-
+      // select().from().where() resolves to [] — no active flows found
       await expect(
         svc.handleStatusUpdate({ metaTemplateId: 'meta-tmpl-456', event: 'DISABLED' }),
       ).resolves.toBeUndefined();

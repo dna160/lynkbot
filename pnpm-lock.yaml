@@ -56,6 +56,9 @@ importers:
       '@lynkbot/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@lynkbot/flow-engine':
+        specifier: workspace:*
+        version: link:../../packages/flow-engine
       '@lynkbot/meta':
         specifier: workspace:*
         version: link:../../packages/meta
@@ -178,6 +181,9 @@ importers:
       '@lynkbot/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@lynkbot/flow-engine':
+        specifier: workspace:*
+        version: link:../../packages/flow-engine
       '@lynkbot/meta':
         specifier: workspace:*
         version: link:../../packages/meta
@@ -262,6 +268,28 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
+
+  packages/flow-engine:
+    dependencies:
+      '@lynkbot/db':
+        specifier: workspace:*
+        version: link:../db
+      '@lynkbot/meta':
+        specifier: workspace:*
+        version: link:../meta
+      '@lynkbot/shared':
+        specifier: workspace:*
+        version: link:../shared
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.75.2
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.0.0
+        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
   packages/meta:
     dependencies:

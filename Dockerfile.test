@@ -1,0 +1,20 @@
+# Test runner image — installs full monorepo with dev deps and runs vitest
+FROM node:20-alpine
+RUN apk add --no-cache dumb-init python3 make g++
+RUN npm install -g turbo@2 \
+    && corepack enable \
+    && corepack prepare pnpm@9 --activate
+
+WORKDIR /app
+COPY . .
+
+# Install ALL deps including devDependencies (needed for vitest, tsx, etc)
+RUN pnpm install --frozen-lockfile
+
+# Build workspace packages in dependency order
+RUN pnpm -F @lynkbot/shared build || true
+RUN pnpm -F @lynkbot/meta build || true
+RUN pnpm -F @lynkbot/db build
+RUN pnpm -F @lynkbot/flow-engine build
+
+CMD ["sh"]

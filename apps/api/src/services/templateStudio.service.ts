@@ -25,11 +25,11 @@ import {
   desc,
   sql,
 } from '@lynkbot/db';
-import type { InferSelectModel } from 'drizzle-orm';
 import { decrypt } from '../utils/crypto';
 import { config } from '../config';
 
-export type FlowTemplate = InferSelectModel<typeof flowTemplates>;
+// Use Drizzle's schema inference directly — avoids needing a direct drizzle-orm import
+export type FlowTemplate = typeof flowTemplates.$inferSelect;
 
 /** JSON component structure accepted by Meta's Graph API */
 export interface MetaTemplateComponent {
