@@ -176,9 +176,11 @@ function fromDrawflow(exported: any): FlowDefinition {
 interface ConfigEditorProps {
   node: FlowNode | null;
   onChange: (updated: FlowNode) => void;
+  triggerType?: TriggerType;
+  onTriggerTypeChange?: (t: TriggerType) => void;
 }
 
-function NodeConfigEditor({ node, onChange }: ConfigEditorProps) {
+function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange }: ConfigEditorProps) {
   if (!node) {
     return (
       <div className="text-center py-8 text-secondary/40 text-xs">
@@ -328,7 +330,67 @@ function NodeConfigEditor({ node, onChange }: ConfigEditorProps) {
       )}
 
       {node.type === 'TRIGGER' && (
-        <p className="text-xs text-secondary/60">Trigger node has no config. Set trigger type in the bottom bar.</p>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="text-xs text-secondary">Trigger Type</span>
+            <select
+              className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+              value={triggerType ?? 'inbound_keyword'}
+              onChange={e => onTriggerTypeChange?.(e.target.value as TriggerType)}
+            >
+              <option value="inbound_keyword">Keyword Trigger</option>
+              <option value="time_based">Scheduled (Cron)</option>
+              <option value="order_event">Order Event</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+
+          {(triggerType === 'inbound_keyword' || !triggerType) && (
+            <label className="block">
+              <span className="text-xs text-secondary">Keywords (comma-separated)</span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent font-mono"
+                placeholder="hello, hi, halo"
+                value={(Array.isArray(node.config.keywords) ? node.config.keywords : []).join(', ')}
+                onChange={e => update({ keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">Flow starts when buyer sends any of these words.</span>
+            </label>
+          )}
+
+          {triggerType === 'time_based' && (
+            <label className="block">
+              <span className="text-xs text-secondary">Cron Expression (Jakarta UTC+7)</span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent font-mono"
+                placeholder="0 9 * * 1  (Mon 9am)"
+                value={String(node.config.cronExpression ?? '')}
+                onChange={e => update({ cronExpression: e.target.value })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">Format: min hour day month weekday</span>
+            </label>
+          )}
+
+          {triggerType === 'order_event' && (
+            <label className="block">
+              <span className="text-xs text-secondary">Order Event</span>
+              <select
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                value={String(node.config.orderEvent ?? 'order_confirmed')}
+                onChange={e => update({ orderEvent: e.target.value })}
+              >
+                <option value="order_confirmed">Order Confirmed</option>
+                <option value="order_shipped">Order Shipped</option>
+                <option value="order_delivered">Order Delivered</option>
+                <option value="payment_expired">Payment Expired</option>
+              </select>
+            </label>
+          )}
+
+          {triggerType === 'manual' && (
+            <p className="text-[10px] text-secondary/50">Manual flows are started via the API or broadcast. No additional config needed.</p>
+          )}
+        </div>
       )}
 
       {node.type === 'SEGMENT_QUALITY_GATE' && (
@@ -737,7 +799,12 @@ export function FlowEditorPage() {
             <div className="text-xs font-semibold text-secondary uppercase tracking-wider mb-3">
               {selectedNode ? 'Node Config' : 'Properties'}
             </div>
-            <NodeConfigEditor node={selectedNode} onChange={handleConfigChange} />
+            <NodeConfigEditor
+              node={selectedNode}
+              onChange={handleConfigChange}
+              triggerType={triggerType}
+              onTriggerTypeChange={setTriggerType}
+            />
           </div>
         </div>
       </div>
