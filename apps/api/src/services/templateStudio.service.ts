@@ -56,6 +56,24 @@ export interface CreateTemplateInput {
 /** Regex for snake_case validation */
 const SNAKE_CASE_RE = /^[a-z][a-z0-9_]*$/;
 
+/**
+ * Realistic example values for known customer/order fields.
+ * Used when building Meta's required `example.body_text` array.
+ */
+const FIELD_EXAMPLES: Record<string, string> = {
+  'buyer.displayName':      'Budi Santoso',
+  'buyer.phone':            '+6281234567890',
+  'buyer.city':             'Jakarta',
+  'buyer.preferredLanguage':'Indonesian',
+  'buyer.notes':            'Please leave at the door',
+  'order.id':               'ORD-20240501-001',
+  'order.totalAmount':      'Rp 250.000',
+  'order.status':           'Confirmed',
+  'order.paymentStatus':    'Paid',
+  'order.shippingCourier':  'JNE',
+  'order.trackingNumber':   'JNE1234567890',
+};
+
 /** Extract body text from component list */
 function extractBodyText(components: MetaTemplateComponent[]): string {
   const body = components.find((c) => c.type === 'BODY');
@@ -102,7 +120,7 @@ export class TemplateStudioService {
         footer: footer ?? null,
         buttons: buttons.length ? buttons : [],
         variables,
-        ...(variableLabels ? { variables: Object.keys(variableLabels) } : {}),
+        variableLabels: variableLabels ?? {},
       })
       .returning();
 
@@ -141,6 +159,10 @@ export class TemplateStudioService {
       updates.footer = footer ?? null;
       const buttonComp = input.components.find((c) => c.type === 'BUTTONS');
       updates.buttons = buttonComp?.buttons ?? [];
+    }
+
+    if (input.variableLabels !== undefined) {
+      updates.variableLabels = input.variableLabels;
     }
 
     const [row] = await db
@@ -191,14 +213,19 @@ export class TemplateStudioService {
       metaComponents.push(template.header as Record<string, unknown>);
     }
 
-    // Body: Meta requires `example.body_text` when the text contains {{N}} variables
+    // Body: Meta requires `example.body_text` when the text contains {{N}} variables.
+    // Use stored variableLabels to pick realistic examples; fall back to generic text.
     const bodyVars = extractVariables(template.bodyText);
+    const storedLabels = (template.variableLabels ?? {}) as Record<string, string>;
     const bodyComponent: Record<string, unknown> = { type: 'BODY', text: template.bodyText };
     if (bodyVars.length > 0) {
-      // Provide one sample row with generic placeholder values
-      bodyComponent.example = {
-        body_text: [bodyVars.map((_, i) => `Sample value ${i + 1}`)],
-      };
+      const exampleRow = bodyVars.map((token, i) => {
+        const fieldPath = storedLabels[token];
+        return fieldPath
+          ? (FIELD_EXAMPLES[fieldPath] ?? fieldPath)
+          : `Sample value ${i + 1}`;
+      });
+      bodyComponent.example = { body_text: [exampleRow] };
     }
     metaComponents.push(bodyComponent);
 

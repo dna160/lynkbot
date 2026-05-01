@@ -50,6 +50,7 @@ export const flowTemplates = pgTable(
     footer: varchar('footer', { length: 60 }),
     buttons: jsonb('buttons').default([]),
     variables: jsonb('variables').$type<string[]>().default([]),
+    variableLabels: jsonb('variable_labels').$type<Record<string, string>>().default({}),
     metaTemplateId: varchar('meta_template_id', { length: 255 }),
     metaTemplateName: varchar('meta_template_name', { length: 255 }),
     rejectionReason: text('rejection_reason'),
