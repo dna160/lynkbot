@@ -9,8 +9,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, desc } from '@lynkbot/db';
 import { db, conversations, messages, buyers } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
-import { config } from '../../config';
+import { getTenantMetaClient } from '../../services/_meta.helper';
 
 function isWithin24HourWindow(lastMessageAt: Date | string): boolean {
   return Date.now() - new Date(lastMessageAt).getTime() < 24 * 60 * 60 * 1000;
@@ -183,21 +182,17 @@ export const conversationRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      // Send via Meta — in dev mode we tolerate errors (test phone numbers)
-      const meta = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+      // Send via per-tenant WABA credentials
       try {
+        const meta = await getTenantMetaClient(tenantId);
         await meta.sendText({
           to: conv.buyerWaPhone!,
           message: text.trim(),
           isWithin24hrWindow: true,
         });
       } catch (sendErr: any) {
-        if (config.NODE_ENV === 'production') {
-          const errMsg = sendErr?.response?.data?.error?.message ?? sendErr?.message ?? 'Meta send error';
-          return reply.status(502).send({ error: `Failed to send via WhatsApp: ${errMsg}` });
-        }
-        // In dev: log and continue — still persist to DB for UI testing
-        request.log.warn({ err: sendErr }, 'Meta send failed (dev mode — message saved to DB anyway)');
+        const errMsg = sendErr?.response?.data?.error?.message ?? sendErr?.message ?? 'Meta send error';
+        return reply.status(502).send({ error: `Failed to send via WhatsApp: ${errMsg}` });
       }
 
       // Persist the outbound message
