@@ -185,13 +185,22 @@ export class TemplateStudioService {
     const accessToken = decrypt(tenant.metaAccessToken, config.WABA_POOL_ENCRYPTION_KEY);
 
     // Build Meta component payload
-    const metaComponents: MetaTemplateComponent[] = [];
+    const metaComponents: Array<Record<string, unknown>> = [];
 
     if (template.header) {
-      metaComponents.push(template.header as MetaTemplateComponent);
+      metaComponents.push(template.header as Record<string, unknown>);
     }
 
-    metaComponents.push({ type: 'BODY', text: template.bodyText });
+    // Body: Meta requires `example.body_text` when the text contains {{N}} variables
+    const bodyVars = extractVariables(template.bodyText);
+    const bodyComponent: Record<string, unknown> = { type: 'BODY', text: template.bodyText };
+    if (bodyVars.length > 0) {
+      // Provide one sample row with generic placeholder values
+      bodyComponent.example = {
+        body_text: [bodyVars.map((_, i) => `Sample value ${i + 1}`)],
+      };
+    }
+    metaComponents.push(bodyComponent);
 
     if (template.footer) {
       metaComponents.push({ type: 'FOOTER', text: template.footer });
@@ -200,7 +209,7 @@ export class TemplateStudioService {
     if (Array.isArray(template.buttons) && (template.buttons as unknown[]).length > 0) {
       metaComponents.push({
         type: 'BUTTONS',
-        buttons: template.buttons as MetaTemplateComponent['buttons'],
+        buttons: template.buttons,
       });
     }
 
@@ -224,8 +233,10 @@ export class TemplateStudioService {
     );
 
     if (res.status !== 200 && res.status !== 201) {
+      const metaError = res.data as { error?: { message?: string; error_user_msg?: string } };
       const errMsg =
-        (res.data as { error?: { message?: string } })?.error?.message ??
+        metaError?.error?.error_user_msg ??
+        metaError?.error?.message ??
         `Meta API error: ${res.status}`;
       throw Object.assign(new Error(errMsg), { statusCode: 502 });
     }
