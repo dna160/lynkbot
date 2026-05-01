@@ -642,7 +642,7 @@ export function FlowEditorPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
+    <div className="flex flex-col h-full">
       {/* Bottom bar (flow metadata) */}
       <div className="flex items-center gap-4 px-5 py-3 border-b border-border bg-surface shrink-0">
         <input

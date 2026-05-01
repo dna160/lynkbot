@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Component, type ReactNode } from 'react';
 import { Layout } from './components/Layout';
+import { CanvasLayout } from './components/CanvasLayout';
 import { LoginPage } from './pages/Login/LoginPage';
 import { OnboardingPage } from './pages/Onboarding/OnboardingPage';
 import { ProductsPage } from './pages/Products/ProductsPage';
@@ -123,6 +124,9 @@ export default function App() {
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="flows" element={<FlowsListPage />} />
+        </Route>
+        {/* Canvas routes — full-bleed, no padding wrapper */}
+        <Route path="/dashboard" element={<ProtectedRoute><CanvasLayout /></ProtectedRoute>}>
           <Route path="flows/new" element={<FlowEditorPage />} />
           <Route path="flows/:id/edit" element={<FlowEditorPage />} />
         </Route>
