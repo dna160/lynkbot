@@ -260,12 +260,25 @@ export class TemplateStudioService {
     );
 
     if (res.status !== 200 && res.status !== 201) {
-      const metaError = res.data as { error?: { message?: string; error_user_msg?: string } };
-      const errMsg =
+      const metaError = res.data as { error?: { message?: string; error_user_msg?: string; error_data?: string } };
+      const rawMsg =
         metaError?.error?.error_user_msg ??
         metaError?.error?.message ??
         `Meta API error: ${res.status}`;
-      throw Object.assign(new Error(errMsg), { statusCode: 502 });
+
+      // Translate common Meta errors into actionable messages
+      let errMsg = rawMsg;
+      if (rawMsg.includes("category") && rawMsg.includes("doesn't match")) {
+        // Extract the category Meta already has on record
+        const match = rawMsg.match(/already associated with this template,\s*(\w+)/i);
+        const existingCat = match?.[1] ?? 'another category';
+        errMsg = `This template name already exists in Meta under the "${existingCat}" category. `
+          + `Change the Category field in the editor to "${existingCat}" and resubmit, or rename the template.`;
+      } else if (rawMsg.includes('duplicate') || rawMsg.includes('already exists')) {
+        errMsg = `A template with this name already exists in Meta. Rename the template and resubmit.`;
+      }
+
+      throw Object.assign(new Error(errMsg), { statusCode: 422 });
     }
 
     const metaTemplateId = String(
