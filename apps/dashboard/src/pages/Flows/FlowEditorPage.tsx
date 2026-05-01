@@ -717,14 +717,14 @@ export function FlowEditorPage() {
           {/* Drawflow custom CSS (overrides) */}
           <style>{`
             .drawflow { background: #0B1120; }
-            .drawflow .drawflow-node { background: #1E293B; border: 1px solid #334155; border-radius: 8px; padding: 0; overflow: hidden; min-width: 180px; }
-            .drawflow .drawflow-node.selected { border-color: #6366F1; box-shadow: 0 0 0 2px rgba(99,102,241,0.3); }
+            .drawflow .drawflow-node { background: #1E293B !important; border: 1px solid #334155 !important; border-radius: 8px; padding: 0; overflow: hidden; min-width: 180px; }
+            .drawflow .drawflow-node.selected { background: #1E293B !important; border-color: #6366F1 !important; box-shadow: 0 0 0 2px rgba(99,102,241,0.3) !important; }
             .drawflow .drawflow-node.error { border-color: #EF4444 !important; }
             .df-node-inner { padding: 8px 10px; }
             .df-node-type { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2px; }
             .df-node-label { font-size: 11px; color: #CBD5E1; line-height: 1.4; }
             .df-node-error { font-size: 9px; color: #F87171; margin-top: 3px; }
-            .drawflow .input, .drawflow .output { background: #6366F1; border: 2px solid #4F46E5; width: 10px; height: 10px; }
+            .drawflow .input, .drawflow .output { background: #6366F1 !important; border: 2px solid #4F46E5 !important; width: 10px; height: 10px; }
             .drawflow .connection .main-path { stroke: #6366F1; stroke-width: 2px; }
           `}</style>
 
