@@ -17,7 +17,7 @@ const envSchema = z.object({
   REDIS_URL: z.string(),
   JWT_SECRET: z.string().min(32),
   LYNK_INTERNAL_API_KEY: z.string().min(10),
-  XAI_API_KEY: z.string().min(1),
+  XAI_API_KEY: z.string().default(''),
   XAI_BASE_URL: z.string().url().default('https://api.x.ai/v1'),
   LLM_MODEL: z.string().default('grok-4-1-fast-reasoning'),
   LLM_PROVIDER: z.string().default('xai'),
@@ -60,10 +60,8 @@ const envSchema = z.object({
   // Optional. If not set, URL discovery step is skipped.
   SERPER_API_KEY: z.string().default(''),
   // ── Flow Engine v2.1 — AES-256-GCM key for tenant Meta access tokens ────────
-  // Required. Must be 64 hex chars (= 32 bytes).
-  WABA_POOL_ENCRYPTION_KEY: z
-    .string()
-    .regex(/^[0-9a-fA-F]{64}$/, 'WABA_POOL_ENCRYPTION_KEY must be 64 hex chars (32 bytes)'),
+  // Optional at startup — validated at call-site before use.
+  WABA_POOL_ENCRYPTION_KEY: z.string().default(''),
   // ── Flow Engine v2.1 — feature flags (default ON) ───────────────────────────
   // Tier-based feature gating is stubbed in middleware/featureGate.ts; flip to
   // 'false' to hard-disable a surface area while business rules are finalized.

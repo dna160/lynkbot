@@ -173,6 +173,15 @@ export class TemplateStudioService {
       throw Object.assign(new Error('Tenant has no Meta access token configured'), { statusCode: 503 });
     }
 
+    if (!config.WABA_POOL_ENCRYPTION_KEY) {
+      throw Object.assign(
+        new Error(
+          'WABA_POOL_ENCRYPTION_KEY is not set. Add a 64-hex-char key to Railway environment variables and redeploy.',
+        ),
+        { statusCode: 503 },
+      );
+    }
+
     const accessToken = decrypt(tenant.metaAccessToken, config.WABA_POOL_ENCRYPTION_KEY);
 
     // Build Meta component payload
