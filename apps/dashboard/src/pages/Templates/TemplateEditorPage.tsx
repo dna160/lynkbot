@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { flowTemplatesApi } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
@@ -8,6 +8,28 @@ type Category = 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
 type ButtonType = 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
 
 interface Button { type: ButtonType; text: string; url?: string; phone_number?: string }
+
+// ── Customer / Order field mappings available for auto-fill ───────────────────
+
+interface FieldOption { label: string; value: string; group: string; icon: string }
+
+const CUSTOMER_FIELDS: FieldOption[] = [
+  // Customer fields
+  { label: 'Customer Name',       value: 'buyer.displayName',       group: 'Customer', icon: '👤' },
+  { label: 'Phone Number',        value: 'buyer.phone',             group: 'Customer', icon: '📱' },
+  { label: 'City',                value: 'buyer.city',              group: 'Customer', icon: '📍' },
+  { label: 'Preferred Language',  value: 'buyer.preferredLanguage', group: 'Customer', icon: '🌐' },
+  { label: 'Notes',               value: 'buyer.notes',             group: 'Customer', icon: '📝' },
+  // Order fields
+  { label: 'Order ID',            value: 'order.id',                group: 'Order',    icon: '🧾' },
+  { label: 'Order Total',         value: 'order.totalAmount',       group: 'Order',    icon: '💰' },
+  { label: 'Order Status',        value: 'order.status',            group: 'Order',    icon: '📦' },
+  { label: 'Payment Status',      value: 'order.paymentStatus',     group: 'Order',    icon: '💳' },
+  { label: 'Shipping Courier',    value: 'order.shippingCourier',   group: 'Order',    icon: '🚚' },
+  { label: 'Tracking Number',     value: 'order.trackingNumber',    group: 'Order',    icon: '🔍' },
+];
+
+const FIELD_BY_VALUE = new Map(CUSTOMER_FIELDS.map(f => [f.value, f]));
 
 function toSnakeCase(s: string) {
   return s
@@ -29,6 +51,7 @@ export function TemplateEditorPage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const isEdit = Boolean(id);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const [displayName, setDisplayName] = useState('');
   const [name, setName] = useState('');
@@ -75,6 +98,28 @@ export function TemplateEditorPage() {
   }, [id, isEdit, addToast]);
 
   const variables = extractVariables(bodyText);
+
+  // Insert a new {{N}} at the textarea cursor and immediately map it to a field
+  const insertVariableField = (fieldValue: string) => {
+    const existingNums = variables.map(v => parseInt(v.replace(/\D/g, '')));
+    const nextNum = existingNums.length ? Math.max(...existingNums) + 1 : 1;
+    const token = `{{${nextNum}}}`;
+    const el = bodyRef.current;
+    if (el) {
+      const start = el.selectionStart ?? bodyText.length;
+      const end = el.selectionEnd ?? bodyText.length;
+      const newText = bodyText.slice(0, start) + token + bodyText.slice(end);
+      setBodyText(newText);
+      setVariableLabels(prev => ({ ...prev, [token]: fieldValue }));
+      setTimeout(() => {
+        el.setSelectionRange(start + token.length, start + token.length);
+        el.focus();
+      }, 0);
+    } else {
+      setBodyText(t => t + token);
+      setVariableLabels(prev => ({ ...prev, [`{{${nextNum}}}`]: fieldValue }));
+    }
+  };
 
   const buildComponents = () => {
     const components = [];
@@ -252,28 +297,110 @@ export function TemplateEditorPage() {
               <h2 className="text-sm font-semibold text-primary uppercase tracking-wider">Body</h2>
               <span className="text-xs text-secondary">{bodyText.length}/1024</span>
             </div>
+
+            {/* Quick-insert field chips */}
+            <div>
+              <p className="text-[10px] font-semibold text-secondary/60 uppercase tracking-wider mb-2">
+                Insert customer field → places {'{{N}}'} at cursor
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {CUSTOMER_FIELDS.map(f => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => insertVariableField(f.value)}
+                    className="flex items-center gap-1 px-2 py-1 bg-[#0F172A] border border-border rounded-md text-[10px] text-secondary hover:text-primary hover:border-accent/60 transition-colors"
+                    title={`Insert {{N}} mapped to ${f.label}`}
+                  >
+                    <span>{f.icon}</span>
+                    <span>{f.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <textarea
+              ref={bodyRef}
               value={bodyText}
               onChange={e => setBodyText(e.target.value)}
-              placeholder="Your message body. Use {{1}}, {{2}} for variables."
+              placeholder={`Hi {{1}}, your order {{2}} is confirmed!`}
               rows={5}
               maxLength={1024}
-              className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent resize-none"
+              className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent resize-none font-mono"
             />
+
+            {/* Variable mappings */}
             {variables.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs text-secondary font-medium">Variable Labels</p>
-                {variables.map(v => (
-                  <div key={v} className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-accent/80 w-12">{v}</span>
-                    <input
-                      value={variableLabels[v] ?? ''}
-                      onChange={e => setVariableLabels(prev => ({ ...prev, [v]: e.target.value }))}
-                      placeholder={`Label for ${v} (e.g. Customer Name)`}
-                      className="flex-1 bg-[#0F172A] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
-                    />
-                  </div>
-                ))}
+              <div className="space-y-2 pt-1">
+                <p className="text-xs font-semibold text-secondary">Variable Mappings</p>
+                <p className="text-[10px] text-secondary/50 -mt-1">
+                  Each {'{{N}}'} maps to a customer field that auto-fills when the message is sent.
+                </p>
+                {variables.map(v => {
+                  const current = variableLabels[v] ?? '';
+                  const knownField = FIELD_BY_VALUE.get(current);
+                  const selectVal = knownField ? current : '__custom__';
+
+                  return (
+                    <div key={v} className="bg-[#0F172A] border border-border rounded-lg p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-bold text-accent bg-accent/10 px-2 py-0.5 rounded">
+                          {v}
+                        </span>
+                        <span className="text-[10px] text-secondary/50">maps to</span>
+                        {knownField && (
+                          <span className="ml-auto text-[10px] font-mono text-secondary/40">{knownField.value}</span>
+                        )}
+                      </div>
+
+                      <select
+                        value={selectVal}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setVariableLabels(prev => ({
+                            ...prev,
+                            [v]: val === '__custom__' ? '' : val,
+                          }));
+                        }}
+                        className="w-full bg-[#080F1E] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                      >
+                        <optgroup label="── Customer ──">
+                          {CUSTOMER_FIELDS.filter(f => f.group === 'Customer').map(f => (
+                            <option key={f.value} value={f.value}>
+                              {f.icon} {f.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="── Order ──">
+                          {CUSTOMER_FIELDS.filter(f => f.group === 'Order').map(f => (
+                            <option key={f.value} value={f.value}>
+                              {f.icon} {f.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <option value="__custom__">✏️ Custom text…</option>
+                      </select>
+
+                      {/* Custom text input when not mapped to a field */}
+                      {selectVal === '__custom__' && (
+                        <input
+                          value={current}
+                          onChange={e => setVariableLabels(prev => ({ ...prev, [v]: e.target.value }))}
+                          placeholder="Describe what goes here (e.g. promo code)"
+                          className="w-full bg-[#080F1E] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                        />
+                      )}
+
+                      {/* Resolved preview */}
+                      {knownField && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-secondary/60">
+                          <span className="text-green-500">✓</span>
+                          Auto-fills from <span className="text-green-400 font-medium">{knownField.icon} {knownField.label}</span> when sending
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
