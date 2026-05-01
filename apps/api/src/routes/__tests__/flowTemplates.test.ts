@@ -102,6 +102,7 @@ const draftTemplate = {
   footer: null,
   buttons: [],
   variables: ['{{1}}', '{{2}}'],
+  variableLabels: { '{{1}}': 'buyer.displayName', '{{2}}': 'order.id' },
   metaTemplateId: null,
   metaTemplateName: null,
   rejectionReason: null,
