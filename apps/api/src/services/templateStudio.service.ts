@@ -260,25 +260,47 @@ export class TemplateStudioService {
     );
 
     if (res.status !== 200 && res.status !== 201) {
-      const metaError = res.data as { error?: { message?: string; error_user_msg?: string; error_data?: string } };
+      const metaError = res.data as { error?: { message?: string; error_user_msg?: string } };
       const rawMsg =
         metaError?.error?.error_user_msg ??
         metaError?.error?.message ??
         `Meta API error: ${res.status}`;
 
-      // Translate common Meta errors into actionable messages
-      let errMsg = rawMsg;
-      if (rawMsg.includes("category") && rawMsg.includes("doesn't match")) {
-        // Extract the category Meta already has on record
-        const match = rawMsg.match(/already associated with this template,\s*(\w+)/i);
-        const existingCat = match?.[1] ?? 'another category';
-        errMsg = `This template name already exists in Meta under the "${existingCat}" category. `
-          + `Change the Category field in the editor to "${existingCat}" and resubmit, or rename the template.`;
-      } else if (rawMsg.includes('duplicate') || rawMsg.includes('already exists')) {
-        errMsg = `A template with this name already exists in Meta. Rename the template and resubmit.`;
+      // ── Already exists in Meta (e.g. partial submit from a previous attempt) ──
+      // Recover: look up the existing template by name, sync its ID + status locally.
+      const alreadyExists =
+        rawMsg.toLowerCase().includes('already') &&
+        (rawMsg.toLowerCase().includes('content') || rawMsg.toLowerCase().includes('exists'));
+
+      if (alreadyExists) {
+        const syncResult = await this._syncExistingMetaTemplate(
+          tenant.wabaId!, accessToken, template.name, template.language, id, tenantId,
+        );
+        if (syncResult) return syncResult;
+        // If lookup failed, fall through to a clear error
+        throw Object.assign(
+          new Error(
+            `Template "${template.name}" already exists in Meta. ` +
+            `Open Meta Business Manager to check its status, or rename the template and resubmit.`,
+          ),
+          { statusCode: 422 },
+        );
       }
 
-      throw Object.assign(new Error(errMsg), { statusCode: 422 });
+      // ── Category mismatch ──
+      if (rawMsg.includes("category") && rawMsg.includes("doesn't match")) {
+        const match = rawMsg.match(/already associated with this template,\s*(\w+)/i);
+        const existingCat = match?.[1] ?? 'another category';
+        throw Object.assign(
+          new Error(
+            `This template name already exists in Meta under the "${existingCat}" category. ` +
+            `Change the Category field to "${existingCat}" and resubmit, or rename the template.`,
+          ),
+          { statusCode: 422 },
+        );
+      }
+
+      throw Object.assign(new Error(rawMsg), { statusCode: 422 });
     }
 
     const metaTemplateId = String(
@@ -649,6 +671,63 @@ export class TemplateStudioService {
   // ────────────────────────────────────────────────────────────────────────────
   // Helpers
   // ────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Recover from a "template already exists in Meta" error.
+   * Queries Meta for the template by name+language, then syncs the local record
+   * with the Meta template ID and status so subsequent operations work correctly.
+   * Returns the updated local record on success, null if Meta lookup fails.
+   */
+  private async _syncExistingMetaTemplate(
+    wabaId: string,
+    accessToken: string,
+    name: string,
+    language: string,
+    localId: string,
+    tenantId: string,
+  ): Promise<FlowTemplate | null> {
+    try {
+      const lookupRes = await axios.get(
+        `https://graph.facebook.com/v23.0/${wabaId}/message_templates`,
+        {
+          params: { name, fields: 'id,name,status,language', limit: 10 },
+          headers: { Authorization: `Bearer ${accessToken}` },
+          validateStatus: null,
+        },
+      );
+      if (lookupRes.status !== 200) return null;
+
+      const items = (lookupRes.data as { data?: Array<{ id: string; status: string; language: string }> }).data ?? [];
+      const match = items.find(t => t.language === language) ?? items[0];
+      if (!match) return null;
+
+      const statusMap: Record<string, typeof flowTemplates.$inferSelect['status']> = {
+        APPROVED:       'approved',
+        REJECTED:       'rejected',
+        PENDING:        'pending_review',
+        FLAGGED:        'flagged',
+        IN_APPEAL:      'in_appeal',
+        DISABLED:       'disabled',
+        PENDING_DELETION: 'disabled',
+      };
+      const newStatus = statusMap[match.status?.toUpperCase()] ?? 'pending_review';
+
+      const [updated] = await db
+        .update(flowTemplates)
+        .set({
+          metaTemplateId: match.id,
+          status: newStatus,
+          submittedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(flowTemplates.id, localId), eq(flowTemplates.tenantId, tenantId)))
+        .returning();
+
+      return updated ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   /** Load template belonging to tenant or throw 404. */
   private async _requireTemplate(tenantId: string, id: string): Promise<FlowTemplate> {
