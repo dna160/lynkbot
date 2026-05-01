@@ -172,7 +172,7 @@ export function TemplateEditorPage() {
                 value={displayName}
                 onChange={e => setDisplayName(e.target.value)}
                 placeholder="e.g. Order Confirmation"
-                className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -184,7 +184,7 @@ export function TemplateEditorPage() {
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="order_confirmation"
-                className="w-full bg-background border border-border text-primary text-sm font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                className="w-full bg-[#0F172A] border border-border text-primary text-sm font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -194,7 +194,7 @@ export function TemplateEditorPage() {
                 <select
                   value={category}
                   onChange={e => setCategory(e.target.value as Category)}
-                  className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                  className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
                 >
                   <option value="UTILITY">Utility</option>
                   <option value="MARKETING">Marketing</option>
@@ -206,7 +206,7 @@ export function TemplateEditorPage() {
                 <select
                   value={language}
                   onChange={e => setLanguage(e.target.value)}
-                  className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                  className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
                 >
                   <option value="id">Indonesian (id)</option>
                   <option value="en">English (en)</option>
@@ -223,7 +223,7 @@ export function TemplateEditorPage() {
               <select
                 value={headerType}
                 onChange={e => setHeaderType(e.target.value as typeof headerType)}
-                className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
               >
                 <option value="NONE">None</option>
                 <option value="TEXT">Text</option>
@@ -238,7 +238,7 @@ export function TemplateEditorPage() {
                 onChange={e => setHeaderText(e.target.value)}
                 placeholder="Header text (max 60 chars)"
                 maxLength={60}
-                className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
               />
             )}
             {headerType !== 'NONE' && headerType !== 'TEXT' && (
@@ -258,7 +258,7 @@ export function TemplateEditorPage() {
               placeholder="Your message body. Use {{1}}, {{2}} for variables."
               rows={5}
               maxLength={1024}
-              className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent resize-none"
+              className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent resize-none"
             />
             {variables.length > 0 && (
               <div className="space-y-2">
@@ -270,7 +270,7 @@ export function TemplateEditorPage() {
                       value={variableLabels[v] ?? ''}
                       onChange={e => setVariableLabels(prev => ({ ...prev, [v]: e.target.value }))}
                       placeholder={`Label for ${v} (e.g. Customer Name)`}
-                      className="flex-1 bg-background border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                      className="flex-1 bg-[#0F172A] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
                     />
                   </div>
                 ))}
@@ -286,7 +286,7 @@ export function TemplateEditorPage() {
               onChange={e => setFooterText(e.target.value)}
               placeholder="Footer text (max 60 chars)"
               maxLength={60}
-              className="w-full bg-background border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+              className="w-full bg-[#0F172A] border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
             />
           </div>
 
@@ -308,7 +308,7 @@ export function TemplateEditorPage() {
                   <select
                     value={btn.type}
                     onChange={e => updateButton(i, 'type', e.target.value)}
-                    className="bg-background border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                    className="bg-[#0F172A] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
                   >
                     <option value="QUICK_REPLY">Quick Reply</option>
                     <option value="URL">URL</option>
@@ -321,14 +321,14 @@ export function TemplateEditorPage() {
                   onChange={e => updateButton(i, 'text', e.target.value)}
                   placeholder="Button label"
                   maxLength={25}
-                  className="w-full bg-background border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                  className="w-full bg-[#0F172A] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
                 />
                 {btn.type === 'URL' && (
                   <input
                     value={btn.url ?? ''}
                     onChange={e => updateButton(i, 'url', e.target.value)}
                     placeholder="https://example.com/{{1}}"
-                    className="w-full bg-background border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                    className="w-full bg-[#0F172A] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
                   />
                 )}
                 {btn.type === 'PHONE_NUMBER' && (
@@ -336,7 +336,7 @@ export function TemplateEditorPage() {
                     value={btn.phone_number ?? ''}
                     onChange={e => updateButton(i, 'phone_number', e.target.value)}
                     placeholder="+628123456789"
-                    className="w-full bg-background border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
+                    className="w-full bg-[#0F172A] border border-border text-primary text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent"
                   />
                 )}
               </div>
