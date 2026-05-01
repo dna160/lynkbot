@@ -79,7 +79,14 @@ export function TemplateListPage() {
       addToast('Template submitted for review', 'success');
       load();
     } catch (err: any) {
-      addToast(err?.response?.data?.error ?? 'Submission failed', 'error');
+      const msg: string = err?.response?.data?.error ?? '';
+      if (msg.includes('no WABA ID') || msg.includes('no Meta access token')) {
+        addToast('WhatsApp not connected — go to Settings → WhatsApp to add your WABA credentials', 'error');
+      } else if (msg.includes('WABA_POOL_ENCRYPTION_KEY')) {
+        addToast('Server config missing — set WABA_POOL_ENCRYPTION_KEY in Railway env vars', 'error');
+      } else {
+        addToast(msg || 'Submission failed', 'error');
+      }
     } finally {
       setActionLoading(null);
     }
