@@ -52,53 +52,54 @@ function getLevelDescription(level: 'ok' | 'warning' | 'blocked') {
  * SVG arc gauge. Draws a 180° half-circle arc from 0 to `pct` (0–1).
  */
 function ArcGauge({ score, color }: { score: number; color: string }) {
-  const r = 40;
-  const cx = 55;
-  const cy = 55;
+  const r   = 34;
+  const cx  = 50;
+  const cy  = 46;
+  const sw  = 8;
 
-  // The gauge is the upper half of a circle.
-  // SVG y-axis is inverted (y increases downward), so the upper arc
-  // is drawn counter-clockwise (sweep-flag=0) from left to right.
+  // A <circle> starts drawing from the East (3 o'clock) point, clockwise.
+  // rotate(-180) shifts the start to West (9 o'clock = left endpoint).
+  // Clockwise from left → the first half of the circle is the UPPER arc
+  // (left → top → right), which is exactly what a gauge needs.
   //
-  // trackStart: leftmost point  (angle = 180°) → (cx-r, cy) = (15, 55)
-  // trackEnd:   rightmost point (angle =   0°) → (cx+r, cy) = (95, 55)
-  const trackStart = { x: cx - r, y: cy };
-  const trackEnd   = { x: cx + r, y: cy };
-
-  // Fill end: pct% of the way from left (180°) counter-clockwise to right (0°).
-  // fillAngle runs from π (at 0%) to 0 (at 100%).
-  // Upper-half point: x = cx + r·cos(θ),  y = cy − r·sin(θ)  (minus because SVG y is down)
-  const pct = Math.max(0, Math.min(100, score)) / 100;
-  const fillAngle = Math.PI * (1 - pct);
-  const fillEnd = {
-    x: cx + r * Math.cos(fillAngle),
-    y: cy - r * Math.sin(fillAngle), // subtract → stays in upper half
-  };
+  // strokeDasharray trick:
+  //   circumference   = 2πr  (full circle path length)
+  //   halfCircum      = πr   (upper-half arc length = our 100% track)
+  //   track dash      = halfCircum, gap = circumference  → shows upper half only
+  //   fill dash       = pct * halfCircum, gap = circumference → shows 0–100%
+  const circumference = 2 * Math.PI * r;
+  const halfCircum    = circumference / 2;
+  const pct           = Math.max(0, Math.min(100, score)) / 100;
+  const rotate        = `rotate(-180, ${cx}, ${cy})`;
 
   return (
-    <svg width="110" height="62" viewBox="0 0 110 62">
-      {/* Track — upper half-circle, counter-clockwise (sweep=0) */}
-      <path
-        d={`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 0 0 ${trackEnd.x} ${trackEnd.y}`}
+    <svg width="100" height="58" viewBox="0 0 100 58">
+      {/* Track */}
+      <circle
+        cx={cx} cy={cy} r={r}
         fill="none"
         stroke="#334155"
-        strokeWidth="8"
+        strokeWidth={sw}
         strokeLinecap="round"
+        strokeDasharray={`${halfCircum} ${circumference}`}
+        transform={rotate}
       />
-      {/* Fill — same direction, up to pct; always ≤ 180° so largeArc=0 */}
+      {/* Fill */}
       {pct > 0 && (
-        <path
-          d={`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 0 0 ${fillEnd.x} ${fillEnd.y}`}
+        <circle
+          cx={cx} cy={cy} r={r}
           fill="none"
           stroke={color}
-          strokeWidth="8"
+          strokeWidth={sw}
           strokeLinecap="round"
+          strokeDasharray={`${pct * halfCircum} ${circumference}`}
+          transform={rotate}
         />
       )}
-      {/* Score text — centred at base of arc */}
+      {/* Score */}
       <text
         x={cx}
-        y={cy - 4}
+        y={cy + 8}
         textAnchor="middle"
         fontSize="18"
         fontWeight="700"
