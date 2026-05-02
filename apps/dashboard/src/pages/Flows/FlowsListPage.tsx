@@ -128,7 +128,6 @@ export function FlowsListPage() {
           <p className="text-sm text-secondary mt-0.5">{total} flow{total !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-3">
-          <RiskScoreGauge compact />
           <button
             onClick={() => navigate('/dashboard/flows/new')}
             className="flex items-center gap-2 px-4 py-2 bg-accent/20 text-accent border border-accent/40 rounded-lg text-sm font-medium hover:bg-accent/30 transition-colors"
@@ -149,6 +148,9 @@ export function FlowsListPage() {
           </button>
         </div>
       </div>
+
+      {/* Sender Risk Score */}
+      <RiskScoreGauge />
 
       {/* Filters */}
       <div className="flex gap-3">
