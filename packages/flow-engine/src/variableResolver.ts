@@ -50,7 +50,7 @@ export function resolveVariables(template: string, ctx: ExecutionContext): strin
     }
     if (key === 'trigger.message') {
       // Works for inbound_keyword trigger and WAIT_FOR_REPLY resume (both set messageText)
-      return String((ctx.trigger as Record<string, unknown>)?.messageText ?? '');
+      return String((ctx.trigger as unknown as Record<string, unknown>)?.messageText ?? '');
     }
     if (key.startsWith('flow.variable.')) {
       const varName = key.slice('flow.variable.'.length);
