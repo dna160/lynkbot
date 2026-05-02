@@ -55,41 +55,47 @@ function ArcGauge({ score, color }: { score: number; color: string }) {
   const r = 40;
   const cx = 55;
   const cy = 55;
-  const startAngle = Math.PI; // 180°  (left)
-  const endAngle = 0;        // 0°    (right)
 
-  // full track arc (half circle)
-  const trackStart = { x: cx + r * Math.cos(startAngle), y: cy + r * Math.sin(startAngle) };
-  const trackEnd   = { x: cx + r * Math.cos(endAngle),   y: cy + r * Math.sin(endAngle) };
+  // The gauge is the upper half of a circle.
+  // SVG y-axis is inverted (y increases downward), so the upper arc
+  // is drawn counter-clockwise (sweep-flag=0) from left to right.
+  //
+  // trackStart: leftmost point  (angle = 180°) → (cx-r, cy) = (15, 55)
+  // trackEnd:   rightmost point (angle =   0°) → (cx+r, cy) = (95, 55)
+  const trackStart = { x: cx - r, y: cy };
+  const trackEnd   = { x: cx + r, y: cy };
 
-  // filled arc up to score
+  // Fill end: pct% of the way from left (180°) counter-clockwise to right (0°).
+  // fillAngle runs from π (at 0%) to 0 (at 100%).
+  // Upper-half point: x = cx + r·cos(θ),  y = cy − r·sin(θ)  (minus because SVG y is down)
   const pct = Math.max(0, Math.min(100, score)) / 100;
-  const fillAngle = Math.PI - pct * Math.PI; // from PI down to 0
-  const fillEnd   = { x: cx + r * Math.cos(fillAngle), y: cy + r * Math.sin(fillAngle) };
-
-  const largeArc = pct > 0.5 ? 1 : 0;
+  const fillAngle = Math.PI * (1 - pct);
+  const fillEnd = {
+    x: cx + r * Math.cos(fillAngle),
+    y: cy - r * Math.sin(fillAngle), // subtract → stays in upper half
+  };
 
   return (
-    <svg width="110" height="62" viewBox="0 0 110 62" className="overflow-visible">
-      {/* Track */}
+    <svg width="110" height="62" viewBox="0 0 110 62">
+      {/* Track — upper half-circle, counter-clockwise (sweep=0) */}
       <path
-        d={`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 0 1 ${trackEnd.x} ${trackEnd.y}`}
+        d={`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 0 0 ${trackEnd.x} ${trackEnd.y}`}
         fill="none"
         stroke="#334155"
         strokeWidth="8"
         strokeLinecap="round"
       />
-      {/* Fill */}
+      {/* Fill — same direction, up to pct; always ≤ 180° so largeArc=0 */}
       {pct > 0 && (
         <path
-          d={`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${largeArc} 1 ${fillEnd.x} ${fillEnd.y}`}
+          d={`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 0 0 ${fillEnd.x} ${fillEnd.y}`}
           fill="none"
           stroke={color}
           strokeWidth="8"
           strokeLinecap="round"
         />
       )}
-      {/* Score text */}
+      {/* Score text — centred at base of arc */}
       <text
         x={cx}
         y={cy - 4}
