@@ -371,6 +371,12 @@ export class ConversationService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   async routeByState(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
+    // If the buyer has an active flow execution, the Flow Engine is handling
+    // this message. Skip the LLM entirely — the flow will send its own reply.
+    if ((buyer.activeFlowCount ?? 0) > 0) {
+      return;
+    }
+
     const handlers: Record<ConversationStateValue, () => Promise<void>> = {
       INIT:                  () => this.handleInit(conv, buyer, payload),
       GREETING:              () => this.handleGreeting(conv, buyer, payload),

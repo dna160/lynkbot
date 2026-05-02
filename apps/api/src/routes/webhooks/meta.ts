@@ -230,7 +230,9 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
 
         // ── Flow Engine: inbound_keyword trigger ───────────────────────────
         // Runs after waiting_reply (active execution takes priority over new trigger).
-        // Works for first-ever messages because buyer was already created above.
+        // We trigger the flow but do NOT return — ConversationService must still
+        // run so the message is saved to the conversations table (dashboard visibility).
+        // routeByState will detect activeFlowCount > 0 and skip the LLM response.
         const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
         if (inboundText) {
           try {
@@ -239,20 +241,19 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
               inboundBuyer.id,
               inboundText,
             );
-
             if (triggeredByKeyword) {
               request.log.info(
                 { tenantId, waId: payload.waId, text: inboundText },
-                'Keyword flow triggered — skipping ConversationService',
+                'Keyword flow triggered — ConversationService will save message, LLM skipped',
               );
-              return;
             }
           } catch (kwErr: unknown) {
             request.log.warn({ err: kwErr }, 'Keyword trigger check failed — falling through to ConversationService');
           }
         }
 
-        // ── Fall through to ConversationService for non-flow messages ──────
+        // ── Always run ConversationService to save the message to the DB ───
+        // routeByState skips the LLM when buyer.activeFlowCount > 0.
         conversationService.handleInbound(tenantId, payload).catch(err => {
           request.log.error({ err, tenantId, waId: payload.waId }, 'Error processing Meta inbound message');
         });
