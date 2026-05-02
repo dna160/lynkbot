@@ -182,34 +182,43 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         // ── Flow Engine: resume WAIT_FOR_REPLY ─────────────────────────────
-        const resumeBuyer = await db.query.buyers.findFirst({
-          where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
-          columns: { id: true },
-        });
-
-        if (resumeBuyer) {
-          const activeExecution = await db.query.flowExecutions.findFirst({
-            where: and(
-              eq(flowExecutions.tenantId, tenantId),
-              eq(flowExecutions.buyerId, resumeBuyer.id),
-              // Note: flowExecutionStatusEnum may not include 'waiting_reply' in current schema
-              // Using a cast here; Phase 1 migration adds this status
-              eq(flowExecutions.status, 'waiting_reply'),
-            ),
+        // Wrapped in try-catch: if the flow_execution_status enum is missing
+        // 'waiting_reply' (migration 0009 not yet applied), we must NOT crash
+        // here — fall through to ConversationService instead.
+        let resumedByFlowEngine = false;
+        try {
+          const resumeBuyer = await db.query.buyers.findFirst({
+            where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
             columns: { id: true },
           });
 
-          if (activeExecution) {
-            const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
-            flowEngine
-              .resumeExecution(activeExecution.id, inboundText)
-              .catch((err: unknown) =>
-                request.log.error({ err }, 'Flow resume failed'),
-              );
-            // Return — do NOT also route through ConversationService
-            return;
+          if (resumeBuyer) {
+            const activeExecution = await db.query.flowExecutions.findFirst({
+              where: and(
+                eq(flowExecutions.tenantId, tenantId),
+                eq(flowExecutions.buyerId, resumeBuyer.id),
+                eq(flowExecutions.status, 'waiting_reply'),
+              ),
+              columns: { id: true },
+            });
+
+            if (activeExecution) {
+              const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
+              flowEngine
+                .resumeExecution(activeExecution.id, inboundText)
+                .catch((err: unknown) =>
+                  request.log.error({ err }, 'Flow resume failed'),
+                );
+              // Return — do NOT also route through ConversationService
+              resumedByFlowEngine = true;
+            }
           }
+        } catch (flowErr: unknown) {
+          // Schema not yet migrated (enum missing 'waiting_reply') — fall through.
+          request.log.warn({ err: flowErr }, 'Flow engine resume check failed — falling through to ConversationService');
         }
+
+        if (resumedByFlowEngine) return;
 
         // ── Fall through to ConversationService for non-flow messages ──────
         conversationService.handleInbound(tenantId, payload).catch(err => {
