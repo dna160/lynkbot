@@ -15,8 +15,8 @@ import type { Processor } from 'bullmq';
 import axios from 'axios';
 import { db, shipments, orders, conversations, buyers } from '@lynkbot/db';
 import { eq, sql } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
 import { ShipmentStatus } from '@lynkbot/shared';
+import { getTenantMetaClient } from '../_meta.helper';
 
 export interface TrackingJobData {
   shipmentId: string;
@@ -217,7 +217,7 @@ export const trackingProcessor: Processor = async (job) => {
 
     if (buyer?.waPhone) {
       const order = await db.query.orders.findFirst({ where: eq(orders.id, shipment.orderId) });
-      const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
+      const meta = await getTenantMetaClient(tenantId);
       const trackingUrl = `https://www.cekresi.com/?noresi=${shipment.resiNumber}`;
 
       try {

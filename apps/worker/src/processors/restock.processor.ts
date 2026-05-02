@@ -12,8 +12,8 @@
 import type { Processor } from 'bullmq';
 import { db, waitlist, buyers, products } from '@lynkbot/db';
 import { eq, and, isNull } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
 import { getQueue } from '../queues';
+import { getTenantMetaClient } from '../_meta.helper';
 import { QUEUES } from '@lynkbot/shared';
 
 const BATCH_SIZE = 50;
@@ -42,7 +42,7 @@ export const restockProcessor: Processor = async (job) => {
     return;
   }
 
-  const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
+  const meta = await getTenantMetaClient(tenantId);
 
   let notified = 0;
   for (const entry of batch) {

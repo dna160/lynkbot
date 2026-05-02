@@ -14,7 +14,7 @@ import type { Processor } from 'bullmq';
 import { db, orders, conversations, buyers, products, auditLogs } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
 import { pgClient } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
+import { getTenantMetaClient } from '../_meta.helper';
 
 export const paymentExpiryProcessor: Processor = async (job) => {
   const { orderId, tenantId, conversationId } = job.data as {
@@ -59,7 +59,7 @@ export const paymentExpiryProcessor: Processor = async (job) => {
 
   if (buyer && product) {
     try {
-      const meta = new MetaClient(process.env.META_ACCESS_TOKEN!, process.env.META_PHONE_NUMBER_ID!);
+      const meta = await getTenantMetaClient(tenantId);
       // zoko_shopify__payment_reminder_002:
       // "Hi {{1}}, Payment for your order from {{2}} is still pending.
       //  Click on the link to complete the payment and confirm your order. {{3}}"
