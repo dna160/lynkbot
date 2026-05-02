@@ -127,7 +127,7 @@ export class ConversationService {
   // Public entry point
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async handleInbound(tenantId: string, payload: MetaNormalizedPayload): Promise<void> {
+  async handleInbound(tenantId: string, payload: MetaNormalizedPayload, opts: { skipAI?: boolean } = {}): Promise<void> {
     const messageId = extractMessageId(payload);
     const waId = payload.waId;
 
@@ -255,8 +255,10 @@ export class ConversationService {
     // Pantheon: async genome update (fire-and-forget — never blocks the response)
     this.updateGenomeAsync(buyer.id, conv.tenantId, conv.id).catch(() => null);
 
-    // Route to state handler
-    await this.routeByState(conv, buyer, payload);
+    // Route to state handler — skip if a Flow Engine execution handled this message
+    if (!opts.skipAI) {
+      await this.routeByState(conv, buyer, payload);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -371,12 +373,6 @@ export class ConversationService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   async routeByState(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
-    // If the buyer has an active flow execution, the Flow Engine is handling
-    // this message. Skip the LLM entirely — the flow will send its own reply.
-    if ((buyer.activeFlowCount ?? 0) > 0) {
-      return;
-    }
-
     const handlers: Record<ConversationStateValue, () => Promise<void>> = {
       INIT:                  () => this.handleInit(conv, buyer, payload),
       GREETING:              () => this.handleGreeting(conv, buyer, payload),

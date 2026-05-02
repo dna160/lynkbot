@@ -234,17 +234,18 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
         // run so the message is saved to the conversations table (dashboard visibility).
         // routeByState will detect activeFlowCount > 0 and skip the LLM response.
         const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
+        let keywordTriggered = false;
         if (inboundText) {
           try {
-            const triggeredByKeyword = await flowEngine.handleKeywordTrigger(
+            keywordTriggered = await flowEngine.handleKeywordTrigger(
               tenantId,
               inboundBuyer.id,
               inboundText,
             );
-            if (triggeredByKeyword) {
+            if (keywordTriggered) {
               request.log.info(
                 { tenantId, waId: payload.waId, text: inboundText },
-                'Keyword flow triggered — ConversationService will save message, LLM skipped',
+                'Keyword flow triggered — message saved to dashboard, LLM skipped',
               );
             }
           } catch (kwErr: unknown) {
@@ -253,8 +254,9 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         // ── Always run ConversationService to save the message to the DB ───
-        // routeByState skips the LLM when buyer.activeFlowCount > 0.
-        conversationService.handleInbound(tenantId, payload).catch(err => {
+        // skipAI=true when a flow was triggered — message is persisted for
+        // the dashboard but routeByState is bypassed (flow sends the reply).
+        conversationService.handleInbound(tenantId, payload, { skipAI: keywordTriggered }).catch(err => {
           request.log.error({ err, tenantId, waId: payload.waId }, 'Error processing Meta inbound message');
         });
       } catch (err) {
