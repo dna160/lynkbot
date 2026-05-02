@@ -39,6 +39,29 @@ import type {
 import { processorRegistry } from './nodeProcessors/index';
 import type { ProcessorDeps, RedisClientLike } from './nodeProcessors/types';
 
+/**
+ * Convert a semantic port name (as used by FlowEngine internally) to the
+ * Drawflow-style output key that older saved flows may have stored in the DB.
+ * Used as a backward-compat fallback in _followEdge and trigger-node lookups.
+ *
+ *   IF_CONDITION : 'true'  → 'output_1' | 'false' → 'output_2'
+ *   KEYWORD_ROUTER: '0'   → 'output_1' | '1'      → 'output_2' …
+ *   default       : 'default' → 'output_1'
+ */
+function semanticPortToDrawflow(nodeType: string, port: string): string | undefined {
+  if (nodeType === 'IF_CONDITION') {
+    if (port === 'true')  return 'output_1';
+    if (port === 'false') return 'output_2';
+    if (port === 'default') return 'output_1';
+  }
+  if (nodeType === 'KEYWORD_ROUTER') {
+    const idx = parseInt(port, 10);
+    if (!isNaN(idx)) return `output_${idx + 1}`;
+  }
+  if (port === 'default') return 'output_1';
+  return undefined;
+}
+
 export interface FlowEngineOptions {
   getMetaClient: (tenantId: string) => Promise<MetaClient>;
   redisClient: RedisClientLike;
@@ -191,7 +214,7 @@ export class FlowEngine {
     }
 
     const firstEdge = definition.edges.find(
-      e => e.source === triggerNode.id && (!e.sourcePort || e.sourcePort === 'default'),
+      e => e.source === triggerNode.id && (!e.sourcePort || e.sourcePort === 'default' || e.sourcePort === 'output_1'),
     );
 
     if (!firstEdge) {
@@ -328,7 +351,7 @@ export class FlowEngine {
     if (!triggerNode) throw new Error(`Flow ${matched.id} has no TRIGGER node`);
 
     const firstEdge = definition.edges.find(
-      e => e.source === triggerNode.id && (!e.sourcePort || e.sourcePort === 'default'),
+      e => e.source === triggerNode.id && (!e.sourcePort || e.sourcePort === 'default' || e.sourcePort === 'output_1'),
     );
 
     if (!firstEdge) {
@@ -695,11 +718,22 @@ export class FlowEngine {
     fromNodeId: string,
     port: string,
   ): Promise<void> {
-    const edge = definition.edges.find(
-      e =>
-        e.source === fromNodeId &&
-        (e.sourcePort === port || (port === 'default' && (!e.sourcePort || e.sourcePort === 'default'))),
-    );
+    // Look up node type so we can do IF_CONDITION / KEYWORD_ROUTER backward-compat mapping
+    const fromNode = definition.nodes.find(n => n.id === fromNodeId);
+    const nodeType = (fromNode?.type as string) ?? '';
+    // Drawflow-style key equivalent for this semantic port (may be undefined if no mapping)
+    const drawflowKey = semanticPortToDrawflow(nodeType, port);
+
+    const edge = definition.edges.find(e => {
+      if (e.source !== fromNodeId) return false;
+      // Exact semantic match (new saves after fix)
+      if (e.sourcePort === port) return true;
+      // Backward-compat: edge stored with Drawflow-style key (old saves)
+      if (drawflowKey && e.sourcePort === drawflowKey) return true;
+      // 'default' also matches edges with no sourcePort at all
+      if (port === 'default' && !e.sourcePort) return true;
+      return false;
+    });
 
     if (!edge) {
       // No edge found — auto-complete

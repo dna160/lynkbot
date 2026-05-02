@@ -189,6 +189,49 @@ function buildNodeHtml(type: NodeType, config: Record<string, unknown>, nodeId: 
 
 // ── Drawflow ↔ FlowDefinition conversion ─────────────────────────────────────
 
+/**
+ * Map a Drawflow output key (output_1, output_2, …) to the semantic port name
+ * that FlowEngine uses internally. Called in fromDrawflow when exporting to DB.
+ *
+ * Rules:
+ *   IF_CONDITION  : output_1 → 'true',  output_2 → 'false'
+ *   KEYWORD_ROUTER: output_N → String(N-1)  (0-indexed branch index)
+ *   everything else: output_1 → undefined (= default), output_N → String(N-1)
+ */
+function drawflowOutputToPort(nodeType: string, outKey: string): string | undefined {
+  const idx = parseInt(outKey.replace('output_', ''), 10) - 1; // 0-based
+  if (nodeType === 'IF_CONDITION') return idx === 0 ? 'true' : 'false';
+  if (nodeType === 'KEYWORD_ROUTER') return String(idx);
+  return idx === 0 ? undefined : String(idx); // undefined = default port
+}
+
+/**
+ * Reverse of drawflowOutputToPort — converts a semantic port name back to the
+ * Drawflow output key so existing edges are correctly wired when loading into
+ * the editor. Called in toDrawflow when building the Drawflow data structure.
+ */
+function portToDrawflowOutput(nodeType: string, sourcePort: string | undefined): string {
+  if (nodeType === 'IF_CONDITION') {
+    if (sourcePort === 'true'  || sourcePort === 'output_1') return 'output_1';
+    if (sourcePort === 'false' || sourcePort === 'output_2') return 'output_2';
+    return 'output_1';
+  }
+  if (nodeType === 'KEYWORD_ROUTER') {
+    // Numeric string branch index (0-based) → output_N
+    if (sourcePort !== undefined && !isNaN(Number(sourcePort))) return `output_${Number(sourcePort) + 1}`;
+    // Already Drawflow-style from older saves
+    if (sourcePort?.startsWith('output_')) return sourcePort;
+    return 'output_1';
+  }
+  // Default node: undefined/'default' → output_1
+  if (!sourcePort || sourcePort === 'default') return 'output_1';
+  // Already Drawflow-style from older saves (backward compat)
+  if (sourcePort.startsWith('output_')) return sourcePort;
+  // Numeric string
+  const n = parseInt(sourcePort, 10);
+  return isNaN(n) ? 'output_1' : `output_${n + 1}`;
+}
+
 function toDrawflow(flow: FlowDefinition): object {
   const drawflow: Record<string, { data: Record<string, object> }> = { Home: { data: {} } };
   const nodeMap: Record<string, number> = {};
@@ -228,7 +271,7 @@ function toDrawflow(flow: FlowDefinition): object {
     const srcNode = drawflow.Home.data[srcId] as any;
     const tgtNode = drawflow.Home.data[tgtId] as any;
     if (!srcNode || !tgtNode) return;
-    const outKey = edge.sourcePort ?? 'output_1';
+    const outKey = portToDrawflowOutput((srcNode as any).name ?? '', edge.sourcePort);
     const inKey  = 'input_1';
     if (!srcNode.outputs[outKey]) srcNode.outputs[outKey] = { connections: [] };
     if (!tgtNode.inputs[inKey])   tgtNode.inputs[inKey]   = { connections: [] };
@@ -263,7 +306,7 @@ function fromDrawflow(exported: any): FlowDefinition {
             id: `edge_${srcOrigId}_${tgtOrigId}_${connIdx}`,
             source: srcOrigId,
             target: tgtOrigId,
-            sourcePort: outKey,
+            sourcePort: drawflowOutputToPort(n.data?.type ?? n.name, outKey),
           });
         }
       });
