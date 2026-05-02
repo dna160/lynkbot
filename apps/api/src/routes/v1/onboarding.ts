@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db, tenants } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
+import { config } from '../../config';
 import { OnboardingService } from '../../services/onboarding.service';
 
 const svc = new OnboardingService();
@@ -66,6 +67,9 @@ export const onboardingRoutes: FastifyPluginAsync = async (fastify) => {
         onboarded,
         displayPhone: tenant.displayPhoneNumber ?? null,
         watiStatus: tenant.watiAccountStatus,
+        // Expose verify token so the dashboard can show it in webhook setup instructions.
+        // This is not a secret — it just prevents arbitrary webhook registration.
+        webhookVerifyToken: config.META_WEBHOOK_VERIFY_TOKEN,
       });
     },
   );

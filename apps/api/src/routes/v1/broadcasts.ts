@@ -9,9 +9,8 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, desc } from '@lynkbot/db';
-import { db, buyers, broadcasts } from '@lynkbot/db';
-import { MetaClient } from '@lynkbot/meta';
-import { config } from '../../config';
+import { db, buyers, broadcasts, tenants } from '@lynkbot/db';
+import { getTenantMetaClient } from '../../services/_meta.helper';
 
 /** Pause execution for ms milliseconds — used to rate-limit Meta API sends. */
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -26,14 +25,18 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get(
     '/v1/broadcasts/templates',
     { preHandler: fastify.authenticate },
-    async (_request, reply) => {
-      if (!config.META_WABA_ID || !config.META_ACCESS_TOKEN) {
-        return reply.send({ templates: [], warning: 'META_WABA_ID or META_ACCESS_TOKEN not configured' });
+    async (request, reply) => {
+      const { tenantId } = request.user;
+
+      // Look up tenant's wabaId — required to list templates from their specific WABA
+      const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+      if (!tenant?.wabaId || !tenant?.metaAccessToken) {
+        return reply.send({ templates: [], warning: 'WhatsApp not configured — complete WABA setup in Settings first' });
       }
 
       try {
-        const meta = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
-        const approved = await meta.listTemplates(config.META_WABA_ID);
+        const meta = await getTenantMetaClient(tenantId);
+        const approved = await meta.listTemplates(tenant.wabaId);
 
         // Derive positional params from body component text using {{N}} placeholders
         const templates = approved.map(t => {
@@ -110,8 +113,10 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(400).send({ error: 'templateKey is required' });
       }
 
-      if (!config.META_ACCESS_TOKEN || !config.META_PHONE_NUMBER_ID) {
-        return reply.status(503).send({ error: 'WhatsApp not configured — META_ACCESS_TOKEN or META_PHONE_NUMBER_ID missing' });
+      // Verify tenant has WABA credentials before fetching audience
+      const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+      if (!tenant?.metaAccessToken || !tenant?.metaPhoneNumberId) {
+        return reply.status(503).send({ error: 'WhatsApp not configured — complete WABA setup in Settings first' });
       }
 
       // Fetch audience — include tags in select so tag filtering works
@@ -158,7 +163,7 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
       // ── Background send ────────────────────────────────────────────────────
       // Rate limit: ~80 messages/min (750ms between sends) to stay well within
       // Meta's 1000 msg/min tier-1 limit and avoid burst errors.
-      const meta = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
+      const meta = await getTenantMetaClient(tenantId);
       let sentCount = 0;
       let failedCount = 0;
       const errorLog: string[] = [];
@@ -233,13 +238,16 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get(
     '/v1/broadcasts/meta-health',
     { preHandler: fastify.authenticate },
-    async (_request, reply) => {
-      if (!config.META_ACCESS_TOKEN || !config.META_PHONE_NUMBER_ID) {
-        return reply.send({ ok: false, error: 'META_ACCESS_TOKEN or META_PHONE_NUMBER_ID not set' });
+    async (request, reply) => {
+      const { tenantId } = request.user;
+      try {
+        const meta = await getTenantMetaClient(tenantId);
+        const result = await meta.testConnection();
+        return reply.send(result);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return reply.send({ ok: false, error: msg });
       }
-      const meta = new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID);
-      const result = await meta.testConnection();
-      return reply.send(result);
     },
   );
 };
