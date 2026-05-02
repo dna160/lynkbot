@@ -216,15 +216,15 @@ export function FlowsListPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-3">
-                      {(flow.status === 'draft' || flow.status === 'paused') && (
+                      {flow.status !== 'archived' && (
                         <Link
                           to={`/dashboard/flows/${flow.id}/edit`}
                           className="text-xs text-accent hover:underline"
                         >
-                          Edit
+                          {flow.status === 'active' ? 'View / Edit' : 'Edit'}
                         </Link>
                       )}
-                      {flow.status === 'draft' && (
+                      {(flow.status === 'draft' || flow.status === 'paused') && (
                         <button
                           onClick={() => handleActivate(flow.id)}
                           disabled={actionLoading === flow.id}

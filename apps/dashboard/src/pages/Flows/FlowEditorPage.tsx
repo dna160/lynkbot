@@ -943,11 +943,16 @@ export function FlowEditorPage() {
 
   const [flowName, setFlowName] = useState('New Flow');
   const [triggerType, setTriggerType] = useState<TriggerType>('inbound_keyword');
+  const [flowStatus, setFlowStatus] = useState<'draft' | 'active' | 'paused' | 'archived' | null>(null);
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
   const [selectedDfId, setSelectedDfId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(!!id);
+  const [activating, setActivating] = useState(false);
+  const [loading, setLoading] = useState(false); // overlay, not early-return
   const [hasNodes, setHasNodes] = useState(false);
+
+  // Holds flow data fetched before Drawflow is ready, imported on editor init.
+  const pendingFlowRef = useRef<{ def: FlowDefinition; name: string; triggerType: TriggerType; status: string } | null>(null);
 
   // Node picker popup state (for "＋ Add step" button)
   const [picker, setPicker] = useState<{ x: number; y: number; sourceNodeId: string } | null>(null);
@@ -968,6 +973,20 @@ export function FlowEditorPage() {
     editor.reroute_fix_curvature = true;
     editor.start();
     editorRef.current = editor;
+
+    // If the API resolved before the editor was ready, import the pending flow now
+    if (pendingFlowRef.current) {
+      const { def, name, triggerType: tt, status } = pendingFlowRef.current;
+      pendingFlowRef.current = null;
+      setFlowName(name);
+      setTriggerType(tt as TriggerType);
+      setFlowStatus(status as any);
+      if (def.nodes.length > 0) {
+        editor.clear();
+        editor.import(toDrawflow(def) as any);
+        setHasNodes(true);
+      }
+    }
 
     editor.on('nodeSelected', (dfId: number) => {
       const exported = editor.export() as any;
@@ -1083,6 +1102,10 @@ export function FlowEditorPage() {
   }, [picker]);
 
   // ── Load existing flow ─────────────────────────────────────────────────────
+  // The canvas is always in the DOM (no early-return spinner), so editorRef
+  // may or may not be ready by the time the API resolves.
+  // · If editor ready:  import immediately.
+  // · If not yet ready: store in pendingFlowRef; the init effect will import.
 
   useEffect(() => {
     if (!id) return;
@@ -1090,13 +1113,25 @@ export function FlowEditorPage() {
     flowsApi.get(id)
       .then(res => {
         const flow = res.data as any;
-        setFlowName(flow.name ?? 'Flow');
-        setTriggerType(flow.triggerType ?? 'inbound_keyword');
+        const name = flow.name ?? 'Flow';
+        const tt: TriggerType = flow.triggerType ?? 'inbound_keyword';
+        const status = flow.status ?? 'draft';
         const def: FlowDefinition = flow.definition ?? { nodes: [], edges: [] };
-        if (editorRef.current && def.nodes.length > 0) {
+
+        setFlowName(name);
+        setTriggerType(tt);
+        setFlowStatus(status);
+
+        if (editorRef.current) {
+          // Editor already initialised — import right now
           editorRef.current.clear();
-          editorRef.current.import(toDrawflow(def) as any);
+          if (def.nodes.length > 0) {
+            editorRef.current.import(toDrawflow(def) as any);
+          }
           setHasNodes(def.nodes.length > 0);
+        } else {
+          // Editor not yet ready — stash for the init effect to pick up
+          pendingFlowRef.current = { def, name, triggerType: tt, status };
         }
       })
       .catch(() => addToast('Failed to load flow', 'error'))
@@ -1283,18 +1318,47 @@ export function FlowEditorPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  // ── Activate handler (used by top-bar button) ─────────────────────────────
+
+  const handleActivate = useCallback(async () => {
+    if (!id) return;
+    setActivating(true);
+    try {
+      await flowsApi.updateStatus(id, 'active');
+      setFlowStatus('active');
+      addToast('Flow activated ✓', 'success');
+    } catch (err: any) {
+      addToast(err?.response?.data?.message ?? err?.response?.data?.error ?? 'Activation failed', 'error');
+    } finally {
+      setActivating(false);
+    }
+  }, [id, addToast]);
+
+  const handlePause = useCallback(async () => {
+    if (!id) return;
+    setActivating(true);
+    try {
+      await flowsApi.updateStatus(id, 'paused');
+      setFlowStatus('paused');
+      addToast('Flow paused', 'success');
+    } catch (err: any) {
+      addToast(err?.response?.data?.error ?? 'Pause failed', 'error');
+    } finally {
+      setActivating(false);
+    }
+  }, [id, addToast]);
 
   const categories = [...new Set(PALETTE_NODES.map(p => p.category))];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
+
+      {/* Loading overlay — shown while API fetch is in flight */}
+      {loading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0F172A]/70 backdrop-blur-sm">
+          <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
 
       {/* ── Top bar ── */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-surface shrink-0">
@@ -1304,6 +1368,17 @@ export function FlowEditorPage() {
           onChange={e => setFlowName(e.target.value)}
           placeholder="Flow name…"
         />
+        {/* Status badge */}
+        {flowStatus && (
+          <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+            flowStatus === 'active'   ? 'bg-green-900/40 text-green-400' :
+            flowStatus === 'paused'  ? 'bg-yellow-900/40 text-yellow-400' :
+            flowStatus === 'archived'? 'bg-red-900/40 text-red-400' :
+                                       'bg-slate-700 text-slate-300'
+          }`}>
+            {flowStatus.charAt(0).toUpperCase() + flowStatus.slice(1)}
+          </span>
+        )}
         <div className="h-4 w-px bg-border shrink-0" />
         <select
           value={triggerType}
@@ -1332,15 +1407,34 @@ export function FlowEditorPage() {
             onClick={() => navigate('/dashboard/flows')}
             className="px-3 py-1.5 text-xs text-secondary hover:text-primary border border-border rounded-lg transition-colors"
           >
-            Cancel
+            ← Back
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-1.5 text-xs font-semibold bg-accent text-white rounded-lg hover:bg-accent/80 disabled:opacity-50 transition-colors"
+            className="px-4 py-1.5 text-xs font-semibold bg-accent/20 text-accent border border-accent/40 rounded-lg hover:bg-accent/30 disabled:opacity-50 transition-colors"
           >
             {saving ? 'Saving…' : id ? 'Save' : 'Create Draft'}
           </button>
+          {/* Activate / Pause buttons — only for saved flows */}
+          {id && (flowStatus === 'draft' || flowStatus === 'paused') && (
+            <button
+              onClick={async () => { await handleSave(); await handleActivate(); }}
+              disabled={saving || activating}
+              className="px-4 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-500 disabled:opacity-50 transition-colors"
+            >
+              {activating ? 'Activating…' : '▶ Activate'}
+            </button>
+          )}
+          {id && flowStatus === 'active' && (
+            <button
+              onClick={handlePause}
+              disabled={activating}
+              className="px-4 py-1.5 text-xs font-semibold bg-yellow-600/20 text-yellow-400 border border-yellow-600/40 rounded-lg hover:bg-yellow-600/30 disabled:opacity-50 transition-colors"
+            >
+              {activating ? '…' : '⏸ Pause'}
+            </button>
+          )}
         </div>
       </div>
 
