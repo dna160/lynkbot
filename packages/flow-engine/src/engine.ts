@@ -205,6 +205,132 @@ export class FlowEngine {
   }
 
   /**
+   * Check whether an inbound message matches any active inbound_keyword flow
+   * for the tenant, and start the first matching one.
+   *
+   * Matching is case-insensitive substring: the inbound text must CONTAIN the
+   * keyword (not just equal it) so "hi, order please" matches keyword "order".
+   *
+   * Returns true if a flow was started (caller should NOT also route to
+   * ConversationService), false if no keyword matched.
+   */
+  async handleKeywordTrigger(
+    tenantId: string,
+    buyerId: string,
+    inboundText: string,
+    conversationId?: string,
+  ): Promise<boolean> {
+    // Load all active inbound_keyword flows for this tenant
+    const keywordFlows = await db.query.flowDefinitions.findMany({
+      where: and(
+        eq(flowDefinitions.tenantId, tenantId),
+        eq(flowDefinitions.status, 'active'),
+        eq(flowDefinitions.triggerType, 'inbound_keyword'),
+      ),
+      columns: { id: true, triggerConfig: true, definition: true },
+    });
+
+    if (keywordFlows.length === 0) return false;
+
+    const lower = inboundText.toLowerCase().trim();
+
+    // Find first flow whose keywords list contains a match
+    const matched = keywordFlows.find(flow => {
+      const cfg = (flow.triggerConfig ?? {}) as TriggerConfig;
+      const keywords = cfg.keywords ?? [];
+      return keywords.some(kw => lower.includes(kw.toLowerCase().trim()));
+    });
+
+    if (!matched) return false;
+
+    // Check for already-running execution for this buyer+flow (idempotent)
+    const existingExecution = await db.query.flowExecutions.findFirst({
+      where: and(
+        eq(flowExecutions.flowId, matched.id),
+        eq(flowExecutions.buyerId, buyerId),
+        or(
+          eq(flowExecutions.status, 'running'),
+          eq(flowExecutions.status, 'waiting_reply'),
+        ),
+      ),
+    });
+
+    if (existingExecution) return true; // already running — consume message, don't re-trigger
+
+    // Load buyer and check compliance
+    const buyer = await db.query.buyers.findFirst({
+      where: eq(buyers.id, buyerId),
+    });
+
+    if (!buyer || buyer.doNotContact) return false;
+
+    const buyerCtx: BuyerContext = {
+      id: buyer.id,
+      waPhone: buyer.waPhone,
+      name: buyer.displayName ?? buyer.waPhone,
+      totalOrders: buyer.totalOrders,
+      tags: (buyer.tags as string[]) ?? [],
+      lastOrderAt: buyer.lastOrderAt,
+      doNotContact: buyer.doNotContact,
+      preferredLanguage: buyer.preferredLanguage ?? 'id',
+      notes: buyer.notes,
+      displayName: buyer.displayName,
+      activeFlowCount: buyer.activeFlowCount,
+    };
+
+    const triggerCtx: TriggerContext = {
+      type: 'inbound_keyword',
+      messageText: inboundText,
+      conversationId,
+    };
+
+    const [execution] = await db
+      .insert(flowExecutions)
+      .values({
+        flowId: matched.id,
+        tenantId,
+        buyerId,
+        status: 'running',
+        context: { buyer: buyerCtx, trigger: triggerCtx, variables: {} },
+        startedAt: new Date(),
+        lastStepAt: new Date(),
+      })
+      .returning({ id: flowExecutions.id });
+
+    await db
+      .update(buyers)
+      .set({ activeFlowCount: sql`${buyers.activeFlowCount} + 1` })
+      .where(eq(buyers.id, buyerId));
+
+    const ctx: ExecutionContext = {
+      executionId: execution.id,
+      flowId: matched.id,
+      tenantId,
+      buyerId,
+      buyer: buyerCtx,
+      trigger: triggerCtx,
+      variables: {},
+      executionLog: [],
+    };
+
+    const definition = matched.definition as unknown as FlowDefinition;
+    const triggerNode = definition.nodes.find(n => n.type === 'TRIGGER');
+    if (!triggerNode) throw new Error(`Flow ${matched.id} has no TRIGGER node`);
+
+    const firstEdge = definition.edges.find(
+      e => e.source === triggerNode.id && (!e.sourcePort || e.sourcePort === 'default'),
+    );
+
+    if (!firstEdge) {
+      await this._markCompleted(ctx);
+      return true;
+    }
+
+    await this.executeNode(execution.id, firstEdge.target, ctx);
+    return true;
+  }
+
+  /**
    * Execute a single node within a flow execution.
    * Recursively follows edges until the flow completes, pauses, or delays.
    */

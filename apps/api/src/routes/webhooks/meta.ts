@@ -220,6 +220,37 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (resumedByFlowEngine) return;
 
+        // ── Flow Engine: inbound_keyword trigger ───────────────────────────
+        // Check if the message text matches any active keyword-triggered flow.
+        // Must run AFTER waiting_reply resume (an active flow takes priority).
+        const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
+        if (inboundText) {
+          try {
+            const keywordBuyer = await db.query.buyers.findFirst({
+              where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
+              columns: { id: true },
+            });
+
+            if (keywordBuyer) {
+              const triggeredByKeyword = await flowEngine.handleKeywordTrigger(
+                tenantId,
+                keywordBuyer.id,
+                inboundText,
+              );
+
+              if (triggeredByKeyword) {
+                request.log.info(
+                  { tenantId, waId: payload.waId, text: inboundText },
+                  'Keyword flow triggered — skipping ConversationService',
+                );
+                return;
+              }
+            }
+          } catch (kwErr: unknown) {
+            request.log.warn({ err: kwErr }, 'Keyword trigger check failed — falling through to ConversationService');
+          }
+        }
+
         // ── Fall through to ConversationService for non-flow messages ──────
         conversationService.handleInbound(tenantId, payload).catch(err => {
           request.log.error({ err, tenantId, waId: payload.waId }, 'Error processing Meta inbound message');
