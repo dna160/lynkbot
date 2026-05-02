@@ -1001,11 +1001,21 @@ export function FlowEditorPage() {
     try {
       const exported = editorRef.current.export();
       const definition = fromDrawflow(exported);
+
+      // Build triggerConfig from the TRIGGER node so the engine can match
+      // keywords without having to parse the full definition graph.
+      const triggerNode = (definition as any).nodes?.find((n: any) => n.type === 'TRIGGER');
+      const triggerConfig: Record<string, unknown> = { triggerType };
+      if (triggerType === 'inbound_keyword' && triggerNode) {
+        const kws = Array.isArray(triggerNode.config?.keywords) ? triggerNode.config.keywords : [];
+        triggerConfig.keywords = kws;
+      }
+
       if (id) {
-        await flowsApi.update(id, { name: flowName, triggerType, definition } as any);
+        await flowsApi.update(id, { name: flowName, triggerType, triggerConfig, definition } as any);
         addToast('Flow saved', 'success');
       } else {
-        const res = await flowsApi.create({ name: flowName, triggerType, definition } as any);
+        const res = await flowsApi.create({ name: flowName, triggerType, triggerConfig, definition } as any);
         const newId = (res.data as any)?.id;
         addToast('Flow created', 'success');
         if (newId) navigate(`/dashboard/flows/${newId}/edit`, { replace: true });

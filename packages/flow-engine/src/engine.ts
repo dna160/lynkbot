@@ -234,10 +234,20 @@ export class FlowEngine {
 
     const lower = inboundText.toLowerCase().trim();
 
-    // Find first flow whose keywords list contains a match
+    // Find first flow whose keywords list contains a match.
+    // Keywords are read from triggerConfig.keywords (set on save).
+    // Fallback: also check the TRIGGER node's config.keywords inside definition
+    // for flows saved before the dashboard fix was deployed.
     const matched = keywordFlows.find(flow => {
       const cfg = (flow.triggerConfig ?? {}) as TriggerConfig;
-      const keywords = cfg.keywords ?? [];
+      let keywords = cfg.keywords ?? [];
+      if (keywords.length === 0) {
+        // Fallback: read from TRIGGER node inside definition
+        const def = flow.definition as unknown as FlowDefinition;
+        const triggerNode = def?.nodes?.find(n => n.type === 'TRIGGER');
+        const nodeKws = (triggerNode?.config as Record<string, unknown>)?.keywords;
+        if (Array.isArray(nodeKws)) keywords = nodeKws as string[];
+      }
       return keywords.some(kw => lower.includes(kw.toLowerCase().trim()));
     });
 
