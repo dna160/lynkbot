@@ -20,7 +20,7 @@ import { verifyMetaSignature } from '../../middleware/metaSignature';
 import { extractFirstMessage, isStatusUpdate } from '@lynkbot/meta';
 import { ConversationService } from '../../services/conversation.service';
 import { config } from '../../config';
-import { db, buyers, flowExecutions, eq, and } from '@lynkbot/db';
+import { db, buyers, flowExecutions, eq, and, sql } from '@lynkbot/db';
 import { FlowEngine } from '@lynkbot/flow-engine';
 import { getTenantMetaClient } from '../../services/_meta.helper';
 import { getRedisConnection } from '../../config';
@@ -154,8 +154,34 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
           return;
         }
 
+        // ── Find-or-create buyer (needed for all flow engine checks below) ──
+        // Do this once here so button trigger, waiting_reply resume, and keyword
+        // trigger all use the same row — and keyword trigger works even on a
+        // buyer's very first message (before ConversationService creates them).
+        let inboundBuyer = await db.query.buyers.findFirst({
+          where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
+          columns: { id: true },
+        });
+        if (!inboundBuyer) {
+          const [created] = await db
+            .insert(buyers)
+            .values({
+              tenantId,
+              waPhone: payload.waId,
+              displayName: payload.name ?? null,
+              preferredLanguage: 'id',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: [buyers.waPhone, buyers.tenantId],
+              set: { updatedAt: sql`now()` },
+            })
+            .returning({ id: buyers.id });
+          inboundBuyer = created;
+        }
+
         // ── Flow Engine: button trigger routing ────────────────────────────
-        // Extract button payload from raw interactive message
         const interactiveButtonId =
           payload.messageType === 'interactive'
             ? (payload.raw?.interactive?.button_reply?.id ?? payload.raw?.interactive?.list_reply?.id)
@@ -164,20 +190,11 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
             : undefined;
 
         if (typeof interactiveButtonId === 'string' && interactiveButtonId.startsWith('flow:')) {
-          // Resolve buyer id from waId + tenantId
-          const triggerBuyer = await db.query.buyers.findFirst({
-            where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
-            columns: { id: true },
-          });
-
-          if (triggerBuyer) {
-            flowEngine
-              .handleButtonTrigger(tenantId, triggerBuyer.id, interactiveButtonId)
-              .catch((err: unknown) =>
-                request.log.error({ err }, 'Flow button trigger failed'),
-              );
-          }
-          // Return — do NOT also route through ConversationService for button triggers
+          flowEngine
+            .handleButtonTrigger(tenantId, inboundBuyer.id, interactiveButtonId)
+            .catch((err: unknown) =>
+              request.log.error({ err }, 'Flow button trigger failed'),
+            );
           return;
         }
 
@@ -187,64 +204,48 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
         // here — fall through to ConversationService instead.
         let resumedByFlowEngine = false;
         try {
-          const resumeBuyer = await db.query.buyers.findFirst({
-            where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
+          const activeExecution = await db.query.flowExecutions.findFirst({
+            where: and(
+              eq(flowExecutions.tenantId, tenantId),
+              eq(flowExecutions.buyerId, inboundBuyer.id),
+              eq(flowExecutions.status, 'waiting_reply'),
+            ),
             columns: { id: true },
           });
 
-          if (resumeBuyer) {
-            const activeExecution = await db.query.flowExecutions.findFirst({
-              where: and(
-                eq(flowExecutions.tenantId, tenantId),
-                eq(flowExecutions.buyerId, resumeBuyer.id),
-                eq(flowExecutions.status, 'waiting_reply'),
-              ),
-              columns: { id: true },
-            });
-
-            if (activeExecution) {
-              const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
-              flowEngine
-                .resumeExecution(activeExecution.id, inboundText)
-                .catch((err: unknown) =>
-                  request.log.error({ err }, 'Flow resume failed'),
-                );
-              // Return — do NOT also route through ConversationService
-              resumedByFlowEngine = true;
-            }
+          if (activeExecution) {
+            const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
+            flowEngine
+              .resumeExecution(activeExecution.id, inboundText)
+              .catch((err: unknown) =>
+                request.log.error({ err }, 'Flow resume failed'),
+              );
+            resumedByFlowEngine = true;
           }
         } catch (flowErr: unknown) {
-          // Schema not yet migrated (enum missing 'waiting_reply') — fall through.
           request.log.warn({ err: flowErr }, 'Flow engine resume check failed — falling through to ConversationService');
         }
 
         if (resumedByFlowEngine) return;
 
         // ── Flow Engine: inbound_keyword trigger ───────────────────────────
-        // Check if the message text matches any active keyword-triggered flow.
-        // Must run AFTER waiting_reply resume (an active flow takes priority).
+        // Runs after waiting_reply (active execution takes priority over new trigger).
+        // Works for first-ever messages because buyer was already created above.
         const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
         if (inboundText) {
           try {
-            const keywordBuyer = await db.query.buyers.findFirst({
-              where: and(eq(buyers.waPhone, payload.waId), eq(buyers.tenantId, tenantId)),
-              columns: { id: true },
-            });
+            const triggeredByKeyword = await flowEngine.handleKeywordTrigger(
+              tenantId,
+              inboundBuyer.id,
+              inboundText,
+            );
 
-            if (keywordBuyer) {
-              const triggeredByKeyword = await flowEngine.handleKeywordTrigger(
-                tenantId,
-                keywordBuyer.id,
-                inboundText,
+            if (triggeredByKeyword) {
+              request.log.info(
+                { tenantId, waId: payload.waId, text: inboundText },
+                'Keyword flow triggered — skipping ConversationService',
               );
-
-              if (triggeredByKeyword) {
-                request.log.info(
-                  { tenantId, waId: payload.waId, text: inboundText },
-                  'Keyword flow triggered — skipping ConversationService',
-                );
-                return;
-              }
+              return;
             }
           } catch (kwErr: unknown) {
             request.log.warn({ err: kwErr }, 'Keyword trigger check failed — falling through to ConversationService');
