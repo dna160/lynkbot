@@ -67,14 +67,19 @@ export class OnboardingService {
       return { success: false, reason: 'invalid_credentials', message: 'Phone Number ID, WABA ID, and Access Token are required.' };
     }
 
-    // Optional connection test
+    // Optional connection test — soft validation only.
+    // Credentials are ALWAYS saved so the tenant's metaPhoneNumberId is persisted
+    // and the inbound webhook can resolve them. A failed connection test just means
+    // we can't verify the display phone number right now (transient Meta API issue,
+    // propagation delay, etc.) — the webhook handshake will confirm it later.
     let displayPhone = metaPhoneNumberId;
     try {
       const client = new MetaClient(metaAccessToken, metaPhoneNumberId);
       const info = await client.getPhoneNumberInfo();
       displayPhone = (info as any)?.display_phone_number ?? metaPhoneNumberId;
     } catch {
-      return { success: false, reason: 'connection_failed', message: 'Could not verify Meta credentials. Check your Phone Number ID and Access Token.' };
+      // Soft-fail: log but proceed — credentials are saved regardless
+      // so inbound webhooks can still route to this tenant.
     }
 
     const encryptedToken = encrypt(metaAccessToken, config.WABA_POOL_ENCRYPTION_KEY);

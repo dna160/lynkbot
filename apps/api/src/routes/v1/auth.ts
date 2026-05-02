@@ -12,7 +12,6 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { db, tenants } from '@lynkbot/db';
 import { eq } from '@lynkbot/db';
-import { config } from '../../config';
 
 const loginBodySchema = z.object({
   lynkUserId: z.string().min(1),
@@ -37,27 +36,17 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         where: eq(tenants.lynkUserId, lynkUserId),
       });
 
-      // Fields to stamp from env config (phone number links webhook → tenant)
-      const metaPhoneNumberId = config.META_PHONE_NUMBER_ID || null;
-      const displayPhoneNumber = config.META_PHONE_NUMBER_ID
-        ? `+${config.META_PHONE_NUMBER_ID}` : null;
-
       if (!tenant) {
+        // Create tenant record — do NOT stamp metaPhoneNumberId from global env.
+        // Phone number IDs are per-tenant and must come from the Settings/onboarding
+        // flow. Stamping a global env var here breaks multi-tenant routing: the
+        // inbound webhook resolves tenants by phone number ID, and if the wrong
+        // number is stamped, all messages are silently dropped.
         const [created] = await db.insert(tenants).values({
           lynkUserId,
           storeName: lynkUserId,
-          metaPhoneNumberId,
-          displayPhoneNumber,
         }).returning();
         tenant = created;
-      } else if (!tenant.metaPhoneNumberId && metaPhoneNumberId) {
-        // Existing tenant missing phone number — stamp it now
-        const [updated] = await db
-          .update(tenants)
-          .set({ metaPhoneNumberId, displayPhoneNumber })
-          .where(eq(tenants.id, tenant.id))
-          .returning();
-        tenant = updated;
       }
 
       const token = fastify.jwt.sign(

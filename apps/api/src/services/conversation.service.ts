@@ -47,7 +47,6 @@ import {
   buildFallbackCache,
   type GenomeScores,
 } from '@lynkbot/pantheon';
-import { config } from '../config';
 import { CheckoutService } from './checkout.service';
 import { ShippingService } from './shipping.service';
 import { NotificationService } from './notification.service';
@@ -102,26 +101,24 @@ export class ConversationService {
    * per-tenant webhook URL), so we look it up from the tenants table.
    */
   async resolveTenantByPhoneNumberId(phoneNumberId: string): Promise<string | null> {
-    // Primary: find tenant with matching metaPhoneNumberId
-    const tenant = await db.query.tenants.findFirst({
+    // Prefer a fully-configured tenant (has both metaPhoneNumberId AND wabaId set via
+    // the Settings page). This avoids accidentally routing to a tenant whose phone
+    // number was auto-stamped from a stale global env var rather than intentionally
+    // set through the onboarding flow.
+    const fullyConfigured = await db.query.tenants.findFirst({
+      where: (t, { eq, and, isNotNull }) => and(
+        eq(t.metaPhoneNumberId, phoneNumberId),
+        isNotNull(t.wabaId),
+      ),
+    });
+    if (fullyConfigured) return fullyConfigured.id;
+
+    // Fallback: any tenant with a matching metaPhoneNumberId (covers tenants that
+    // connected before wabaId was a required field).
+    const anyMatch = await db.query.tenants.findFirst({
       where: (t, { eq }) => eq(t.metaPhoneNumberId, phoneNumberId),
     });
-    if (tenant) return tenant.id;
-
-    // Fallback: if incoming phoneNumberId matches the configured META_PHONE_NUMBER_ID,
-    // find the first tenant without a phone number and stamp it (handles first-login case)
-    if (config.META_PHONE_NUMBER_ID && phoneNumberId === config.META_PHONE_NUMBER_ID) {
-      const unlinked = await db.query.tenants.findFirst({
-        where: (t, { isNull }) => isNull(t.metaPhoneNumberId),
-      });
-      if (unlinked) {
-        await db.update(tenants).set({
-          metaPhoneNumberId: phoneNumberId,
-          displayPhoneNumber: `+${phoneNumberId}`,
-        }).where(eq(tenants.id, unlinked.id));
-        return unlinked.id;
-      }
-    }
+    if (anyMatch) return anyMatch.id;
 
     return null;
   }

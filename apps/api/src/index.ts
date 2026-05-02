@@ -70,8 +70,13 @@ async function bootstrap(): Promise<void> {
 
   // --- Capture raw body for HMAC signature verification (Meta, Midtrans, Xendit webhooks) ---
   // Must be registered before any content-type parser or plugin that reads the body.
+  // Use a regex so we match both 'application/json' and
+  // 'application/json; charset=utf-8' (what Meta actually sends).
+  // An exact-string match would leave rawBody undefined for the charset variant,
+  // making HMAC verification fall back to JSON.stringify which produces different
+  // bytes → signature mismatch → 401 → Meta stops delivering webhooks.
   server.addContentTypeParser(
-    'application/json',
+    /^application\/json/,
     { parseAs: 'buffer' },
     (req, body, done) => {
       try {
