@@ -316,6 +316,193 @@ function fromDrawflow(exported: any): FlowDefinition {
   return { nodes, edges };
 }
 
+// ── Variable Picker ───────────────────────────────────────────────────────────
+
+const VARIABLE_GROUPS: Array<{
+  label: string;
+  emoji: string;
+  color: string;
+  vars: Array<{ label: string; token: string; hint: string }>;
+}> = [
+  {
+    label: 'Buyer',
+    emoji: '👤',
+    color: '#3B82F6',
+    vars: [
+      { label: 'Name',        token: '{{buyer.name}}',        hint: "Buyer's display name" },
+      { label: 'Phone',       token: '{{buyer.phone}}',       hint: 'WhatsApp number' },
+      { label: '# Orders',   token: '{{buyer.totalOrders}}', hint: 'Total order count' },
+      { label: 'Tags',        token: '{{buyer.tags}}',        hint: 'Comma-separated tags' },
+      { label: 'Language',    token: '{{buyer.language}}',    hint: 'Preferred language code' },
+      { label: 'Notes',       token: '{{buyer.notes}}',       hint: 'Buyer notes field' },
+    ],
+  },
+  {
+    label: 'Order',
+    emoji: '📦',
+    color: '#10B981',
+    vars: [
+      { label: 'Order Code', token: '{{order.code}}', hint: 'Current order reference code' },
+    ],
+  },
+  {
+    label: 'Conversation',
+    emoji: '💬',
+    color: '#F59E0B',
+    vars: [
+      { label: 'Last Reply', token: '{{trigger.message}}', hint: "What the buyer just typed" },
+    ],
+  },
+];
+
+/**
+ * Renders a panel of clickable variable chips. Calls onInsert(token) on click.
+ * Does NOT manage cursor insertion — the parent MessageEditor handles that.
+ */
+function VariablePicker({ onInsert }: { onInsert: (token: string) => void }) {
+  const [customVar, setCustomVar] = useState('');
+
+  return (
+    <div className="mt-2 rounded-lg border border-border/50 bg-white/[0.02] p-3 space-y-3">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-secondary/50">
+        Insert variable
+      </div>
+
+      {VARIABLE_GROUPS.map(group => (
+        <div key={group.label}>
+          <div className="text-[9px] font-bold uppercase tracking-widest mb-1.5"
+               style={{ color: group.color }}>
+            {group.emoji} {group.label}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {group.vars.map(v => (
+              <button
+                key={v.token}
+                type="button"
+                onMouseDown={e => { e.preventDefault(); onInsert(v.token); }}
+                title={`${v.token} — ${v.hint}`}
+                className="px-2 py-0.5 text-[11px] font-mono rounded-md border transition-all hover:scale-105 active:scale-95"
+                style={{
+                  borderColor: `${group.color}40`,
+                  color: group.color,
+                  background: `${group.color}12`,
+                }}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* Custom flow variable */}
+      <div>
+        <div className="text-[9px] font-bold uppercase tracking-widest mb-1.5 text-purple-400">
+          ✦ Custom variable
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            className="flex-1 bg-[#0F172A] border border-border rounded-md px-2 py-1 text-[11px] text-primary font-mono focus:outline-none focus:border-purple-500/60 placeholder-secondary/30"
+            placeholder="variable_name"
+            value={customVar}
+            onChange={e => setCustomVar(e.target.value.replace(/[\s{}]/g, '_'))}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && customVar.trim()) {
+                e.preventDefault();
+                onInsert(`{{flow.variable.${customVar.trim()}}}`);
+                setCustomVar('');
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={!customVar.trim()}
+            onMouseDown={e => {
+              e.preventDefault();
+              if (customVar.trim()) {
+                onInsert(`{{flow.variable.${customVar.trim()}}}`);
+                setCustomVar('');
+              }
+            }}
+            className="px-2.5 py-1 text-[11px] rounded-md border border-purple-700/40 bg-purple-900/20 text-purple-400 hover:bg-purple-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Insert
+          </button>
+        </div>
+        <span className="text-[9px] text-secondary/40 mt-1 block">
+          Resolves to <span className="font-mono">{'{{flow.variable.name}}'}</span> at runtime.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Textarea with integrated variable-chip picker.
+ * Tracks cursor position via onMouseUp/onKeyUp so chips insert at the right spot.
+ * Uses onMouseDown (not onClick) on chips so the textarea doesn't blur before insertion.
+ */
+function MessageEditor({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 5,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+  hint?: string;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const cursorRef = useRef<number>(value.length);
+
+  const saveCursor = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    cursorRef.current = e.currentTarget.selectionStart ?? value.length;
+  };
+
+  const handleInsert = (token: string) => {
+    const pos = cursorRef.current;
+    const before = value.slice(0, pos);
+    const after = value.slice(pos);
+    const newVal = before + token + after;
+    const newPos = pos + token.length;
+    cursorRef.current = newPos;
+    onChange(newVal);
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(newPos, newPos);
+      }
+    });
+  };
+
+  return (
+    <div className="space-y-0">
+      <label className="block">
+        <span className="text-xs font-medium text-secondary">{label}</span>
+        <textarea
+          ref={taRef}
+          rows={rows}
+          className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono leading-relaxed"
+          placeholder={placeholder}
+          value={value}
+          onChange={e => { onChange(e.target.value); saveCursor(e as any); }}
+          onMouseUp={saveCursor}
+          onKeyUp={saveCursor}
+          onSelect={saveCursor}
+        />
+        {hint && <span className="text-[10px] text-secondary/50 mt-1 block">{hint}</span>}
+      </label>
+      <VariablePicker onInsert={handleInsert} />
+    </div>
+  );
+}
+
 // ── Node Config Editor ────────────────────────────────────────────────────────
 
 interface ConfigEditorProps {
@@ -463,31 +650,56 @@ function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, on
         )}
 
         {node.type === 'SEND_TEXT' && (
-          <label className="block">
-            <span className="text-xs font-medium text-secondary">Message</span>
-            <textarea
-              rows={5}
-              className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none"
-              placeholder="Hi {{buyer.name}}, your order is ready!"
-              value={String(node.config.message ?? '')}
-              onChange={e => update({ message: e.target.value })}
-            />
-            <span className="text-[10px] text-secondary/50 mt-1 block">Use {'{{buyer.name}}'}, {'{{buyer.phone}}'} for personalization.</span>
-          </label>
+          <MessageEditor
+            label="Message"
+            value={String(node.config.message ?? '')}
+            onChange={v => update({ message: v })}
+            placeholder={'Hi {{buyer.name}}, your order is ready! 🎉'}
+            rows={5}
+            hint="Click a chip below to insert a variable at your cursor."
+          />
         )}
 
         {node.type === 'SEND_INTERACTIVE' && (
-          <label className="block">
-            <span className="text-xs font-medium text-secondary">Interaction Type</span>
-            <select
-              className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
-              value={String(node.config.type ?? 'button')}
-              onChange={e => update({ type: e.target.value })}
-            >
-              <option value="button">Button</option>
-              <option value="list">List</option>
-            </select>
-          </label>
+          <div className="space-y-4">
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Interaction Type</span>
+              <select
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                value={String(node.config.type ?? 'button')}
+                onChange={e => update({ type: e.target.value })}
+              >
+                <option value="button">Button</option>
+                <option value="list">List</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Header text <span className="text-secondary/40">(optional)</span></span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                placeholder={'Order update for {{buyer.name}}'}
+                value={String(node.config.headerText ?? '')}
+                onChange={e => update({ headerText: e.target.value })}
+              />
+            </label>
+            <MessageEditor
+              label="Body text"
+              value={String(node.config.bodyText ?? '')}
+              onChange={v => update({ bodyText: v })}
+              placeholder={'Hi {{buyer.name}}, please choose an option:'}
+              rows={4}
+              hint="Main message shown to the buyer. Click a chip to insert a variable."
+            />
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Footer text <span className="text-secondary/40">(optional)</span></span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                placeholder="Reply with a number to choose"
+                value={String(node.config.footerText ?? '')}
+                onChange={e => update({ footerText: e.target.value })}
+              />
+            </label>
+          </div>
         )}
 
         {node.type === 'DELAY' && (
@@ -606,15 +818,14 @@ function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, on
                 <option value="preferredLanguage">Preferred Language</option>
               </select>
             </label>
-            <label className="block">
-              <span className="text-xs font-medium text-secondary">New value</span>
-              <input
-                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
-                placeholder="{{buyer.name}}"
-                value={String(node.config.value ?? '')}
-                onChange={e => update({ value: e.target.value })}
-              />
-            </label>
+            <MessageEditor
+              label="New value"
+              value={String(node.config.value ?? '')}
+              onChange={v => update({ value: v })}
+              placeholder={'{{trigger.message}} or static text'}
+              rows={2}
+              hint="Use a variable to copy a buyer's reply into this field."
+            />
           </div>
         )}
 

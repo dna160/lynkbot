@@ -17,7 +17,9 @@ import type { ExecutionContext } from './types';
  *   {{buyer.totalOrders}}  → ctx.buyer.totalOrders
  *   {{buyer.tags}}         → ctx.buyer.tags.join(', ')
  *   {{buyer.language}}     → ctx.buyer.preferredLanguage
+ *   {{buyer.notes}}        → ctx.buyer.notes
  *   {{order.code}}         → ctx.variables['orderCode'] (convention)
+ *   {{trigger.message}}    → ctx.trigger.messageText (inbound_keyword / WAIT_FOR_REPLY reply)
  *   {{flow.variable.X}}    → ctx.variables['X']
  *   anything else          → '' (empty string, never throw)
  */
@@ -45,6 +47,10 @@ export function resolveVariables(template: string, ctx: ExecutionContext): strin
     }
     if (key === 'order.code') {
       return String(ctx.variables['orderCode'] ?? '');
+    }
+    if (key === 'trigger.message') {
+      // Works for inbound_keyword trigger and WAIT_FOR_REPLY resume (both set messageText)
+      return String((ctx.trigger as Record<string, unknown>)?.messageText ?? '');
     }
     if (key.startsWith('flow.variable.')) {
       const varName = key.slice('flow.variable.'.length);
