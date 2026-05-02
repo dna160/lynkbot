@@ -31,6 +31,7 @@
 17. [Deployment — Railway Runbook](#17-deployment--railway-runbook)
 18. [PRD vs Implementation — Divergences](#18-prd-vs-implementation--divergences)
 19. [Known Debt & Stubs](#19-known-debt--stubs)
+20. [**WhatsApp Troubleshooting — First-Order Investigation**](#20-whatsapp-troubleshooting--first-order-investigation)
 
 ---
 
@@ -1142,6 +1143,211 @@ These are explicitly deferred items — not bugs, but incomplete features:
 | `riskScoreEstimate` in broadcast route | `apps/api/src/routes/v1/broadcasts.ts` | Not wired to actual risk score |
 | WABA pool seed data | `infra/scripts/seed-waba-pool.ts` | TODOs need real Meta Cloud API credentials before running |
 | `SET_VARIABLE` node type | Not implemented | PRD mentions flow-scoped runtime variables; `ExecutionContext.variables` exists but no node writes to it |
+
+---
+
+## 20. WhatsApp Troubleshooting — First-Order Investigation
+
+> **This section is the mandatory first stop for any WhatsApp-related problem report.**
+> Before reading logs, before checking credentials, before blaming configuration — work through
+> this checklist top-to-bottom. Every item here was a real production bug.
+
+### The Two Directions
+
+| Symptom | Direction broken | Entry point to check |
+|---------|-----------------|---------------------|
+| "I can send from dashboard but can't receive messages" | **Inbound** (Meta → API) | Start at [Inbound Pipeline](#inbound-pipeline-meta--api--db) |
+| "Messages I send aren't reaching the buyer" | **Outbound** (API → Meta) | Start at [Outbound Pipeline](#outbound-pipeline-api--meta) |
+| "Both directions broken / no conversations appearing" | Both | Start inbound — it's almost always inbound |
+
+---
+
+### Inbound Pipeline (Meta → API → DB)
+
+The full inbound path for a WhatsApp message:
+
+```
+Buyer sends WA message
+  → Meta HTTPS POST /webhooks/meta
+  → verifyMetaSignature preHandler           ← failure = 401 → Meta retries then stops
+  → extractFirstMessage(body)               ← failure = null → silently ignored
+  → resolveTenantByPhoneNumberId(phoneId)   ← failure = null → logged warn, dropped
+  → flowExecutions enum check               ← DB error → crashes handler, all msgs dropped
+  → conversationService.handleInbound()     ← failure = logged, 200 already sent
+  → message saved to DB
+  → dashboard polls /v1/conversations
+```
+
+**Check each stage in this order:**
+
+#### Stage 1 — Is the webhook reaching the server at all?
+
+Look in Railway logs for `POST /webhooks/meta`. If you see nothing, Meta cannot reach your URL.
+- Confirm the webhook URL in Meta Developer Console is `https://your-api.railway.app/webhooks/meta` (no `/api` prefix — webhooks are registered without it)
+- Confirm the Railway API service is up: `GET /health` should return `{"status":"ok"}`
+
+#### Stage 2 — Is `META_APP_SECRET` set in Railway? (`metaSignature.ts`)
+
+**File:** `apps/api/src/middleware/metaSignature.ts`
+
+```typescript
+if (!config.META_APP_SECRET) {
+  if (config.NODE_ENV === 'production') {
+    return reply.status(401).send({ error: 'Webhook signature verification not configured' });
+  }
+}
+```
+
+`META_APP_SECRET` defaults to `''` (empty string). Empty string is **falsy**. If it is unset or blank in Railway and `NODE_ENV=production`, **every single inbound webhook is rejected with 401 before the body is read.** Meta retries a few times, then stops sending. Outbound still works because outbound uses stored credentials, not this env var.
+
+- `META_APP_SECRET` is the **App Secret** from Meta App Dashboard → App Settings → Basic → "App Secret" (click Show). It is NOT the access token and NOT the verify token.
+- Log line to look for: `"Meta webhook signature mismatch — rejected"` or `"Webhook signature verification not configured"`
+
+#### Stage 3 — Is `rawBody` captured for HMAC? (`index.ts`)
+
+**File:** `apps/api/src/index.ts`
+
+```typescript
+// CORRECT — regex matches both 'application/json' and 'application/json; charset=utf-8'
+server.addContentTypeParser(/^application\/json/, { parseAs: 'buffer' }, ...)
+
+// WRONG — exact string misses Meta's charset variant → rawBody undefined → HMAC fails
+server.addContentTypeParser('application/json', { parseAs: 'buffer' }, ...)
+```
+
+Meta sends `Content-Type: application/json; charset=utf-8`. If the content-type parser uses an exact string match, `rawBody` is never set. The HMAC middleware falls back to `JSON.stringify(request.body)` which produces different bytes than Meta signed → signature mismatch → 401.
+
+**Correct parser:** must use `/^application\/json/` regex (not the exact string).
+
+#### Stage 4 — Is the `flow_execution_status` enum complete? (`meta.ts` + migration)
+
+**File:** `apps/api/src/routes/webhooks/meta.ts`  
+**Migration:** `packages/db/src/migrations/0009_add_waiting_reply_status.sql`
+
+The webhook handler queries `flowExecutions` with `status = 'waiting_reply'`. If the DB enum was created by migration `0005_flow_engine.sql` and `0009` has not been applied, Postgres throws:
+
+```
+PostgresError: invalid input value for enum flow_execution_status: "waiting_reply"
+```
+
+This exception is caught by the **outer try-catch** in the POST handler, logged as `"Failed to process Meta webhook"`, and the handler returns. `handleInbound` is **never called**. Every inbound message from every buyer is silently dropped while the webhook returns 200 (so Meta doesn't retry).
+
+**Check:** Look for `"Failed to process Meta webhook"` in Railway logs with a `PostgresError` in the `err` field. If you see it, migration `0009` has not run.
+
+**Fix:** The migration runs automatically at API startup. Redeploy to trigger it.
+
+The handler also has a try-catch specifically around this query as a defensive guard — if the enum is still missing, it logs `"Flow engine resume check failed — falling through to ConversationService"` and correctly processes the message anyway.
+
+#### Stage 5 — Is the tenant's `metaPhoneNumberId` correct in the DB?
+
+**File:** `apps/api/src/services/conversation.service.ts` → `resolveTenantByPhoneNumberId()`
+
+The webhook payload contains `metadata.phone_number_id`. This must match `tenants.metaPhoneNumberId` in the DB. If it doesn't match, the log shows:
+
+```
+"No tenant found for Meta phone_number_id — ignoring" { phoneNumberId: "..." }
+```
+
+The message is silently dropped (200 returned, nothing saved).
+
+**Root causes of a mismatch:**
+
+1. **`auth.ts` auto-stamping** (fixed in commit `e32bbc8`): the old login route stamped `config.META_PHONE_NUMBER_ID` (a global env var) onto the tenant at every login, overwriting the real number set via Settings. After the fix, phone numbers only come from the Settings/onboarding flow.
+
+2. **`onboarding.service.ts` hard-failing** (fixed in commit `e32bbc8`): the old onboarding route rejected credentials if `getPhoneNumberInfo()` threw (network timeout, transient Meta error). Credentials were never saved. The tenant's `metaPhoneNumberId` remained null or stale. After the fix, credentials are always saved — the connection test is advisory only.
+
+**Fix:** After deploying the latest code, go to **Settings → Update Credentials** and re-save the Phone Number ID, WABA ID, and Access Token. This writes the correct `metaPhoneNumberId` to the DB.
+
+**Lookup priority in `resolveTenantByPhoneNumberId`:**
+```typescript
+// 1. Prefer fully-configured tenant (has BOTH metaPhoneNumberId AND wabaId)
+// 2. Fall back to any tenant with matching metaPhoneNumberId
+// Never auto-stamp from global env var
+```
+
+#### Stage 6 — Is `watiAccountStatus` = `'active'`?
+
+`GET /api/v1/onboarding/status` returns `onboarded = (watiAccountStatus === 'active' && !!metaPhoneNumberId)`. Completing onboarding via Settings sets `watiAccountStatus = 'active'`. If it's still `null` or `'pending'`, the dashboard shows "Not connected" and the AI state machine won't respond (though the webhook will still save messages).
+
+---
+
+### Outbound Pipeline (API → Meta)
+
+The path for a dashboard agent sending a message:
+
+```
+POST /api/v1/conversations/:id/send-message
+  → JWT auth + conversation ownership check
+  → state must be 'ESCALATED'
+  → isWithin24HourWindow check              ← fails = 422 (correct behaviour)
+  → getTenantMetaClient(tenantId)           ← throws if no credentials in DB
+  → meta.sendText(...)                      ← Meta API call
+  → message saved to DB
+```
+
+**Common outbound failures:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `getTenantMetaClient throws: Tenant has no active WABA credentials` | `metaAccessToken` or `metaPhoneNumberId` null in DB | Go to Settings → Update Credentials |
+| `Can only send messages to escalated conversations` | State is not ESCALATED | Click "Take Over" in the conversation first |
+| `WhatsApp 24-hour session has expired` | Last buyer message was >24h ago | Use a template broadcast instead of freeform |
+| 502 from Meta with auth error | Access token expired or revoked | Regenerate the System User token in Meta Business Manager and re-save in Settings |
+
+**CRITICAL — Worker outbound (restock, payment expiry, tracking):**  
+Worker processors use `getTenantMetaClient(tenantId)` from `apps/worker/src/_meta.helper.ts` — they must **never** use `process.env.META_ACCESS_TOKEN` directly. If they do, they send on the wrong WABA and the correct tenant never receives the notification.
+
+---
+
+### Per-Tenant MetaClient — The Golden Rule
+
+**Always and only use `getTenantMetaClient(tenantId)`.**
+
+| Location | Helper file |
+|----------|------------|
+| `apps/api` services and routes | `apps/api/src/services/_meta.helper.ts` |
+| `apps/worker` processors | `apps/worker/src/_meta.helper.ts` |
+
+Both helpers: load tenant row from DB → decrypt `metaAccessToken` (AES-256-GCM, key=`WABA_POOL_ENCRYPTION_KEY`) → `MetaClient.fromTenant({metaAccessToken, metaPhoneNumberId})`.
+
+**Never:**
+```typescript
+new MetaClient(config.META_ACCESS_TOKEN, config.META_PHONE_NUMBER_ID)  // global credentials
+new MetaClient(process.env.META_ACCESS_TOKEN!, ...)                     // same problem
+```
+
+Any code doing the above sends on a global shared WABA, not the tenant's own number. This breaks multi-tenancy completely — the buyer receives the message from an unrecognised number and replies go to the wrong webhook.
+
+---
+
+### Quick Diagnostic Checklist
+
+When any WhatsApp problem is reported, paste this into a Railway log search before doing anything else:
+
+```
+"Failed to process Meta webhook"     → Stage 4 (DB enum crash) or general error
+"Meta webhook signature mismatch"    → Stage 2 or 3 (META_APP_SECRET or rawBody)
+"Webhook signature verification not configured"  → Stage 2 (META_APP_SECRET empty)
+"No tenant found for Meta phone_number_id"       → Stage 5 (metaPhoneNumberId mismatch)
+"Meta inbound message received"      → Pipeline is working; problem is downstream
+"Flow engine resume check failed"    → Stage 4 fallback triggered (migration pending)
+```
+
+If you see `"Meta inbound message received"` but conversations don't appear in the dashboard, the problem is in `handleInbound` (buyer creation, conversation creation, or message save) — add logging and check DB directly.
+
+---
+
+### Known Historical Bugs (do not re-introduce)
+
+| Bug | Was in | Fixed in | Commit |
+|-----|--------|----------|--------|
+| `auth.ts` stamped global `META_PHONE_NUMBER_ID` onto tenant at every login | `apps/api/src/routes/v1/auth.ts` | Removed entirely — phone numbers come from Settings only | `e32bbc8` |
+| `onboarding.service.ts` hard-failed on `getPhoneNumberInfo()` — credentials never saved | `apps/api/src/services/onboarding.service.ts` | Soft-fail — credentials always saved | `e32bbc8` |
+| Content-type parser exact-string `'application/json'` — `rawBody` undefined for Meta's charset variant → HMAC always fails | `apps/api/src/index.ts` | Changed to `/^application\/json/` regex | `e32bbc8` |
+| `resolveTenantByPhoneNumberId` fallback auto-stamped random tenant with global env phone | `apps/api/src/services/conversation.service.ts` | Removed global fallback; prefers fully-configured tenant | `e32bbc8` |
+| `flow_execution_status` enum missing `'waiting_reply'` — webhook handler crashed, all inbound messages dropped | `packages/db/src/migrations/` | Migration `0009` adds the value; handler has defensive try-catch | `e64fd3e` |
+| Worker processors used `process.env.META_ACCESS_TOKEN` — sent on wrong WABA | `apps/worker/src/processors/` | All switched to `getTenantMetaClient(tenantId)` | `18fdaf5` |
+| `broadcasts.ts` used global credentials for template list and send | `apps/api/src/routes/v1/broadcasts.ts` | Switched to `getTenantMetaClient(tenantId)` | `94dd9b9` |
 
 ---
 
