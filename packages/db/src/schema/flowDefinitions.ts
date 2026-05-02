@@ -21,7 +21,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
-export const flowStatusEnum = pgEnum('flow_status', ['draft', 'active', 'archived']);
+export const flowStatusEnum = pgEnum('flow_status', ['draft', 'active', 'paused', 'archived']);
 
 export const flowDefinitions = pgTable(
   'flow_definitions',

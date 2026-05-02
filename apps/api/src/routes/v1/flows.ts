@@ -202,7 +202,7 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.patch<{
     Params: { id: string };
-    Body: { status: 'active' | 'draft' | 'archived' };
+    Body: { status: 'active' | 'draft' | 'paused' | 'archived' };
   }>(
     '/v1/flows/:id/status',
     { preHandler: authAndFeature(fastify) },
@@ -210,8 +210,8 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
       const { tenantId } = request.user;
       const { status } = request.body;
 
-      if (!['active', 'draft', 'archived'].includes(status)) {
-        return reply.status(400).send({ error: 'status must be active, draft, or archived' });
+      if (!['active', 'draft', 'paused', 'archived'].includes(status)) {
+        return reply.status(400).send({ error: 'status must be active, draft, paused, or archived' });
       }
 
       const existing = await db.query.flowDefinitions.findFirst({
@@ -245,7 +245,7 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const setPayload: {
-        status: 'active' | 'draft' | 'archived';
+        status: 'active' | 'draft' | 'paused' | 'archived';
         updatedAt: Date;
         activatedAt?: Date;
         archivedAt?: Date;
