@@ -32,6 +32,10 @@ export enum ConversationState {
   COMPLETED = 'COMPLETED',
   ESCALATED = 'ESCALATED',
   CLOSED_LOST = 'CLOSED_LOST',
+  // Scheduling module
+  SCHEDULING = 'SCHEDULING',
+  SCHEDULING_CONFIRMED = 'SCHEDULING_CONFIRMED',
+  SCHEDULING_CANCELLED = 'SCHEDULING_CANCELLED',
 }
 
 export interface Conversation {

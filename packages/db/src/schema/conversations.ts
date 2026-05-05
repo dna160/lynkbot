@@ -45,6 +45,10 @@ export const conversationStateEnum = pgEnum('conversation_state', [
   'COMPLETED',
   'ESCALATED',
   'CLOSED_LOST',
+  // Scheduling module (migration 0012)
+  'SCHEDULING',
+  'SCHEDULING_CONFIRMED',
+  'SCHEDULING_CANCELLED',
 ]);
 
 export const conversations = pgTable('conversations', {

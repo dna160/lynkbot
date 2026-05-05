@@ -23,8 +23,13 @@ import {
   getLLMClient,
   buildSystemPrompt,
   query as ragQuery,
+  SCHEDULING_SYSTEM_PROMPT,
+  parseSchedulingEnvelope,
+  formatWIBDatetime,
 } from '@lynkbot/ai';
+import { BOOKING_INTENT_KEYWORDS } from '@lynkbot/shared';
 import { IntentPlaybookService } from './intentPlaybook.service';
+import { SchedulingService } from './scheduling.service';
 import {
   extractText,
   extractMessageId,
@@ -86,11 +91,18 @@ function detectProductQuestion(text: string): boolean {
   return containsAny(text, indicators);
 }
 
+/** O(1) keyword scan — triggers SCHEDULING state transition before LLM classification */
+function detectBookingIntent(text: string): boolean {
+  const allKeywords = [...BOOKING_INTENT_KEYWORDS.id, ...BOOKING_INTENT_KEYWORDS.en];
+  return containsAny(text, allKeywords);
+}
+
 export class ConversationService {
   private checkoutService = new CheckoutService();
   private shippingService = new ShippingService();
   private notificationService = new NotificationService();
   private paymentService = new PaymentService();
+  private schedulingService = new SchedulingService();
 
   private getMetaClient(tenantId: string): Promise<MetaClient> {
     return getTenantMetaClient(tenantId);
@@ -355,29 +367,33 @@ export class ConversationService {
 
   async routeByState(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const handlers: Record<ConversationStateValue, () => Promise<void>> = {
-      INIT:                  () => this.handleInit(conv, buyer, payload),
-      GREETING:              () => this.handleGreeting(conv, buyer, payload),
-      BROWSING:              () => this.handleBrowsing(conv, buyer, payload),
-      PRODUCT_INQUIRY:       () => this.handleProductInquiry(conv, buyer, payload),
-      OBJECTION_HANDLING:    () => this.handleObjection(conv, buyer, payload),
-      CHECKOUT_INTENT:       () => this.checkoutService.beginCheckout(conv, buyer),
-      STOCK_CHECK:           () => this.checkoutService.beginCheckout(conv, buyer),
-      ADDRESS_COLLECTION:    () => this.checkoutService.collectAddress(conv, buyer, payload),
-      LOCATION_RECEIVED:     () => this.checkoutService.collectAddress(conv, buyer, payload),
-      SHIPPING_CALC:         () => this.checkoutService.presentShippingOptions(conv, buyer),
-      PAYMENT_METHOD_SELECT: () => this.handlePaymentMethodSelect(conv, buyer, payload),
-      INVOICE_GENERATION:    () => Promise.resolve(),
-      AWAITING_PAYMENT:      () => this.handleAwaitingPayment(conv, buyer, payload),
-      PAYMENT_EXPIRED:       () => this.handlePaymentExpired(conv, buyer, payload),
-      PAYMENT_CONFIRMED:     () => Promise.resolve(),
-      ORDER_PROCESSING:      () => this.handleOrderProcessing(conv, buyer, payload),
-      OUT_OF_STOCK:          () => this.handleOutOfStock(conv, buyer, payload),
-      SHIPPED:               () => Promise.resolve(),
-      TRACKING:              () => Promise.resolve(),
-      DELIVERED:             () => Promise.resolve(),
-      COMPLETED:             () => Promise.resolve(),
-      ESCALATED:             () => Promise.resolve(), // AI is silent — human has taken over
-      CLOSED_LOST:           () => Promise.resolve(), // ignore all messages
+      INIT:                   () => this.handleInit(conv, buyer, payload),
+      GREETING:               () => this.handleGreeting(conv, buyer, payload),
+      BROWSING:               () => this.handleBrowsing(conv, buyer, payload),
+      PRODUCT_INQUIRY:        () => this.handleProductInquiry(conv, buyer, payload),
+      OBJECTION_HANDLING:     () => this.handleObjection(conv, buyer, payload),
+      CHECKOUT_INTENT:        () => this.checkoutService.beginCheckout(conv, buyer),
+      STOCK_CHECK:            () => this.checkoutService.beginCheckout(conv, buyer),
+      ADDRESS_COLLECTION:     () => this.checkoutService.collectAddress(conv, buyer, payload),
+      LOCATION_RECEIVED:      () => this.checkoutService.collectAddress(conv, buyer, payload),
+      SHIPPING_CALC:          () => this.checkoutService.presentShippingOptions(conv, buyer),
+      PAYMENT_METHOD_SELECT:  () => this.handlePaymentMethodSelect(conv, buyer, payload),
+      INVOICE_GENERATION:     () => Promise.resolve(),
+      AWAITING_PAYMENT:       () => this.handleAwaitingPayment(conv, buyer, payload),
+      PAYMENT_EXPIRED:        () => this.handlePaymentExpired(conv, buyer, payload),
+      PAYMENT_CONFIRMED:      () => Promise.resolve(),
+      ORDER_PROCESSING:       () => this.handleOrderProcessing(conv, buyer, payload),
+      OUT_OF_STOCK:           () => this.handleOutOfStock(conv, buyer, payload),
+      SHIPPED:                () => Promise.resolve(),
+      TRACKING:               () => Promise.resolve(),
+      DELIVERED:              () => Promise.resolve(),
+      COMPLETED:              () => Promise.resolve(),
+      ESCALATED:              () => Promise.resolve(), // AI is silent — human has taken over
+      CLOSED_LOST:            () => Promise.resolve(), // ignore all messages
+      // Scheduling states
+      SCHEDULING:             () => this.handleScheduling(conv, buyer, payload),
+      SCHEDULING_CONFIRMED:   () => Promise.resolve(), // staff confirmation pending
+      SCHEDULING_CANCELLED:   () => this.handleBrowsing(conv, buyer, payload), // allow re-booking
     };
 
     const handler = handlers[conv.state as ConversationStateValue];
@@ -409,6 +425,13 @@ export class ConversationService {
   private async handleBrowsing(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
 
+    // Booking intent check before buy intent — scheduling takes priority
+    if (text && detectBookingIntent(text)) {
+      await this.transitionState(conv.id, 'SCHEDULING');
+      await this.handleScheduling({ ...conv, state: 'SCHEDULING' }, buyer, payload);
+      return;
+    }
+
     if (detectBuyIntent(text, conv.language as 'id' | 'en')) {
       await this.transitionState(conv.id, 'CHECKOUT_INTENT');
       await this.checkoutService.beginCheckout({ ...conv, state: 'CHECKOUT_INTENT' }, buyer);
@@ -434,6 +457,13 @@ export class ConversationService {
 
   private async handleProductInquiry(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
     const text = extractText(payload);
+
+    // Booking intent intercept — also fires from product inquiry
+    if (text && detectBookingIntent(text)) {
+      await this.transitionState(conv.id, 'SCHEDULING');
+      await this.handleScheduling({ ...conv, state: 'SCHEDULING' }, buyer, payload);
+      return;
+    }
 
     if (detectBuyIntent(text)) {
       await this.transitionState(conv.id, 'CHECKOUT_INTENT');
@@ -478,6 +508,88 @@ export class ConversationService {
     }
 
     await this.sendAiResponse(conv, buyer, text);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SCHEDULING state handler
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handles the SCHEDULING conversation state.
+   *
+   * Conversation flow:
+   *   1. Buyer sends booking intent keyword → state transitions to SCHEDULING
+   *   2. This handler sends the buyer message to the LLM with SCHEDULING_SYSTEM_PROMPT
+   *   3. LLM either replies with plain text (asks clarifying questions) OR a JSON envelope
+   *   4. If JSON envelope: handleLLMEnvelope executes it (availability check / booking)
+   *   5. On confirm_booking: state transitions to SCHEDULING_CONFIRMED
+   *
+   * The LLM is capped at MAX_SCHEDULING_ROUNDS negotiation rounds per PRD §3.5.
+   */
+  private async handleScheduling(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
+    const text = extractText(payload) ?? '';
+    const llm = getLLMClient();
+
+    // Build conversation history for the scheduling LLM (last 10 messages for context)
+    const recentMessages = await db.query.messages.findMany({
+      where: and(
+        eq(messages.conversationId, conv.id),
+      ),
+      orderBy: (m, { desc }) => [desc(m.createdAt)],
+      limit: 10,
+    });
+
+    const history = recentMessages
+      .reverse()
+      .map(m => ({
+        role: m.direction === 'inbound' ? ('user' as const) : ('assistant' as const),
+        content: m.textContent ?? '',
+      }))
+      .filter(m => m.content.length > 0);
+
+    // Append the current user message if not already in history
+    if (!history.length || history[history.length - 1].role !== 'user') {
+      history.push({ role: 'user', content: text });
+    }
+
+    try {
+      const llmResponse = await llm.chat([
+        { role: 'system', content: SCHEDULING_SYSTEM_PROMPT },
+        ...history,
+      ]);
+
+      const responseText = llmResponse.content.trim();
+
+      // Try parsing as envelope first
+      const envelope = parseSchedulingEnvelope(responseText);
+      if (envelope) {
+        const replyText = await this.schedulingService.handleLLMEnvelope(
+          conv.tenantId,
+          { id: conv.id, state: conv.state },
+          { id: buyer.id, displayName: buyer.displayName, waPhone: buyer.waPhone },
+          envelope,
+        );
+
+        // Send the human-readable result to the buyer
+        await this.sendAndRecord(conv, buyer.waPhone, replyText);
+
+        // Transition to SCHEDULING_CONFIRMED after a confirm_booking envelope
+        if (envelope.action === 'confirm_booking') {
+          await this.transitionState(conv.id, 'SCHEDULING_CONFIRMED');
+        }
+      } else {
+        // Plain text — send directly
+        await this.sendAndRecord(conv, buyer.waPhone, responseText);
+      }
+    } catch (err) {
+      // LLM failed — send graceful fallback
+      await this.sendAndRecord(
+        conv,
+        buyer.waPhone,
+        'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.',
+      );
+      throw err; // Re-throw so the outer error handler can log it
+    }
   }
 
   private async handlePaymentMethodSelect(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {

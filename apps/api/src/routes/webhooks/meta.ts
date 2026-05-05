@@ -20,17 +20,19 @@ import { verifyMetaSignature } from '../../middleware/metaSignature';
 import { extractFirstMessage, isStatusUpdate } from '@lynkbot/meta';
 import { ConversationService } from '../../services/conversation.service';
 import { config } from '../../config';
-import { db, buyers, flowExecutions, eq, and, sql } from '@lynkbot/db';
+import { db, buyers, flowExecutions, staff, eq, and, sql } from '@lynkbot/db';
 import { FlowEngine } from '@lynkbot/flow-engine';
 import { getTenantMetaClient } from '../../services/_meta.helper';
 import { getRedisConnection } from '../../config';
 import Redis from 'ioredis';
 import { TemplateStudioService } from '../../services/templateStudio.service';
 import { RiskScoreService } from '../../services/riskScore.service';
+import { SchedulingService } from '../../services/scheduling.service';
 
 const conversationService = new ConversationService();
 const templateStudioService = new TemplateStudioService();
 const riskScoreService = new RiskScoreService();
+const schedulingService = new SchedulingService();
 
 // ── Flow Engine singleton ────────────────────────────────────────────────────
 // Instantiated once per API process; matches ConversationService pattern.
@@ -152,6 +154,49 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
             'No tenant found for Meta phone_number_id — ignoring',
           );
           return;
+        }
+
+        // ── Staff intercept — HIGHEST PRIORITY ────────────────────────────
+        // If the inbound WA number matches a staff record, this is a staff
+        // member replying to a confirmation template — NOT a buyer message.
+        // Staff always wins: even if a staff number has a buyer row, we route
+        // to the scheduling confirmation handler and return immediately.
+        // Decision: "Staff always wins" — see session notes 2026-05-xx.
+        {
+          const inboundText = payload.text ?? payload.raw?.text?.body ?? '';
+          const staffMember = await db.query.staff.findFirst({
+            where: and(eq(staff.tenantId, tenantId), eq(staff.phoneNumber, payload.waId)),
+            columns: { id: true, phoneNumber: true },
+          });
+
+          if (staffMember) {
+            request.log.info(
+              { waId: payload.waId, staffId: staffMember.id, tenantId },
+              'Staff intercept: routing to scheduling confirmation handler',
+            );
+
+            // Path A: quick-reply button from aria_appointment_confirmation template
+            const buttonPayload = payload.raw?.interactive?.button_reply?.id as string | undefined;
+            if (buttonPayload?.startsWith('appt:')) {
+              // Format: "appt:<appointmentId>:confirm" | "appt:<appointmentId>:decline"
+              const [, appointmentId, action] = buttonPayload.split(':');
+              const isConfirm = action === 'confirm';
+              schedulingService
+                .handleStaffButtonReply(tenantId, appointmentId, isConfirm, request.log)
+                .catch((err: unknown) =>
+                  request.log.error({ err, appointmentId }, 'Staff button reply handling failed'),
+                );
+            } else if (inboundText) {
+              // Path B: keyword reply (konfirmasi / tolak / etc.)
+              schedulingService
+                .handleStaffKeywordReply(tenantId, staffMember.id, staffMember.phoneNumber, inboundText, request.log)
+                .catch((err: unknown) =>
+                  request.log.error({ err, staffId: staffMember.id }, 'Staff keyword reply handling failed'),
+                );
+            }
+
+            return; // Do NOT process as buyer message
+          }
         }
 
         // ── Find-or-create buyer (needed for all flow engine checks below) ──

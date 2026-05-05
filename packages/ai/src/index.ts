@@ -18,3 +18,5 @@ export { buildSystemPrompt } from './prompts/system';
 export type { SystemPromptContext } from './prompts/system';
 export { SALES_DIRECTIVES, BUY_INTENT_KEYWORDS, OBJECTION_KEYWORDS, DISENGAGEMENT_KEYWORDS, STOP_KEYWORDS, AGENT_KEYWORDS } from './prompts/sales';
 export { STATE_PROMPTS } from './prompts/statePrompts';
+export { SCHEDULING_SYSTEM_PROMPT, parseSchedulingEnvelope, formatWIBDatetime } from './prompts/schedulingPrompt';
+export type { SchedulingEnvelope } from './prompts/schedulingPrompt';

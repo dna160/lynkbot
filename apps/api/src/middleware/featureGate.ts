@@ -5,7 +5,8 @@ export type FeatureFlag =
   | 'template_studio'
   | 'flow_reengagement'
   | 'ai_flow_generator'
-  | 'risk_score';
+  | 'risk_score'
+  | 'scheduling';
 
 /**
  * Stub middleware for subscription-tier feature gating (PRD §2.7).

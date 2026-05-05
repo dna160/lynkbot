@@ -156,8 +156,9 @@ export interface MetaTemplateComponent {
   sub_type?: 'quick_reply' | 'url';
   index?: number;
   parameters: Array<{
-    type: 'text' | 'image' | 'document' | 'video' | 'currency' | 'date_time';
+    type: 'text' | 'image' | 'document' | 'video' | 'currency' | 'date_time' | 'payload';
     text?: string;
+    payload?: string;  // Used for quick_reply button parameters (WhatsApp API)
     image?: { link: string };
   }>;
 }

@@ -15,6 +15,10 @@ import { TemplateEditorPage } from './pages/Templates/TemplateEditorPage';
 import { FlowsListPage } from './pages/Flows/FlowsListPage';
 import { FlowEditorPage } from './pages/Flows/FlowEditorPage';
 import { IntentPlaybooksPage } from './pages/IntentPlaybooks/IntentPlaybooksPage';
+import { AppointmentsPage } from './pages/Appointments/AppointmentsPage';
+import { AppointmentsCalendarPage } from './pages/Appointments/AppointmentsCalendarPage';
+import { StaffPage } from './pages/Staff/StaffPage';
+import { ServicesPage } from './pages/Services/ServicesPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { getTenantIdFromToken } from './lib/api';
 
@@ -127,6 +131,10 @@ export default function App() {
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="flows" element={<FlowsListPage />} />
           <Route path="playbooks" element={<IntentPlaybooksPage />} />
+          <Route path="appointments" element={<AppointmentsPage />} />
+          <Route path="appointments/calendar" element={<AppointmentsCalendarPage />} />
+          <Route path="staff" element={<StaffPage />} />
+          <Route path="services" element={<ServicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         {/* Canvas routes — full-bleed, no padding wrapper */}

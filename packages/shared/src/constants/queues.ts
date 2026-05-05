@@ -18,6 +18,8 @@ export const QUEUES = {
   FLOW_EXECUTION: 'lynkbot-flow-execution',
   TEMPLATE_SYNC: 'lynkbot-template-sync',
   RISK_SCORE: 'lynkbot-risk-score',
+  // Scheduling module
+  REMINDERS: 'lynkbot-reminders',
 } as const;
 
 export type QueueName = typeof QUEUES[keyof typeof QUEUES];
