@@ -61,7 +61,7 @@ export function useIntentPlaybooks() {
   return useQuery({
     queryKey: ['intent-playbooks'],
     queryFn: async () => {
-      const res = await api.get('/v1/intent-playbooks');
+      const res = await api.get('/intent-playbooks');
       return res.data.playbooks as PlaybookRow[];
     },
   });
@@ -71,7 +71,7 @@ export function useCreatePlaybook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: Partial<PlaybookRow>) => {
-      const res = await api.post('/v1/intent-playbooks', data);
+      const res = await api.post('/intent-playbooks', data);
       return res.data.playbook as PlaybookRow;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['intent-playbooks'] }),
@@ -82,7 +82,7 @@ export function useUpdatePlaybook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...data }: Partial<PlaybookRow> & { id: string }) => {
-      const res = await api.put(`/v1/intent-playbooks/${id}`, data);
+      const res = await api.put(`/intent-playbooks/${id}`, data);
       return res.data.playbook as PlaybookRow;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['intent-playbooks'] }),
@@ -93,7 +93,7 @@ export function useDeletePlaybook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await api.delete(`/v1/intent-playbooks/${id}`);
+      await api.delete(`/intent-playbooks/${id}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['intent-playbooks'] }),
   });
@@ -103,7 +103,7 @@ export function useTogglePlaybook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const res = await api.patch(`/v1/intent-playbooks/${id}/toggle`);
+      const res = await api.patch(`/intent-playbooks/${id}/toggle`);
       return res.data.playbook as PlaybookRow;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['intent-playbooks'] }),
