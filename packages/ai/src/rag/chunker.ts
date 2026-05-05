@@ -28,6 +28,17 @@ export interface TextChunk {
 }
 
 /**
+ * Strip characters Postgres UTF8 cannot store:
+ *   - Null bytes (0x00) — Postgres hard-rejects these in all text columns
+ *   - Other C0/C1 control chars except \t, \n, \r (keep whitespace)
+ * PDFs from embedded fonts or OCR sometimes embed these in the raw byte stream.
+ */
+function sanitizeForPostgres(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x00/g, '').replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+/**
  * Approximate token count: 1 token ≈ 4 characters (GPT-family heuristic).
  * Avoids tiktoken WASM which can silently fail in Alpine Docker containers.
  */
@@ -47,8 +58,9 @@ export async function extractPdfText(pdfBuffer: Buffer): Promise<PageText[]> {
     throw new Error('PDF produced no extractable text — may be image-only or encrypted');
   }
 
-  // pdf-parse separates pages with form-feed (\f) characters
-  const rawPages = data.text.split('\f');
+  // pdf-parse separates pages with form-feed (\f) characters.
+  // Sanitize before splitting — null bytes can appear anywhere in raw PDF text.
+  const rawPages = sanitizeForPostgres(data.text).split('\f');
   const pages: PageText[] = rawPages
     .map((text: string, i: number) => ({ pageNumber: i + 1, text: text.trim() }))
     .filter((p: PageText) => p.text.length > 0);
@@ -90,7 +102,7 @@ export function chunkText(pages: PageText[], opts = { maxTokens: 512, overlap: 5
 
       if (bufferTokens + lineTokens > opts.maxTokens && buffer.length > 0) {
         chunks.push({
-          text: buffer.trim(),
+          text: sanitizeForPostgres(buffer.trim()),
           pageNumber: page.pageNumber,
           chapterTitle: currentChapterTitle,
           tokenCount: bufferTokens,
@@ -115,7 +127,7 @@ export function chunkText(pages: PageText[], opts = { maxTokens: 512, overlap: 5
 
     if (buffer.trim().length > 0) {
       chunks.push({
-        text: buffer.trim(),
+        text: sanitizeForPostgres(buffer.trim()),
         pageNumber: page.pageNumber,
         chapterTitle: currentChapterTitle,
         tokenCount: bufferTokens,
