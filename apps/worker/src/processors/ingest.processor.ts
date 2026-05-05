@@ -45,9 +45,14 @@ export const ingestProcessor: Processor = async (job) => {
   const jobData = job.data as IngestJobData;
   const { productId, tenantId } = jobData;
 
+  /** Strip null bytes and C0/C1 control chars that Postgres UTF8 rejects. */
+  const sanitize = (s: string) =>
+    // eslint-disable-next-line no-control-regex
+    s.replace(/\x00/g, '').replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
   const saveError = async (msg: string) => {
     await db.update(products)
-      .set({ knowledgeStatus: 'failed', knowledgeError: msg, updatedAt: new Date() })
+      .set({ knowledgeStatus: 'failed', knowledgeError: sanitize(msg), updatedAt: new Date() })
       .where(eq(products.id, productId));
   };
 
@@ -144,7 +149,7 @@ export const ingestProcessor: Processor = async (job) => {
         90_000, 'LLM persona generation'
       );
       await db.update(products)
-        .set({ bookPersonaPrompt: res.content, updatedAt: new Date() })
+        .set({ bookPersonaPrompt: sanitize(res.content), updatedAt: new Date() })
         .where(eq(products.id, productId));
       job.log(`[6/6] Persona generated (${res.tokensUsed} tokens, ${res.latencyMs}ms)`);
     } catch (personaErr) {

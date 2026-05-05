@@ -89,7 +89,9 @@ async function generateBookPersona(productId: string, sampleContent: string): Pr
     },
   ], { maxTokens: 400 });
 
-  return res.content;
+  // Strip null bytes and C0/C1 control chars that Postgres UTF8 rejects
+  // eslint-disable-next-line no-control-regex
+  return res.content.replace(/\x00/g, '').replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 export async function query(productId: string, tenantId: string, question: string): Promise<string> {
