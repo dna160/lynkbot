@@ -14,6 +14,7 @@ export interface SystemPromptContext {
   productName?: string;
   bookPersonaPrompt?: string | null;
   language: 'id' | 'en';
+  playbookContext?: string;
 }
 
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
@@ -71,6 +72,7 @@ COMPLIANCE:
   const base = ctx.language === 'id' ? baseID : baseEN;
   const persona = ctx.bookPersonaPrompt ? `\n\nBOOK EXPERTISE:\n${ctx.bookPersonaPrompt}` : '';
   const product = ctx.productName ? `\n\nCURRENT PRODUCT CONTEXT: ${ctx.productName}` : '';
+  const playbook = ctx.playbookContext ? `\n\n${ctx.playbookContext}` : '';
 
-  return base + persona + product;
+  return base + persona + product + playbook;
 }

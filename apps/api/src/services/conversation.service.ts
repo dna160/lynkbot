@@ -24,6 +24,7 @@ import {
   buildSystemPrompt,
   query as ragQuery,
 } from '@lynkbot/ai';
+import { IntentPlaybookService } from './intentPlaybook.service';
 import {
   extractText,
   extractMessageId,
@@ -576,11 +577,16 @@ export class ConversationService {
       ? await db.query.products.findFirst({ where: eq(products.id, conv.productId) })
       : null;
 
+    // Load intent playbook for this conversation state
+    const intentSvc = new IntentPlaybookService();
+    const playbookResult = await intentSvc.getPlaybookBlock(conv.tenantId, conv.state).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
+
     const systemPrompt = buildSystemPrompt({
       storeName: tenant?.storeName ?? 'LynkBot Store',
       productName: product?.name,
       bookPersonaPrompt: product?.bookPersonaPrompt,
       language: (conv.language as 'id' | 'en') ?? 'id',
+      playbookContext: playbookResult.block || undefined,
     });
 
     const stateOverlay = STATE_PROMPTS[conv.state as ConversationStateValue] ?? '';

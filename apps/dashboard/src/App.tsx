@@ -14,6 +14,7 @@ import { TemplateListPage } from './pages/Templates/TemplateListPage';
 import { TemplateEditorPage } from './pages/Templates/TemplateEditorPage';
 import { FlowsListPage } from './pages/Flows/FlowsListPage';
 import { FlowEditorPage } from './pages/Flows/FlowEditorPage';
+import { IntentPlaybooksPage } from './pages/IntentPlaybooks/IntentPlaybooksPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { getTenantIdFromToken } from './lib/api';
 
@@ -125,6 +126,7 @@ export default function App() {
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="flows" element={<FlowsListPage />} />
+          <Route path="playbooks" element={<IntentPlaybooksPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         {/* Canvas routes — full-bleed, no padding wrapper */}
