@@ -108,7 +108,7 @@ describe('SchedulingService - Rescheduling', () => {
     });
 
     it('returns null when service not found', async () => {
-      vi.spyOn(db.query.services, 'findFirst').mockResolvedValueOnce(null);
+      vi.spyOn(db.query.services, 'findFirst').mockResolvedValueOnce(null as any);
 
       const result = await svc.getConfirmationStaff(SERVICE_ID, TENANT_ID);
 
@@ -161,7 +161,7 @@ describe('SchedulingService - Rescheduling', () => {
     });
 
     it('returns error if appointment not found', async () => {
-      vi.spyOn(svc, 'getAppointment').mockResolvedValueOnce(null);
+      vi.spyOn(svc, 'getAppointment').mockResolvedValueOnce(null as any);
 
       const result = await svc.handleRescheduleRequest(
         'nonexistent-id',
