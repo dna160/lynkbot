@@ -4,9 +4,9 @@
 > feature locations, API surface, DB schema, type system, design patterns, and operational details.
 > Synthesized from PRD v2.1, all 6 phase handoffs, checkpoint audit, and verified source files.
 >
-> **Branch:** `claude/elegant-brattain-b5512a`
-> **Last completed phase:** Phase 6 — 64/64 tests passing, zero TypeScript errors
-> **Working directory:** `/Users/storytellers/Documents/Claude Home/Lynkbot/.claude/worktrees/elegant-brattain-b5512a`
+> **Branch:** `main`
+> **Last completed phase:** Phase 6 + post-launch fixes (scheduling intent, RAG, inline PDF, buyer deletion, dashboard i18n)
+> **Working directory:** `/Users/storytellers/Documents/Claude Home/Lynkbot`
 
 ---
 
@@ -280,7 +280,7 @@ Both routes are behind `requireFeature('ai_flow_generator')` preHandler.
 
 **AI response handling:** JSON parsed leniently — markdown fences stripped, parse errors surfaced as `parseError` field but response still returned. AI-generated flows are ALWAYS `status: 'draft'`; never auto-activated.
 
-### 4.9 Conversational AI (pre-existing)
+### 4.9 Conversational AI
 
 | Component | File |
 |-----------|------|
@@ -288,11 +288,56 @@ Both routes are behind `requireFeature('ai_flow_generator')` preHandler.
 | Conversation routes | `apps/api/src/routes/v1/conversations.ts` |
 | Meta webhook handler | `apps/api/src/routes/webhooks/meta.ts` |
 | AI prompts | `packages/ai/src/prompts/` |
-| RAG pipeline | `packages/ai/src/rag/` |
+| RAG pipeline | `packages/ai/src/rag/pipeline.ts` |
+| LLM intent classifier | `packages/ai/src/llm/classifier.ts` |
+| Scheduling prompts | `packages/ai/src/prompts/schedulingPrompt.ts` |
 
-**Conversation state machine:** `GREETING → BROWSING → CART → CHECKOUT → AWAITING_PAYMENT → ORDER_CONFIRMED → CLOSED_WON / CLOSED_LOST / ESCALATED`
+**Conversation state machine:**
+```
+INIT → GREETING → BROWSING → PRODUCT_INQUIRY → OBJECTION_HANDLING
+     → CHECKOUT_INTENT → ADDRESS_COLLECTION → SHIPPING_CALC
+     → PAYMENT_METHOD_SELECT → INVOICE_GENERATION → AWAITING_PAYMENT
+     → PAYMENT_CONFIRMED → ORDER_PROCESSING → SHIPPED → DELIVERED → COMPLETED
+     → SCHEDULING → SCHEDULING_CONFIRMED → SCHEDULING_CANCELLED
+     → OUT_OF_STOCK → ESCALATED → CLOSED_LOST
+```
+
+**Intent classification (LLM-based):** `classifyMessageIntent(text, tenantId, lastBotMessage?)` runs in parallel with RAG inside `handleBrowsing` and `handleProductInquiry`. Uses `LLM_FALLBACK_MODEL` (grok-3), `maxTokens:50`, `temperature:0`. Labels:
+- `PRODUCT_INQUIRY` — question about the product
+- `GENERAL_INQUIRY` — question about the brand/store
+- `OBJECTION_HANDLING` — price concern, hesitation
+- `CHECKOUT_INTENT` — purchase signal
+- `SCHEDULING` — date/time confirmation OR explicit booking request
+- `BROWSING` — greetings, small talk, unclear
+
+**Critical detail:** Pass `lastBotMessage` (last outbound DB message) to the classifier so context-dependent time replies (e.g. "Selasa jam 14:00" after the bot offered a consultation) are correctly classified as `SCHEDULING` rather than `BROWSING`.
+
+**SCHEDULING short-circuit:** When the classifier returns `SCHEDULING`, RAG is skipped entirely and the message is routed directly to `handleScheduling` — this prevents unrelated product chunks contaminating the scheduling reply.
+
+**Auto-transition to SCHEDULING:** After `sendAiResponse`, if `playbookResult.nextStepType === 'schedule_consultation'`, the state is pre-transitioned to `SCHEDULING` so the buyer's next reply lands directly in `handleScheduling`.
+
+**Tenant-wide RAG:** `query(tenantId, question)` searches ALL tenant products, not just `conv.productId`. Results are labeled `[Source: ProductName]`. FTS uses `'simple'` config + OR operator for Indonesian text. Fallback: first 5 chunks from the most recently trained product when FTS finds nothing.
 
 **STOP/BERHENTI handler:** Sets `doNotContact=true` on buyer + cancels all active flow executions.
+
+### 4.10 Scheduling Module
+
+| Component | File |
+|-----------|------|
+| Scheduling service | `apps/api/src/services/scheduling.service.ts` |
+| Scheduling routes | `apps/api/src/routes/v1/scheduling.ts` |
+| Scheduling prompt | `packages/ai/src/prompts/schedulingPrompt.ts` |
+| Staff page | `apps/dashboard/src/pages/Staff/StaffPage.tsx` |
+| Services page | `apps/dashboard/src/pages/Services/ServicesPage.tsx` |
+| Appointments list | `apps/dashboard/src/pages/Appointments/AppointmentsPage.tsx` |
+| Appointments calendar | `apps/dashboard/src/pages/Appointments/AppointmentsCalendarPage.tsx` |
+| React Query hooks | `apps/dashboard/src/hooks/useScheduling.ts` |
+
+**Flow:** Bot proactively offers consultation → buyer replies with day/time → `SCHEDULING` state → `handleScheduling` sends message with `SCHEDULING_SYSTEM_PROMPT` (no product RAG, no bookPersonaPrompt) → LLM responds with plain text (clarifying questions) OR a JSON envelope → `handleLLMEnvelope` processes envelope → `confirm_booking` transitions to `SCHEDULING_CONFIRMED`.
+
+**States:** `SCHEDULING` → `SCHEDULING_CONFIRMED` → (staff confirms) → done. `SCHEDULING_CANCELLED` → re-enter `handleBrowsing`.
+
+**Duplicate staff guard:** `POST/PUT /v1/scheduling/staff` catches Postgres code `23505` and returns HTTP 409 with `"A staff member with this WhatsApp number already exists."` instead of crashing with 500.
 
 ---
 
@@ -352,6 +397,22 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | CRUD + import | `/api/v1/buyers` | `apps/api/src/routes/v1/buyers.ts` |
 | CRUD | `/api/v1/conversations` | `apps/api/src/routes/v1/conversations.ts` |
 | CRUD | `/api/v1/broadcasts` | `apps/api/src/routes/v1/broadcasts.ts` |
+
+### Scheduling Routes
+
+| Method | Path | File |
+|--------|------|------|
+| GET | `/api/v1/scheduling/staff` | `apps/api/src/routes/v1/scheduling.ts` |
+| POST | `/api/v1/scheduling/staff` | `apps/api/src/routes/v1/scheduling.ts` |
+| PUT | `/api/v1/scheduling/staff/:id` | `apps/api/src/routes/v1/scheduling.ts` |
+| PUT | `/api/v1/scheduling/staff/:id/availability` | `apps/api/src/routes/v1/scheduling.ts` |
+| GET | `/api/v1/scheduling/services` | `apps/api/src/routes/v1/scheduling.ts` |
+| POST | `/api/v1/scheduling/services` | `apps/api/src/routes/v1/scheduling.ts` |
+| GET | `/api/v1/scheduling/services/:id` | `apps/api/src/routes/v1/scheduling.ts` |
+| PUT | `/api/v1/scheduling/services/:id` | `apps/api/src/routes/v1/scheduling.ts` |
+| GET | `/api/v1/scheduling/appointments` | `apps/api/src/routes/v1/scheduling.ts` |
+| GET | `/api/v1/scheduling/appointments/:id` | `apps/api/src/routes/v1/scheduling.ts` |
+| PATCH | `/api/v1/scheduling/appointments/:id/status` | `apps/api/src/routes/v1/scheduling.ts` |
 
 ### Flow Engine Routes
 
@@ -424,11 +485,11 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 |-------|-------------|-------------|
 | `tenants` | `tenants.ts` | `id, lynkUserId, storeName, wabaId, watiApiKeyEnc, subscriptionTier (trial\|growth\|pro\|scale), metaAccessToken (encrypted), messagingTier (int), wabaQualityRating, lastRiskScoreAt` |
 | `buyers` | `buyers.ts` | `id, tenantId, waPhone, displayName, preferredLanguage, totalOrders, totalSpendIdr, lastOrderAt, tags (JSONB), doNotContact, activeFlowCount` |
-| `conversations` | `conversations.ts` | `id, tenantId, buyerId, state (state machine), messageCount, lastMessageAt` |
+| `conversations` | `conversations.ts` | `id, tenantId, buyerId (nullable → SET NULL on buyer delete), state (state machine), messageCount, lastMessageAt` |
 | `messages` | `messages.ts` | `id, conversationId, direction (inbound\|outbound), body, createdAt` |
-| `products` | `products.ts` | Standard product catalog |
+| `products` | `products.ts` | Standard product catalog + `pdfBytes bytea` (nullable, stores PDF when S3 not configured) + `knowledgeError text` |
 | `inventory` | `inventory.ts` | Stock levels |
-| `orders` | `orders.ts` | Order lifecycle |
+| `orders` | `orders.ts` | Order lifecycle; `buyerId` is nullable → SET NULL on buyer delete (order history preserved) |
 | `shipments` | `shipments.ts` | Shipping tracking |
 | `broadcasts` | `broadcasts.ts` | `id, tenantId, templateName, audienceFilter (JSONB), status, flowId (FK), riskScoreAtSend` |
 | `buyer_genomes` | `buyerGenomes.ts` | Pantheon enrichment data |
@@ -446,6 +507,16 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | `tenant_risk_scores` | `tenantRiskScores.ts` | `id, tenantId (UNIQUE), score, breakdown (JSONB), computedAt` |
 | `waba_pool` | `wabaPool.ts` | `id, phoneNumberId, displayPhone, wabaId, accessTokenEnc (AES-256-GCM encrypted), status (available\|assigned), assignedTo (tenantId FK), assignedAt` |
 
+### Scheduling Tables (Migration 0012)
+
+| Table | Schema File | Key Columns |
+|-------|-------------|-------------|
+| `staff` | `scheduling.ts` | `id, tenantId, name, phoneNumber (UNIQUE per tenant), role, isActive, availability (JSONB weekly slots)` |
+| `services` | `scheduling.ts` | `id, tenantId, name, durationMinutes, isActive, staffIds (JSONB)` |
+| `appointments` | `scheduling.ts` | `id, tenantId, buyerId (CASCADE), staffId (CASCADE), serviceId (CASCADE), startTime, endTime, status (negotiating\|pending_doctor\|confirmed\|cancelled), notes, bullmqJobId` |
+
+**Unique constraint on staff:** `staff_tenant_phone_unique (tenant_id, phone_number)` — duplicate creates 409, not 500.
+
 ### Migration File Index
 
 | File | Phase | What it does |
@@ -453,6 +524,10 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | `0001_initial.sql` … `0004_*.sql` | pre-v2.1 | Base schema |
 | `0005_flow_engine.sql` | Phase 1–4 | All 6 new tables + ALTERs to tenants/buyers/broadcasts |
 | `0006_unique_tenant_risk_score.sql` | Phase 5 drift fix | Deduplicates and adds UNIQUE constraint on `tenant_risk_scores.tenant_id` |
+| `0007_*.sql` … `0011_*.sql` | post-launch fixes | Various schema additions (see file names) |
+| `0012_scheduling.sql` | Scheduling module | `staff`, `services`, `appointments` tables; adds scheduling states to conversation_state enum |
+| `0013_add_pdf_bytes.sql` | Inline PDF storage | `ALTER TABLE products ADD COLUMN pdf_bytes bytea` — stores PDF when S3 not configured |
+| `0014_buyer_soft_delete_fks.sql` | Buyer deletion fix | `conversations.buyer_id` + `orders.buyer_id`: DROP NOT NULL, FK changed from RESTRICT/CASCADE → SET NULL — lets buyers be deleted while preserving conversation and order history |
 
 ---
 
@@ -776,6 +851,92 @@ const mockInsert = Object.assign(Promise.resolve([]), {
 (db.insert as any).mockReturnValue({ values: vi.fn().mockReturnValue(mockInsert) });
 ```
 
+### LLM Classifier Pattern
+
+```typescript
+import { classifyMessageIntent } from '@lynkbot/ai';
+
+// Load last outbound message FIRST — needed for scheduling context
+const lastBotMsg = await db.query.messages.findFirst({
+  where: and(eq(messages.conversationId, conv.id), eq(messages.direction, 'outbound')),
+  orderBy: (m, { desc }) => desc(m.createdAt),
+});
+
+// Run RAG + classifier in parallel (classifier adds zero extra wall-clock time)
+const [ragContext, classifiedIntent] = await Promise.all([
+  ragQuery(conv.tenantId, text).catch((): string => ''),
+  classifyMessageIntent(text, conv.tenantId, lastBotMsg?.textContent ?? undefined)
+    .catch((): MessageIntent => 'BROWSING'),
+]);
+
+// SCHEDULING short-circuit — bypass RAG result entirely
+if (classifiedIntent === 'SCHEDULING') {
+  await this.transitionState(conv.id, 'SCHEDULING');
+  await this.handleScheduling({ ...conv, state: 'SCHEDULING' }, buyer, payload);
+  return;
+}
+```
+
+**Why `lastBotMessage` matters:** A bare reply like "Selasa jam 14:00" is ambiguous without context. With the previous bot message ("Kapan kamu bisa konsultasi?") injected as a prior assistant turn, the classifier correctly labels it `SCHEDULING`.
+
+### GrokClient — Reasoning Model Temperature Handling
+
+Reasoning models (model name contains `"reasoning"`) reject the `temperature` parameter. `GrokClient._chat()` automatically strips it:
+
+```typescript
+const isReasoningModel = model.toLowerCase().includes('reasoning');
+const temperatureParam = (!isReasoningModel && opts.temperature !== undefined)
+  ? { temperature: opts.temperature }
+  : (!isReasoningModel ? { temperature: 0.7 } : {});
+```
+
+Per-call model override: `opts.model` takes precedence over the client's default `this.model`. The classifier always passes `model: process.env.LLM_FALLBACK_MODEL` to pin to the non-reasoning model.
+
+### Inline PDF Storage (no S3)
+
+When `S3_BUCKET` is not configured, PDFs are stored in the `products.pdfBytes` (`bytea`) column:
+
+```typescript
+// Upload: save bytes to DB
+await db.update(products).set({ pdfS3Key: 'inline://pdf', pdfBytes: fileBuffer }).where(...)
+
+// Re-train: read bytes from DB
+if (product.pdfS3Key.startsWith('inline://')) {
+  await ingestQueue.add('ingest-product', {
+    productId: id, tenantId,
+    pdfBase64: (product.pdfBytes as Buffer).toString('base64'),
+  });
+}
+```
+
+The ingest processor checks for `job.data.pdfBase64` first, then falls back to S3 download only if `S3_BUCKET` is set.
+
+### Null Byte Sanitization (ingest processor)
+
+LLM output (bookPersonaPrompt) and error strings must be sanitized before writing to Postgres:
+
+```typescript
+const sanitize = (s: string) =>
+  s.replace(/\x00/g, '').replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+```
+
+Apply to: `knowledgeError`, `bookPersonaPrompt` return value from `generateBookPersona()`. Missing this causes `PostgresError: invalid byte sequence for encoding "UTF8": 0x00`.
+
+### Nullable buyerId Pattern
+
+`conversations.buyerId` and `orders.buyerId` are now nullable (buyer can be deleted while records are preserved). Always guard before querying:
+
+```typescript
+// In service methods that receive a conv row:
+if (!conv.buyerId) return; // buyer was deleted
+
+// For optional DB lookups (payment notifications, etc.):
+const buyer = order.buyerId
+  ? await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) })
+  : null;
+if (buyer) { /* send notification */ }
+```
+
 ### AES-256-GCM Crypto
 
 ```typescript
@@ -819,22 +980,47 @@ All features are currently enabled for all authenticated tenants. Feature flags 
 
 | Route | Component | File |
 |-------|-----------|------|
-| `/dashboard` | Overview / home | pre-existing |
+| `/dashboard` | Overview / home | `pages/Overview/OverviewPage.tsx` |
+| `/dashboard/conversations` | ConversationsPage | `pages/Conversations/ConversationsPage.tsx` |
+| `/dashboard/buyers` | BuyersPage | `pages/Buyers/BuyersPage.tsx` |
+| `/dashboard/orders` | OrdersPage | `pages/Orders/OrdersPage.tsx` |
+| `/dashboard/products` | ProductsPage | `pages/Products/ProductsPage.tsx` |
+| `/dashboard/staff` | StaffPage | `pages/Staff/StaffPage.tsx` |
+| `/dashboard/services` | ServicesPage | `pages/Services/ServicesPage.tsx` |
+| `/dashboard/appointments` | AppointmentsPage | `pages/Appointments/AppointmentsPage.tsx` |
+| `/dashboard/appointments/calendar` | AppointmentsCalendarPage | `pages/Appointments/AppointmentsCalendarPage.tsx` |
 | `/dashboard/flows` | FlowsListPage | `pages/Flows/FlowsListPage.tsx` |
 | `/dashboard/flows/new` | FlowEditorPage | `pages/Flows/FlowEditorPage.tsx` |
 | `/dashboard/flows/:id/edit` | FlowEditorPage | `pages/Flows/FlowEditorPage.tsx` |
 | `/dashboard/templates` | TemplateListPage | `pages/Templates/TemplateListPage.tsx` |
 | `/dashboard/templates/new` | TemplateEditorPage | `pages/Templates/TemplateEditorPage.tsx` |
 | `/dashboard/templates/:id/edit` | TemplateEditorPage | `pages/Templates/TemplateEditorPage.tsx` |
-| `/dashboard/buyers` | BuyersPage | pre-existing (reference for dark theme style) |
+| `/dashboard/intent-playbooks` | IntentPlaybooksPage | `pages/IntentPlaybooks/IntentPlaybooksPage.tsx` |
+| `/dashboard/settings` | SettingsPage | `pages/Settings/SettingsPage.tsx` |
+
+**Dashboard language:** All dashboard UI is in English. Buyer-facing bot messages remain Indonesian.
 
 ### Key Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `Sidebar` | `components/Sidebar.tsx` | Nav links: includes Flows (⚡) + Templates entries |
+| `Sidebar` | `components/Sidebar.tsx` | Nav links: Overview, Conversations, Buyers, Orders, Products, Staff, Services, Appointments, Flows, Templates, Intent Playbooks, Settings |
 | `RiskScoreGauge` | `components/RiskScoreGauge.tsx` | SVG half-arc gauge; fetches `/api/v1/risk-score` on mount; compact variant available |
 | `TemplatePreview` | `pages/Templates/components/TemplatePreview.tsx` | WhatsApp dark-green bubble mockup; updates live |
+
+### Scheduling Hooks (`apps/dashboard/src/hooks/useScheduling.ts`)
+
+| Hook | Purpose |
+|------|---------|
+| `useStaff()` | GET /scheduling/staff |
+| `useCreateStaff()` | POST /scheduling/staff — mutation |
+| `useUpdateStaff()` | PUT /scheduling/staff/:id — mutation |
+| `useSetAvailability()` | PUT /scheduling/staff/:id/availability — mutation |
+| `useServices()` | GET /scheduling/services |
+| `useCreateService()` | POST /scheduling/services — mutation |
+| `useUpdateService()` | PUT /scheduling/services/:id — mutation |
+| `useAppointments(filters?)` | GET /scheduling/appointments |
+| `useUpdateAppointmentStatus()` | PATCH /scheduling/appointments/:id/status — mutation |
 
 ### FlowEditorPage — Drawflow Integration
 
