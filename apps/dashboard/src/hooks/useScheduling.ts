@@ -83,8 +83,8 @@ export function useStaff() {
   return useQuery<StaffRow[]>({
     queryKey: KEYS.staff,
     queryFn: async () => {
-      const data = await api.get('/scheduling/staff');
-      return data.staff;
+      const res = await api.get('/scheduling/staff');
+      return res.data.staff;
     },
   });
 }
@@ -92,7 +92,7 @@ export function useStaff() {
 export function useCreateStaff() {
   const qc = useQueryClient();
   return useMutation<StaffRow, Error, Omit<StaffRow, 'id' | 'tenantId' | 'createdAt' | 'updatedAt' | 'availability'>>({
-    mutationFn: (body) => api.post('/scheduling/staff', body).then((d) => d.staff),
+    mutationFn: (body) => api.post('/scheduling/staff', body).then((d) => d.data.staff),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.staff }),
   });
 }
@@ -100,7 +100,7 @@ export function useCreateStaff() {
 export function useUpdateStaff() {
   const qc = useQueryClient();
   return useMutation<StaffRow, Error, { id: string } & Partial<StaffRow>>({
-    mutationFn: ({ id, ...body }) => api.put(`/scheduling/staff/${id}`, body).then((d) => d.staff),
+    mutationFn: ({ id, ...body }) => api.put(`/scheduling/staff/${id}`, body).then((d) => d.data.staff),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.staff }),
   });
 }
@@ -119,8 +119,8 @@ export function useServices() {
   return useQuery<ServiceRow[]>({
     queryKey: KEYS.services,
     queryFn: async () => {
-      const data = await api.get('/scheduling/services');
-      return data.services;
+      const res = await api.get('/scheduling/services');
+      return res.data.services;
     },
   });
 }
@@ -129,8 +129,8 @@ export function useService(id: string | undefined) {
   return useQuery<ServiceRow>({
     queryKey: KEYS.serviceDetail(id ?? ''),
     queryFn: async () => {
-      const data = await api.get(`/scheduling/services/${id}`);
-      return data.service;
+      const res = await api.get(`/scheduling/services/${id}`);
+      return res.data.service;
     },
     enabled: !!id,
   });
@@ -139,7 +139,7 @@ export function useService(id: string | undefined) {
 export function useCreateService() {
   const qc = useQueryClient();
   return useMutation<ServiceRow, Error, { name: string; durationMinutes?: number; staffIds?: string[]; isActive?: boolean }>({
-    mutationFn: (body) => api.post('/scheduling/services', body).then((d) => d.service),
+    mutationFn: (body) => api.post('/scheduling/services', body).then((d) => d.data.service),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.services }),
   });
 }
@@ -147,7 +147,7 @@ export function useCreateService() {
 export function useUpdateService() {
   const qc = useQueryClient();
   return useMutation<ServiceRow, Error, { id: string; name?: string; durationMinutes?: number; staffIds?: string[]; isActive?: boolean }>({
-    mutationFn: ({ id, ...body }) => api.put(`/scheduling/services/${id}`, body).then((d) => d.service),
+    mutationFn: ({ id, ...body }) => api.put(`/scheduling/services/${id}`, body).then((d) => d.data.service),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.services });
     },
@@ -174,8 +174,8 @@ export function useAppointments(filters?: AppointmentFilters) {
     queryKey: KEYS.appointments(params),
     queryFn: async () => {
       const qs = new URLSearchParams(params).toString();
-      const data = await api.get(`/scheduling/appointments${qs ? `?${qs}` : ''}`);
-      return data.appointments;
+      const res = await api.get(`/scheduling/appointments${qs ? `?${qs}` : ''}`);
+      return res.data.appointments;
     },
   });
 }
@@ -184,8 +184,8 @@ export function useAppointment(id: string | undefined) {
   return useQuery<AppointmentRow>({
     queryKey: KEYS.appointment(id ?? ''),
     queryFn: async () => {
-      const data = await api.get(`/scheduling/appointments/${id}`);
-      return data.appointment;
+      const res = await api.get(`/scheduling/appointments/${id}`);
+      return res.data.appointment;
     },
     enabled: !!id,
   });
