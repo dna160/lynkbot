@@ -20,6 +20,10 @@ export const QUEUES = {
   RISK_SCORE: 'lynkbot-risk-score',
   // Scheduling module
   REMINDERS: 'lynkbot-reminders',
+  // Webhook durability
+  WEBHOOK_PROCESS: 'lynkbot-webhook-process',
+  // Broadcast batching
+  BROADCAST_BATCH: 'lynkbot-broadcast-batch',
 } as const;
 
 export type QueueName = typeof QUEUES[keyof typeof QUEUES];

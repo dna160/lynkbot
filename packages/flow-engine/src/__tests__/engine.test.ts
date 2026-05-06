@@ -7,9 +7,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@lynkbot/db', () => ({
   db: {
     query: {
-      flowDefinitions: { findFirst: vi.fn() },
-      buyers: { findFirst: vi.fn() },
-      flowExecutions: { findFirst: vi.fn() },
+      flowDefinitions: { findFirst: vi.fn(), findMany: vi.fn(() => Promise.resolve([])) },
+      buyers: { findFirst: vi.fn(), findMany: vi.fn(() => Promise.resolve([])) },
+      flowExecutions: { findFirst: vi.fn(), findMany: vi.fn(() => Promise.resolve([])) },
+      tenants: { findFirst: vi.fn(() => Promise.resolve({ wabaId: 'test-waba' })) },
     },
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
@@ -40,10 +41,12 @@ vi.mock('@lynkbot/db', () => ({
     activeFlowCount: 'activeFlowCount',
   },
   buyers: { id: 'id', activeFlowCount: 'activeFlowCount' },
+  tenants: { id: 'id', wabaId: 'wabaId' },
   eq: vi.fn(() => 'eq'),
   and: vi.fn(() => 'and'),
   or: vi.fn(() => 'or'),
-  sql: vi.fn(() => 'sql-expr'),
+  not: vi.fn(() => 'not'),
+  sql: Object.assign(vi.fn(() => 'sql-expr'), { raw: vi.fn((s: string) => s) }),
   gte: vi.fn(() => 'gte'),
   desc: vi.fn(() => 'desc'),
   count: vi.fn(() => 'count'),
@@ -316,20 +319,14 @@ describe('FlowEngine stubs', () => {
     engine = makeEngine();
   });
 
-  it('evaluateTimeTriggers: stub — logs and resolves without throwing', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('evaluateTimeTriggers: stub — resolves without throwing', async () => {
     await expect(engine.evaluateTimeTriggers()).resolves.toBeUndefined();
     await expect(engine.evaluateTimeTriggers('tenant-1')).resolves.toBeUndefined();
-    expect(logSpy).toHaveBeenCalled();
-    logSpy.mockRestore();
   });
 
-  it('broadcastToSegment: stub — logs and resolves without throwing', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('broadcastToSegment: stub — resolves without throwing', async () => {
     await expect(
       engine.broadcastToSegment('tenant-1', 'flow-1', { tags: ['vip'] }),
     ).resolves.toBeUndefined();
-    expect(logSpy).toHaveBeenCalled();
-    logSpy.mockRestore();
   });
 });

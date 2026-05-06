@@ -9,7 +9,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, desc } from '@lynkbot/db';
-import { db, buyers, broadcasts, tenants } from '@lynkbot/db';
+import { db, buyers, broadcasts, tenants, consentAudit } from '@lynkbot/db';
 import { getTenantMetaClient } from '../../services/_meta.helper';
 
 /** Pause execution for ms milliseconds — used to rate-limit Meta API sends. */
@@ -176,6 +176,16 @@ export const broadcastRoutes: FastifyPluginAsync = async (fastify) => {
         try {
           // Normalise phone: Meta expects E.164 without '+' (e.g. "628123456789")
           const to = recipient.waPhone.replace(/^\+/, '');
+          // Consent audit: log before sending
+          await db.insert(consentAudit).values({
+            buyerId: recipient.id,
+            tenantId,
+            action: 'broadcast_sent',
+            channel: 'whatsapp',
+            templateName: templateKey,
+            createdAt: new Date(),
+          });
+
           await meta.sendTemplate({
             to,
             templateName: templateKey,

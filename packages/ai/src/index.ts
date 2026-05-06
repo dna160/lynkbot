@@ -7,6 +7,8 @@
  */
 export type { ILLMClient, ChatMessage, LLMResponse, ChatOptions } from './llm/ILLMClient';
 export { GrokClient } from './llm/GrokClient';
+export { OpenAIClient } from './llm/OpenAIClient';
+export { AnthropicClient } from './llm/AnthropicClient';
 export { getLLMClient, resetLLMClient } from './llm/factory';
 export { classifyMessageIntent } from './llm/classifier';
 export type { MessageIntent } from './llm/classifier';
@@ -16,6 +18,7 @@ export type { TextChunk, PageText } from './rag/chunker';
 export { retrieveTopK } from './rag/retriever';
 export type { RetrievedChunk } from './rag/retriever';
 export { ingest, query } from './rag/pipeline';
+export { storeProductEmbeddings, vectorQuery } from './rag/vectorPipeline';
 export { buildSystemPrompt } from './prompts/system';
 export type { SystemPromptContext } from './prompts/system';
 export { SALES_DIRECTIVES, BUY_INTENT_KEYWORDS, OBJECTION_KEYWORDS, DISENGAGEMENT_KEYWORDS, STOP_KEYWORDS, AGENT_KEYWORDS } from './prompts/sales';
