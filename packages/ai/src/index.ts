@@ -8,6 +8,8 @@
 export type { ILLMClient, ChatMessage, LLMResponse, ChatOptions } from './llm/ILLMClient';
 export { GrokClient } from './llm/GrokClient';
 export { getLLMClient, resetLLMClient } from './llm/factory';
+export { classifyMessageIntent } from './llm/classifier';
+export type { MessageIntent } from './llm/classifier';
 export { embed, batchEmbed } from './rag/embeddings';
 export { extractPdfText, chunkText } from './rag/chunker';
 export type { TextChunk, PageText } from './rag/chunker';

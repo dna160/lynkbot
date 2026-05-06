@@ -23,10 +23,12 @@ import {
   getLLMClient,
   buildSystemPrompt,
   query as ragQuery,
+  classifyMessageIntent,
   SCHEDULING_SYSTEM_PROMPT,
   parseSchedulingEnvelope,
   formatWIBDatetime,
 } from '@lynkbot/ai';
+import type { MessageIntent } from '@lynkbot/ai';
 import { BOOKING_INTENT_KEYWORDS } from '@lynkbot/shared';
 import { IntentPlaybookService } from './intentPlaybook.service';
 import { SchedulingService } from './scheduling.service';
@@ -84,11 +86,6 @@ function detectObjection(text: string): boolean {
 function detectDisengagement(text: string): boolean {
   const keywords = [...DISENGAGEMENT_KEYWORDS.id, ...DISENGAGEMENT_KEYWORDS.en];
   return containsAny(text, keywords);
-}
-
-function detectProductQuestion(text: string): boolean {
-  const indicators = ['apa', 'bagaimana', 'gimana', 'cara', 'isi', 'manfaat', 'benefit', '?', 'what', 'how', 'does', 'can'];
-  return containsAny(text, indicators);
 }
 
 /** O(1) keyword scan — triggers SCHEDULING state transition before LLM classification */
@@ -440,20 +437,22 @@ export class ConversationService {
       return;
     }
 
-    // RAG: search across ALL tenant products — returns the contextually correct
-    // chunks regardless of which product this conversation was started on.
-    let ragContext = '';
-    try {
-      ragContext = await ragQuery(conv.tenantId, text);
-    } catch {
-      // RAG unavailable — fall through to base AI
-    }
+    // RAG + LLM intent classification run in parallel — classification adds zero latency.
+    // classifyMessageIntent loads store/product name from DB so it can correctly
+    // distinguish brand questions ("What is Storytellers?") from product questions ("What is Aria?").
+    const [ragContext, classifiedIntent] = await Promise.all([
+      ragQuery(conv.tenantId, text).catch((): string => ''),
+      classifyMessageIntent(text, conv.tenantId).catch((): MessageIntent => 'BROWSING'),
+    ]);
 
-    await this.sendAiResponse(conv, buyer, text, ragContext || undefined);
-
-    if (detectProductQuestion(text)) {
+    // Transition state before responding so the correct state overlay is included
+    if (classifiedIntent === 'PRODUCT_INQUIRY') {
       await this.transitionState(conv.id, 'PRODUCT_INQUIRY');
     }
+
+    // Pass classified intent as override so sendAiResponse injects the right playbook block
+    // (e.g. GENERAL_INQUIRY gets its own playbook even though state stays BROWSING)
+    await this.sendAiResponse(conv, buyer, text, ragContext || undefined, classifiedIntent);
   }
 
   private async handleProductInquiry(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
@@ -478,16 +477,13 @@ export class ConversationService {
       return;
     }
 
-    // RAG: tenant-wide search — finds the right product knowledge regardless of
-    // which product the conversation is currently assigned to.
-    let ragContext = '';
-    try {
-      ragContext = await ragQuery(conv.tenantId, text);
-    } catch {
-      // RAG unavailable — fall through to base AI
-    }
+    // RAG + classification in parallel
+    const [ragContext, classifiedIntent] = await Promise.all([
+      ragQuery(conv.tenantId, text).catch((): string => ''),
+      classifyMessageIntent(text, conv.tenantId).catch((): MessageIntent => 'PRODUCT_INQUIRY'),
+    ]);
 
-    await this.sendAiResponse(conv, buyer, text, ragContext || undefined);
+    await this.sendAiResponse(conv, buyer, text, ragContext || undefined, classifiedIntent);
   }
 
   private async handleObjection(conv: ConvRow, buyer: BuyerRow, payload: MetaNormalizedPayload): Promise<void> {
@@ -679,6 +675,8 @@ export class ConversationService {
     buyer: BuyerRow,
     userMessage: string,
     additionalContext?: string,
+    /** LLM-classified intent — overrides conv.state for playbook lookup when provided */
+    intentOverride?: MessageIntent,
   ): Promise<void> {
     const within24h = isWithin24HourWindow(conv.lastMessageAt);
     if (!within24h) return; // Can't send freeform outside window
@@ -689,9 +687,12 @@ export class ConversationService {
       ? await db.query.products.findFirst({ where: eq(products.id, conv.productId) })
       : null;
 
-    // Load intent playbook for this conversation state
+    // Load intent playbook — use LLM-classified intent when available so the right
+    // playbook fires even if conv.state hasn't transitioned yet (e.g. GENERAL_INQUIRY
+    // playbook loads while state is still BROWSING).
     const intentSvc = new IntentPlaybookService();
-    const playbookResult = await intentSvc.getPlaybookBlock(conv.tenantId, conv.state).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
+    const playbookLookupKey = intentOverride ?? conv.state;
+    const playbookResult = await intentSvc.getPlaybookBlock(conv.tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
 
     const systemPrompt = buildSystemPrompt({
       storeName: tenant?.storeName ?? 'LynkBot Store',
