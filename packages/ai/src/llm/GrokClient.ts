@@ -37,10 +37,12 @@ export class GrokClient implements ILLMClient {
 
   async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<LLMResponse> {
     const start = Date.now();
+    // opts.model lets callers pin a specific model (e.g. a non-reasoning model for classification)
+    const primaryModel = opts.model ?? this.model;
     try {
-      return await this._chat(messages, this.model, opts, start);
+      return await this._chat(messages, primaryModel, opts, start);
     } catch (primaryErr) {
-      console.error(`Primary model ${this.model} failed, trying fallback ${this.fallbackModel}:`, primaryErr);
+      console.error(`Primary model ${primaryModel} failed, trying fallback ${this.fallbackModel}:`, primaryErr);
       try {
         return await this._chat(messages, this.fallbackModel, opts, start);
       } catch (fallbackErr) {
@@ -61,11 +63,18 @@ export class GrokClient implements ILLMClient {
       ? [{ role: 'system', content: opts.system }, ...messages]
       : messages;
 
+    // Reasoning models (names containing "reasoning") do not accept a temperature
+    // parameter — xAI returns an error if it is sent. Strip it for those models.
+    const isReasoningModel = model.toLowerCase().includes('reasoning');
+    const temperatureParam = (!isReasoningModel && opts.temperature !== undefined)
+      ? { temperature: opts.temperature }
+      : (!isReasoningModel ? { temperature: 0.7 } : {});
+
     const res = await this.client.chat.completions.create({
       model,
       messages: fullMessages,
       max_tokens: opts.maxTokens ?? 1024,
-      temperature: opts.temperature ?? 0.7,
+      ...temperatureParam,
       // Only send response_format when explicitly requesting JSON — sending
       // { type: 'text' } as a default causes xAI API to reject the request
       ...(opts.responseFormat === 'json_object' && { response_format: { type: 'json_object' as const } }),

@@ -483,6 +483,13 @@ export class ConversationService {
       classifyMessageIntent(text, conv.tenantId).catch((): MessageIntent => 'PRODUCT_INQUIRY'),
     ]);
 
+    // If the user has moved away from a product question (e.g. asking about the
+    // brand or making small talk), transition back to BROWSING so the state label
+    // and future routing stay accurate.
+    if (classifiedIntent === 'GENERAL_INQUIRY' || classifiedIntent === 'BROWSING') {
+      await this.transitionState(conv.id, 'BROWSING');
+    }
+
     await this.sendAiResponse(conv, buyer, text, ragContext || undefined, classifiedIntent);
   }
 

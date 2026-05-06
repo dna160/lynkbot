@@ -87,7 +87,14 @@ export async function classifyMessageIntent(
   const llm = getLLMClient();
   const res = await llm.chat(
     [{ role: 'user', content: text }],
-    { system: systemPrompt, maxTokens: 15, temperature: 0 },
+    {
+      system: systemPrompt,
+      // Use the fast/fallback model — reasoning models are overkill for a
+      // single-label classification and don't accept temperature=0.
+      model: process.env.LLM_FALLBACK_MODEL ?? 'grok-3',
+      maxTokens: 50,   // enough for one label + any trailing whitespace
+      temperature: 0,  // deterministic — same input always → same label
+    },
   );
 
   return parseLabel(res.content);

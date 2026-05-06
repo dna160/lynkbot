@@ -23,6 +23,8 @@ export interface ChatOptions {
   temperature?: number;
   responseFormat?: 'text' | 'json_object';
   system?: string;
+  /** Override the default model for this specific call (e.g. use fast model for classification). */
+  model?: string;
 }
 
 export interface ILLMClient {
