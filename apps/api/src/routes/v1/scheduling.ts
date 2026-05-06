@@ -50,14 +50,22 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(400).send({ error: 'name and phoneNumber are required' });
       }
 
-      const member = await svc.createStaff(tenantId, {
-        name: name as string,
-        phoneNumber: phoneNumber as string,
-        role: role as string | undefined,
-        isActive: isActive !== false,
-      });
-
-      return reply.status(201).send({ staff: member });
+      try {
+        const member = await svc.createStaff(tenantId, {
+          name: name as string,
+          phoneNumber: phoneNumber as string,
+          role: role as string | undefined,
+          isActive: isActive !== false,
+        });
+        return reply.status(201).send({ staff: member });
+      } catch (err: unknown) {
+        // Postgres unique violation — duplicate phone number for this tenant
+        const pg = err as { code?: string };
+        if (pg?.code === '23505') {
+          return reply.status(409).send({ error: 'A staff member with this WhatsApp number already exists.' });
+        }
+        throw err;
+      }
     },
   );
 

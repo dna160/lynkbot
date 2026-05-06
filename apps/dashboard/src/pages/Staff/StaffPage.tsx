@@ -18,7 +18,7 @@ import {
   type AvailabilitySlot,
 } from '@/hooks/useScheduling';
 
-const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // ── Availability Editor ───────────────────────────────────────────────────────
 
@@ -63,10 +63,10 @@ function AvailabilityEditor({
         staffId,
         slots: slots.filter((s): s is AvailabilitySlot => s !== null),
       });
-      toast({ type: 'success', message: `Jadwal ${staffName} disimpan` });
+      toast({ type: 'success', message: `Schedule for ${staffName} saved` });
       onClose();
     } catch {
-      toast({ type: 'error', message: 'Gagal menyimpan jadwal' });
+      toast({ type: 'error', message: 'Failed to save schedule' });
     }
   }
 
@@ -74,7 +74,7 @@ function AvailabilityEditor({
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-[#1E293B] border border-[#334155] rounded-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#334155]">
-          <h3 className="font-semibold text-white">Jadwal {staffName}</h3>
+          <h3 className="font-semibold text-white">Schedule for {staffName}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -109,21 +109,21 @@ function AvailabilityEditor({
                   />
                 </div>
               ) : (
-                <span className="text-slate-600 text-sm">Libur</span>
+                <span className="text-slate-600 text-sm">Day off</span>
               )}
             </div>
           ))}
         </div>
         <div className="flex justify-end gap-3 px-5 py-4 border-t border-[#334155]">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-white/5">
-            Batal
+            Cancel
           </button>
           <button
             onClick={save}
             disabled={setAvailability.isPending}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           >
-            {setAvailability.isPending ? 'Menyimpan...' : 'Simpan Jadwal'}
+            {setAvailability.isPending ? 'Saving...' : 'Save Schedule'}
           </button>
         </div>
       </div>
@@ -168,7 +168,7 @@ function StaffModal({
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Nama *</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Name *</label>
             <input
               value={form.name}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
@@ -177,7 +177,7 @@ function StaffModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Nomor WhatsApp *</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">WhatsApp Number *</label>
             <input
               value={form.phoneNumber}
               onChange={e => setForm(p => ({ ...p, phoneNumber: e.target.value }))}
@@ -186,12 +186,12 @@ function StaffModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Jabatan</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Role</label>
             <input
               value={form.role}
               onChange={e => setForm(p => ({ ...p, role: e.target.value }))}
               className="w-full bg-[#0F172A] border border-[#334155] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              placeholder="Dokter / Konsultan / dll"
+              placeholder="Doctor / Consultant / etc"
             />
           </div>
           <div className="flex items-center gap-3">
@@ -204,19 +204,19 @@ function StaffModal({
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
-            <span className="text-sm text-slate-300">Aktif</span>
+            <span className="text-sm text-slate-300">Active</span>
           </div>
         </div>
         <div className="flex justify-end gap-3 px-5 py-4 border-t border-[#334155]">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-white/5">
-            Batal
+            Cancel
           </button>
           <button
             onClick={() => onSubmit(form)}
             disabled={!form.name || !form.phoneNumber || isLoading}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           >
-            {isLoading ? 'Menyimpan...' : 'Simpan'}
+            {isLoading ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
@@ -241,10 +241,11 @@ export function StaffPage() {
   async function handleCreate(data: StaffFormState) {
     try {
       await createStaff.mutateAsync(data);
-      toast({ type: 'success', message: 'Staf berhasil ditambahkan' });
+      toast({ type: 'success', message: 'Staff member added' });
       setShowCreate(false);
-    } catch {
-      toast({ type: 'error', message: 'Gagal menambahkan staf' });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast({ type: 'error', message: msg ?? 'Failed to add staff member' });
     }
   }
 
@@ -252,10 +253,10 @@ export function StaffPage() {
     if (!editTarget) return;
     try {
       await updateStaff.mutateAsync({ id: editTarget.id, ...data });
-      toast({ type: 'success', message: 'Staf berhasil diperbarui' });
+      toast({ type: 'success', message: 'Staff member updated' });
       setEditTarget(null);
     } catch {
-      toast({ type: 'error', message: 'Gagal memperbarui staf' });
+      toast({ type: 'error', message: 'Failed to update staff member' });
     }
   }
 
@@ -263,8 +264,8 @@ export function StaffPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-white">Manajemen Staf</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Tambah dan atur jadwal ketersediaan staf</p>
+          <h1 className="text-xl font-semibold text-white">Staff Management</h1>
+          <p className="text-slate-400 text-sm mt-0.5">Add and manage staff availability schedules</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -273,7 +274,7 @@ export function StaffPage() {
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Tambah Staf
+          Add Staff
         </button>
       </div>
 
@@ -293,7 +294,7 @@ export function StaffPage() {
                   d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </div>
-            <p className="text-slate-400 text-sm">Belum ada staf. Tambahkan staf pertama kamu.</p>
+            <p className="text-slate-400 text-sm">No staff yet. Add your first team member.</p>
           </div>
         ) : (
           staffList.map(s => (
@@ -313,7 +314,7 @@ export function StaffPage() {
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
                   s.isActive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-500 border-slate-500/20'
                 }`}>
-                  {s.isActive ? 'Aktif' : 'Nonaktif'}
+                  {s.isActive ? 'Active' : 'Inactive'}
                 </span>
               </div>
 
@@ -330,7 +331,7 @@ export function StaffPage() {
                   onClick={() => setAvailTarget(s)}
                   className="flex-1 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-xs font-medium transition-colors border border-white/10"
                 >
-                  Atur Jadwal
+                  Set Schedule
                 </button>
                 <button
                   onClick={() => setEditTarget(s)}
@@ -346,7 +347,7 @@ export function StaffPage() {
 
       {showCreate && (
         <StaffModal
-          title="Tambah Staf Baru"
+          title="Add New Staff Member"
           initial={EMPTY_FORM}
           onSubmit={handleCreate}
           onClose={() => setShowCreate(false)}

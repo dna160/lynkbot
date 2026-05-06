@@ -19,10 +19,10 @@ import {
 } from '@/hooks/useScheduling';
 
 const STATUS_LABELS: Record<AppointmentStatus, string> = {
-  negotiating: 'Negosiasi',
-  pending_doctor: 'Menunggu Konfirmasi',
-  confirmed: 'Dikonfirmasi',
-  cancelled: 'Dibatalkan',
+  negotiating: 'Negotiating',
+  pending_doctor: 'Pending Confirmation',
+  confirmed: 'Confirmed',
+  cancelled: 'Cancelled',
 };
 
 const STATUS_COLORS: Record<AppointmentStatus, string> = {
@@ -33,7 +33,7 @@ const STATUS_COLORS: Record<AppointmentStatus, string> = {
 };
 
 function formatWIB(utcIso: string): string {
-  return new Intl.DateTimeFormat('id-ID', {
+  return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Jakarta',
     day: '2-digit',
     month: 'short',
@@ -57,9 +57,9 @@ export function AppointmentsPage() {
     if (!confirmTarget) return;
     try {
       await updateStatus.mutateAsync({ id: confirmTarget.id, status: confirmTarget.action });
-      toast({ type: 'success', message: confirmTarget.action === 'confirmed' ? 'Appointment dikonfirmasi' : 'Appointment dibatalkan' });
+      toast({ type: 'success', message: confirmTarget.action === 'confirmed' ? 'Appointment confirmed' : 'Appointment cancelled' });
     } catch {
-      toast({ type: 'error', message: 'Gagal memperbarui status' });
+      toast({ type: 'error', message: 'Failed to update status' });
     } finally {
       setConfirmTarget(null);
     }
@@ -71,7 +71,7 @@ export function AppointmentsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">Appointments</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Kelola semua jadwal konsultasi</p>
+          <p className="text-slate-400 text-sm mt-0.5">Manage all consultation schedules</p>
         </div>
         <Link
           to="/dashboard/appointments/calendar"
@@ -81,7 +81,7 @@ export function AppointmentsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          Kalender
+          Calendar
         </Link>
       </div>
 
@@ -97,7 +97,7 @@ export function AppointmentsPage() {
                 : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10'
             }`}
           >
-            {s === '' ? 'Semua' : STATUS_LABELS[s]}
+            {s === '' ? 'All' : STATUS_LABELS[s]}
           </button>
         ))}
       </div>
@@ -105,7 +105,7 @@ export function AppointmentsPage() {
       {/* Table */}
       <div className="bg-[#1E293B] border border-[#334155] rounded-xl overflow-hidden">
         {isLoading ? (
-          <div className="flex items-center justify-center py-16 text-slate-400 text-sm">Memuat...</div>
+          <div className="flex items-center justify-center py-16 text-slate-400 text-sm">Loading...</div>
         ) : appointments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
@@ -114,13 +114,13 @@ export function AppointmentsPage() {
                   d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </div>
-            <p className="text-slate-400 text-sm">Belum ada appointment</p>
+            <p className="text-slate-400 text-sm">No appointments yet</p>
           </div>
         ) : (
           <table className="w-full">
             <thead>
               <tr className="border-b border-[#334155]">
-                {['Waktu', 'Layanan', 'Staf', 'Pembeli', 'Status', ''].map((h) => (
+                {['Time', 'Service', 'Staff', 'Buyer', 'Status', ''].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     {h}
                   </th>
@@ -149,13 +149,13 @@ export function AppointmentsPage() {
                           onClick={() => setConfirmTarget({ id: appt.id, action: 'confirmed' })}
                           className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded text-xs font-medium transition-colors border border-emerald-600/30"
                         >
-                          Konfirmasi
+                          Confirm
                         </button>
                         <button
                           onClick={() => setConfirmTarget({ id: appt.id, action: 'cancelled' })}
                           className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-xs font-medium transition-colors border border-red-600/30"
                         >
-                          Tolak
+                          Decline
                         </button>
                       </div>
                     )}
@@ -172,19 +172,19 @@ export function AppointmentsPage() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setConfirmTarget(null)}>
           <div className="bg-[#1E293B] border border-[#334155] rounded-xl p-6 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white font-semibold">
-              {confirmTarget.action === 'confirmed' ? 'Konfirmasi Appointment?' : 'Batalkan Appointment?'}
+              {confirmTarget.action === 'confirmed' ? 'Confirm Appointment?' : 'Cancel Appointment?'}
             </h3>
             <p className="text-slate-400 text-sm">
               {confirmTarget.action === 'confirmed'
-                ? 'Pembeli akan mendapatkan notifikasi bahwa appointment dikonfirmasi.'
-                : 'Pembeli akan mendapatkan notifikasi bahwa appointment dibatalkan.'}
+                ? 'The buyer will be notified that the appointment has been confirmed.'
+                : 'The buyer will be notified that the appointment has been cancelled.'}
             </p>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setConfirmTarget(null)}
                 className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-white/5"
               >
-                Batal
+                Back
               </button>
               <button
                 onClick={handleStatusChange}
@@ -195,7 +195,7 @@ export function AppointmentsPage() {
                     : 'bg-red-600 hover:bg-red-500 text-white'
                 }`}
               >
-                {updateStatus.isPending ? 'Memproses...' : confirmTarget.action === 'confirmed' ? 'Ya, Konfirmasi' : 'Ya, Batalkan'}
+                {updateStatus.isPending ? 'Processing...' : confirmTarget.action === 'confirmed' ? 'Yes, Confirm' : 'Yes, Cancel'}
               </button>
             </div>
           </div>

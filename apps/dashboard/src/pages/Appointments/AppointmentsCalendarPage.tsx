@@ -12,12 +12,12 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Calendar, dateFnsLocalizer, type View } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
-import { id as idLocale } from 'date-fns/locale';
+import { enGB as enLocale } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { useAppointments, type AppointmentRow } from '@/hooks/useScheduling';
 
-// ── date-fns localizer (Indonesian locale) ────────────────────────────────────
-const locales = { 'id': idLocale };
+// ── date-fns localizer (English locale, Monday start) ────────────────────────
+const locales = { 'en-GB': enLocale };
 const localizer = dateFnsLocalizer({
   format,
   parse,
@@ -54,7 +54,7 @@ export function AppointmentsCalendarPage() {
       .filter(a => a.status !== 'cancelled')
       .map(a => ({
         id: a.id,
-        title: `${a.serviceName ?? 'Layanan'} — ${a.staffName ?? 'Staf'}`,
+        title: `${a.serviceName ?? 'Service'} — ${a.staffName ?? 'Staff'}`,
         start: new Date(a.startTime),
         end: new Date(a.endTime),
         resource: a,
@@ -82,8 +82,8 @@ export function AppointmentsCalendarPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-xl font-semibold text-white">Kalender Appointment</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Lihat jadwal dalam tampilan kalender</p>
+          <h1 className="text-xl font-semibold text-white">Appointment Calendar</h1>
+          <p className="text-slate-400 text-sm mt-0.5">View schedules in calendar view</p>
         </div>
         <Link
           to="/dashboard/appointments"
@@ -92,7 +92,7 @@ export function AppointmentsCalendarPage() {
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
           </svg>
-          Tampilan List
+          List View
         </Link>
       </div>
 
@@ -103,7 +103,7 @@ export function AppointmentsCalendarPage() {
             <div key={status} className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
               <span className="text-xs text-slate-400">
-                {status === 'negotiating' ? 'Negosiasi' : status === 'pending_doctor' ? 'Menunggu' : 'Dikonfirmasi'}
+                {status === 'negotiating' ? 'Negotiating' : status === 'pending_doctor' ? 'Pending' : 'Confirmed'}
               </span>
             </div>
           )
@@ -113,7 +113,7 @@ export function AppointmentsCalendarPage() {
       {/* Calendar wrapper — override RBC dark styles */}
       <div className="flex-1 min-h-0 bg-[#1E293B] rounded-xl border border-[#334155] overflow-hidden p-4" style={{ minHeight: '600px' }}>
         {isLoading ? (
-          <div className="flex items-center justify-center h-full text-slate-400 text-sm">Memuat...</div>
+          <div className="flex items-center justify-center h-full text-slate-400 text-sm">Loading...</div>
         ) : (
           <style>{`
             .rbc-calendar { background: transparent; color: #CBD5E1; font-family: inherit; height: 100%; }
@@ -147,18 +147,18 @@ export function AppointmentsCalendarPage() {
           onNavigate={setDate}
           eventPropGetter={eventPropGetter}
           tooltipAccessor={(e: CalendarEvent) =>
-            `${e.resource.serviceName ?? 'Layanan'}\nStaf: ${e.resource.staffName ?? '—'}\nBuyer: ${e.resource.buyerName ?? e.resource.buyerPhone ?? '—'}\nStatus: ${e.resource.status}`
+            `${e.resource.serviceName ?? 'Service'}\nStaff: ${e.resource.staffName ?? '—'}\nBuyer: ${e.resource.buyerName ?? e.resource.buyerPhone ?? '—'}\nStatus: ${e.resource.status}`
           }
-          culture="id"
+          culture="en-GB"
           messages={{
-            today: 'Hari ini',
+            today: 'Today',
             previous: '‹',
             next: '›',
-            month: 'Bulan',
-            week: 'Minggu',
-            day: 'Hari',
+            month: 'Month',
+            week: 'Week',
+            day: 'Day',
             agenda: 'Agenda',
-            noEventsInRange: 'Tidak ada appointment di rentang ini',
+            noEventsInRange: 'No appointments in this range',
           }}
           style={{ height: '100%' }}
         />
