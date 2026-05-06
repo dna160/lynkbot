@@ -255,8 +255,9 @@ export function StaffPage() {
       await updateStaff.mutateAsync({ id: editTarget.id, ...data });
       toast({ type: 'success', message: 'Staff member updated' });
       setEditTarget(null);
-    } catch {
-      toast({ type: 'error', message: 'Failed to update staff member' });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast({ type: 'error', message: msg ?? 'Failed to update staff member' });
     }
   }
 

@@ -78,12 +78,21 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
       const { id } = request.params;
       const { name, phoneNumber, role, isActive } = request.body;
 
-      const member = await svc.updateStaff(id, tenantId, {
-        name: name as string | undefined,
-        phoneNumber: phoneNumber as string | undefined,
-        role: role as string | undefined,
-        isActive: isActive as boolean | undefined,
-      });
+      let member;
+      try {
+        member = await svc.updateStaff(id, tenantId, {
+          name: name as string | undefined,
+          phoneNumber: phoneNumber as string | undefined,
+          role: role as string | undefined,
+          isActive: isActive as boolean | undefined,
+        });
+      } catch (err: unknown) {
+        const pg = err as { code?: string };
+        if (pg?.code === '23505') {
+          return reply.status(409).send({ error: 'A staff member with this WhatsApp number already exists.' });
+        }
+        throw err;
+      }
 
       if (!member) return reply.status(404).send({ error: 'Staff not found' });
       return reply.send({ staff: member });
