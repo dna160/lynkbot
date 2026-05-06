@@ -120,10 +120,28 @@ export async function query(productId: string, tenantId: string, question: strin
     }
   }
 
-  // Full-text search fallback (no embeddings required)
-  // Sanitise question for tsquery: keep only words and spaces
-  const safeQuery = question.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().split(/\s+/).filter(Boolean).join(' & ');
-  if (!safeQuery) {
+  // Full-text search fallback (no embeddings required).
+  //
+  // Language config: 'simple' — no stop-word removal, no stemming.
+  //   'english' breaks Indonesian content: English stop words strip common
+  //   Indonesian words, and English stemming mangles non-English roots.
+  //   'simple' just lowercases tokens, making it safe for any language.
+  //
+  // Operator: OR ( | ) not AND ( & ).
+  //   AND requires ALL query terms in the SAME chunk — a chunk containing
+  //   "Aria" but not "apa" and "itu" is silently skipped.
+  //   OR returns the highest-scoring chunk that matches ANY term, ranked
+  //   by ts_rank so the most-relevant result surfaces first.
+  //
+  // Term filter: drop tokens < 2 chars (punctuation artifacts).
+  const queryTerms = question
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(w => w.length >= 2)
+    .map(w => w.toLowerCase());
+
+  if (queryTerms.length === 0) {
     // No usable terms — return first 5 chunks as context
     const chunks = await pgClient<{ content_text: string }[]>`
       SELECT content_text FROM product_chunks
@@ -133,13 +151,15 @@ export async function query(productId: string, tenantId: string, question: strin
     return chunks.map((r) => r.content_text).join('\n\n---\n\n');
   }
 
+  const safeQuery = queryTerms.join(' | ');
+
   const chunks = await pgClient<{ content_text: string }[]>`
     SELECT content_text,
-           ts_rank(to_tsvector('english', content_text), to_tsquery('english', ${safeQuery})) AS rank
+           ts_rank(to_tsvector('simple', content_text), to_tsquery('simple', ${safeQuery})) AS rank
     FROM product_chunks
     WHERE product_id = ${productId}
       AND tenant_id = ${tenantId}
-      AND to_tsvector('english', content_text) @@ to_tsquery('english', ${safeQuery})
+      AND to_tsvector('simple', content_text) @@ to_tsquery('simple', ${safeQuery})
     ORDER BY rank DESC
     LIMIT 5
   `;

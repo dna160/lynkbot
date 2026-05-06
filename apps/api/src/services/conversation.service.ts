@@ -703,7 +703,7 @@ export class ConversationService {
 
     const stateOverlay = STATE_PROMPTS[conv.state as ConversationStateValue] ?? '';
     const contextBlock = additionalContext
-      ? `\n\nRELEVANT CONTEXT:\n${additionalContext}`
+      ? `\n\nPRODUCT KNOWLEDGE (retrieved from training material — use this to answer questions accurately; do NOT say you don't have information if the answer is in this context):\n${additionalContext}`
       : '';
 
     // ── Pantheon V2: classify moment + inject dialog recommendation ────────────
