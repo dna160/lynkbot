@@ -199,6 +199,7 @@ export class ConversationService {
       // Auto-assign the tenant's first active + ready product so the AI has product context from message 1
       const defaultProduct = await db.query.products.findFirst({
         where: and(eq(products.tenantId, tenantId), eq(products.isActive, true), eq(products.knowledgeStatus, 'ready')),
+        orderBy: (p, { desc }) => desc(p.updatedAt),
       });
 
       const [created] = await db.insert(conversations).values({
@@ -214,9 +215,10 @@ export class ConversationService {
       }).returning();
       conv = created;
     } else if (!conv.productId) {
-      // Existing conversation without a product — try to assign one now (handles pre-fix conversations)
+      // Existing conversation without a product — try to assign one now
       const defaultProduct = await db.query.products.findFirst({
         where: and(eq(products.tenantId, tenantId), eq(products.isActive, true), eq(products.knowledgeStatus, 'ready')),
+        orderBy: (p, { desc }) => desc(p.updatedAt),
       });
       if (defaultProduct) {
         await db.update(conversations).set({ productId: defaultProduct.id }).where(eq(conversations.id, conv.id));
@@ -438,14 +440,13 @@ export class ConversationService {
       return;
     }
 
-    // RAG context in BROWSING too — product questions land here before state transitions to PRODUCT_INQUIRY
+    // RAG: search across ALL tenant products — returns the contextually correct
+    // chunks regardless of which product this conversation was started on.
     let ragContext = '';
-    if (conv.productId) {
-      try {
-        ragContext = await ragQuery(conv.productId, conv.tenantId, text);
-      } catch {
-        // RAG unavailable — fall through to base AI
-      }
+    try {
+      ragContext = await ragQuery(conv.tenantId, text);
+    } catch {
+      // RAG unavailable — fall through to base AI
     }
 
     await this.sendAiResponse(conv, buyer, text, ragContext || undefined);
@@ -477,14 +478,13 @@ export class ConversationService {
       return;
     }
 
-    // RAG context if product is set
+    // RAG: tenant-wide search — finds the right product knowledge regardless of
+    // which product the conversation is currently assigned to.
     let ragContext = '';
-    if (conv.productId) {
-      try {
-        ragContext = await ragQuery(conv.productId, conv.tenantId, text);
-      } catch {
-        // RAG unavailable — fall through to base AI
-      }
+    try {
+      ragContext = await ragQuery(conv.tenantId, text);
+    } catch {
+      // RAG unavailable — fall through to base AI
     }
 
     await this.sendAiResponse(conv, buyer, text, ragContext || undefined);

@@ -55,7 +55,7 @@ describe('chunker', () => {
 
 describe('query', () => {
   it('returns joined chunk content', async () => {
-    const result = await query('prod-1', 'tenant-1', 'What is this book about?');
+    const result = await query('tenant-1', 'What is this book about?');
     expect(result).toContain('Sample chunk');
     expect(embed).toHaveBeenCalledWith('What is this book about?');
   });

@@ -8,7 +8,7 @@
  * Exports : ingest(), query()
  * DO NOT  : Import from apps/*, wati, payments
  */
-import { db, pgClient, products, productChunks, eq, sql } from '@lynkbot/db';
+import { db, pgClient, products, productChunks, eq, sql, and } from '@lynkbot/db';
 import { extractPdfText, chunkText } from './chunker';
 import { batchEmbed, embed } from './embeddings';
 import { getLLMClient } from '../llm/factory';
@@ -94,46 +94,49 @@ async function generateBookPersona(productId: string, sampleContent: string): Pr
   return res.content.replace(/\x00/g, '').replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
-export async function query(productId: string, tenantId: string, question: string): Promise<string> {
+/**
+ * Search ALL trained products for this tenant and return the most relevant chunks.
+ *
+ * Searching tenant-wide (not scoped to a single productId) means the bot answers
+ * questions about ANY product it has been trained on, picking the contextually
+ * correct information based on what the user actually asked.
+ *
+ * Each returned chunk is labelled with its product name so the LLM knows which
+ * product the knowledge belongs to.
+ */
+export async function query(tenantId: string, question: string): Promise<string> {
   const embeddingModel = process.env.XAI_EMBEDDING_MODEL ?? '';
 
   if (embeddingModel) {
-    // Vector similarity search (when embeddings are stored)
+    // Vector similarity search across all tenant products
     try {
       const queryEmbedding = await embed(question);
       const embeddingStr = JSON.stringify(queryEmbedding);
-      const chunks = await pgClient<{ content_text: string }[]>`
-        SELECT content_text
-        FROM product_chunks
-        WHERE product_id = ${productId}
-          AND tenant_id = ${tenantId}
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> ${embeddingStr}::vector
+      const rows = await pgClient<{ content_text: string; product_name: string }[]>`
+        SELECT pc.content_text, p.name AS product_name
+        FROM product_chunks pc
+        JOIN products p ON p.id = pc.product_id
+        WHERE pc.tenant_id = ${tenantId}
+          AND pc.embedding IS NOT NULL
+          AND p.knowledge_status = 'ready'
+        ORDER BY pc.embedding <=> ${embeddingStr}::vector
         LIMIT 5
       `;
-      if (chunks.length > 0) return chunks.map((r) => r.content_text).join('\n\n---\n\n');
+      if (rows.length > 0) return formatChunks(rows);
     } catch (err) {
-      // Downgraded to log (not warn/error) — FTS fallback is the expected path when
-      // XAI_EMBEDDING_MODEL is set to a model the xAI account doesn't support,
-      // or when no embeddings have been stored yet. Not an actionable error.
       console.log('[query] Vector search unavailable, using FTS:', (err as Error).message);
     }
   }
 
-  // Full-text search fallback (no embeddings required).
+  // Full-text search fallback — tenant-wide, 'simple' config, OR operator.
   //
-  // Language config: 'simple' — no stop-word removal, no stemming.
-  //   'english' breaks Indonesian content: English stop words strip common
-  //   Indonesian words, and English stemming mangles non-English roots.
-  //   'simple' just lowercases tokens, making it safe for any language.
+  // 'simple': no language-specific stop words or stemming — correct for Indonesian,
+  //   English, or any mixed content. 'english' would mangle Indonesian roots.
   //
-  // Operator: OR ( | ) not AND ( & ).
-  //   AND requires ALL query terms in the SAME chunk — a chunk containing
-  //   "Aria" but not "apa" and "itu" is silently skipped.
-  //   OR returns the highest-scoring chunk that matches ANY term, ranked
-  //   by ts_rank so the most-relevant result surfaces first.
-  //
-  // Term filter: drop tokens < 2 chars (punctuation artifacts).
+  // OR ( | ): any chunk matching ANY query term is scored and returned ranked
+  //   by ts_rank. AND ( & ) requires ALL terms in the same chunk — too strict
+  //   for natural-language questions ("apa itu Aria" with AND skips chunks that
+  //   have "Aria" but not "apa" or "itu").
   const queryTerms = question
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
     .trim()
@@ -142,37 +145,57 @@ export async function query(productId: string, tenantId: string, question: strin
     .map(w => w.toLowerCase());
 
   if (queryTerms.length === 0) {
-    // No usable terms — return first 5 chunks as context
-    const chunks = await pgClient<{ content_text: string }[]>`
-      SELECT content_text FROM product_chunks
-      WHERE product_id = ${productId} AND tenant_id = ${tenantId}
-      ORDER BY chunk_index LIMIT 5
+    // No usable terms — return first 5 chunks from the most recently trained product
+    const rows = await pgClient<{ content_text: string; product_name: string }[]>`
+      SELECT pc.content_text, p.name AS product_name
+      FROM product_chunks pc
+      JOIN products p ON p.id = pc.product_id
+      WHERE pc.tenant_id = ${tenantId}
+        AND p.knowledge_status = 'ready'
+        AND p.is_active = true
+      ORDER BY p.updated_at DESC, pc.chunk_index ASC
+      LIMIT 5
     `;
-    return chunks.map((r) => r.content_text).join('\n\n---\n\n');
+    return formatChunks(rows);
   }
 
   const safeQuery = queryTerms.join(' | ');
 
-  const chunks = await pgClient<{ content_text: string }[]>`
-    SELECT content_text,
-           ts_rank(to_tsvector('simple', content_text), to_tsquery('simple', ${safeQuery})) AS rank
-    FROM product_chunks
-    WHERE product_id = ${productId}
-      AND tenant_id = ${tenantId}
-      AND to_tsvector('simple', content_text) @@ to_tsquery('simple', ${safeQuery})
+  const rows = await pgClient<{ content_text: string; product_name: string }[]>`
+    SELECT pc.content_text,
+           p.name AS product_name,
+           ts_rank(to_tsvector('simple', pc.content_text), to_tsquery('simple', ${safeQuery})) AS rank
+    FROM product_chunks pc
+    JOIN products p ON p.id = pc.product_id
+    WHERE pc.tenant_id = ${tenantId}
+      AND p.knowledge_status = 'ready'
+      AND p.is_active = true
+      AND to_tsvector('simple', pc.content_text) @@ to_tsquery('simple', ${safeQuery})
     ORDER BY rank DESC
     LIMIT 5
   `;
 
-  if (chunks.length === 0) {
-    // FTS found nothing — return first 5 chunks as broad context
-    const fallback = await pgClient<{ content_text: string }[]>`
-      SELECT content_text FROM product_chunks
-      WHERE product_id = ${productId} AND tenant_id = ${tenantId}
-      ORDER BY chunk_index LIMIT 5
+  if (rows.length === 0) {
+    // FTS found nothing — return first 5 chunks from most recently trained product
+    const fallback = await pgClient<{ content_text: string; product_name: string }[]>`
+      SELECT pc.content_text, p.name AS product_name
+      FROM product_chunks pc
+      JOIN products p ON p.id = pc.product_id
+      WHERE pc.tenant_id = ${tenantId}
+        AND p.knowledge_status = 'ready'
+        AND p.is_active = true
+      ORDER BY p.updated_at DESC, pc.chunk_index ASC
+      LIMIT 5
     `;
-    return fallback.map((r) => r.content_text).join('\n\n---\n\n');
+    return formatChunks(fallback);
   }
 
-  return chunks.map((r) => r.content_text).join('\n\n---\n\n');
+  return formatChunks(rows);
+}
+
+/** Format retrieved chunks with their source product name for LLM context. */
+function formatChunks(rows: { content_text: string; product_name: string }[]): string {
+  return rows
+    .map(r => `[Source: ${r.product_name}]\n${r.content_text}`)
+    .join('\n\n---\n\n');
 }
