@@ -515,6 +515,25 @@ export class SchedulingService {
   }
 
   async createStaff(tenantId: string, data: { name: string; phoneNumber: string; role?: string; isActive?: boolean }) {
+    // If a staff record with this phone already exists for the tenant, reactivate it
+    // rather than hitting the unique constraint. Only block if they're already active.
+    const existing = await db.query.staff.findFirst({
+      where: and(eq(staff.tenantId, tenantId), eq(staff.phoneNumber, data.phoneNumber)),
+    });
+
+    if (existing) {
+      if (existing.isActive) {
+        const err = Object.assign(new Error('Duplicate phone number'), { code: '23505' });
+        throw err;
+      }
+      const [row] = await db
+        .update(staff)
+        .set({ name: data.name, role: data.role ?? existing.role, isActive: true })
+        .where(eq(staff.id, existing.id))
+        .returning();
+      return row;
+    }
+
     const [row] = await db.insert(staff).values({ tenantId, ...data, createdAt: new Date() }).returning();
     return row;
   }
