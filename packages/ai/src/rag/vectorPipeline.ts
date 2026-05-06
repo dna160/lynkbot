@@ -1,0 +1,97 @@
+/**
+ * @CLAUDE_CONTEXT
+ * Package : packages/ai
+ * File    : src/rag/vectorPipeline.ts
+ * Role    : pgvector semantic search for product RAG.
+ *           Stores embeddings, performs cosine-similarity queries.
+ *           Falls back to FTS if vector returns < 3 results.
+ */
+import { db, productEmbeddings, products, eq, and, sql } from '@lynkbot/db';
+import { query as ftsQuery } from './pipeline';
+
+// Lazy-load embedding model
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let embeddingModel: any = null;
+
+async function getEmbedding(text: string): Promise<number[]> {
+  // Use OpenAI embeddings by default (text-embedding-3-small, 1536 dims)
+  // For 768-dim, use text-embedding-3-small with dimensions param or local model
+  try {
+    if (!embeddingModel) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { OpenAI } = require('openai');
+      embeddingModel = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        maxRetries: 0,
+      });
+    }
+    const res = await embeddingModel.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text,
+      dimensions: 768,
+    });
+    return res.data[0].embedding;
+  } catch (err) {
+    console.error('[vectorPipeline] Embedding generation failed:', err);
+    throw err;
+  }
+}
+
+/**
+ * Store embeddings for a product's chunks.
+ * Called after PDF ingestion or product update.
+ */
+export async function storeProductEmbeddings(
+  tenantId: string,
+  productId: string,
+  chunks: string[],
+): Promise<void> {
+  // Delete existing embeddings for this product
+  await db.delete(productEmbeddings).where(eq(productEmbeddings.productId, productId));
+
+  for (let i = 0; i < chunks.length; i++) {
+    const embedding = await getEmbedding(chunks[i]);
+    await db.insert(productEmbeddings).values({
+      productId,
+      tenantId,
+      chunkIndex: i,
+      chunkText: chunks[i],
+      embedding: sql`${JSON.stringify(embedding)}::vector`,
+    });
+  }
+}
+
+/**
+ * Semantic search via pgvector cosine similarity.
+ * Falls back to FTS if < 3 results.
+ */
+export async function vectorQuery(tenantId: string, question: string, limit = 5): Promise<string> {
+  try {
+    const embedding = await getEmbedding(question);
+
+    const results = await db.execute(sql`
+      SELECT pe.chunk_text, pe.product_id, p.name as product_name,
+             1 - (pe.embedding <=> ${JSON.stringify(embedding)}::vector) as similarity
+      FROM product_embeddings pe
+      JOIN products p ON p.id = pe.product_id
+      WHERE pe.tenant_id = ${tenantId}
+      ORDER BY pe.embedding <=> ${JSON.stringify(embedding)}::vector
+      LIMIT ${limit}
+    `);
+
+    const rows = Array.isArray(results) ? results : [];
+
+    if (rows.length < 3) {
+      // Fallback to FTS
+      const fts = await ftsQuery(tenantId, question);
+      if (fts) return fts;
+    }
+
+    return rows
+      .map((r: any) => `[Source: ${r.product_name}]\n${r.chunk_text}`)
+      .join('\n\n---\n\n');
+  } catch (err) {
+    console.error('[vectorPipeline] Vector query failed, falling back to FTS:', err);
+    return ftsQuery(tenantId, question);
+  }
+}

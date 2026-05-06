@@ -76,11 +76,13 @@ export interface FlowEngineOptions {
 export class FlowEngine {
   private getMetaClient: (tenantId: string) => Promise<MetaClient>;
   private redisClient: RedisClientLike;
+  private redisConnection: { host: string; port: number; password?: string };
   private queue: Queue;
 
   constructor(options: FlowEngineOptions) {
     this.getMetaClient = options.getMetaClient;
     this.redisClient = options.redisClient;
+    this.redisConnection = options.redisConnection;
     this.queue = new Queue(QUEUES.FLOW_EXECUTION, {
       connection: options.redisConnection,
     });
@@ -419,13 +421,16 @@ export class FlowEngine {
 
   /**
    * Execute a single node within a flow execution.
-   * Recursively follows edges until the flow completes, pauses, or delays.
+   * Iteratively follows edges until the flow completes, pauses, or delays.
+   * Replaces recursive execution to prevent stack overflow on long flows.
    */
   async executeNode(
     executionId: string,
-    nodeId: string,
+    startNodeId: string,
     passedCtx?: ExecutionContext,
   ): Promise<void> {
+    const MAX_DEPTH = Number(process.env.MAX_FLOW_DEPTH ?? 1000);
+
     // 1. Load execution from DB (if context not already passed)
     let ctx: ExecutionContext;
 
@@ -465,7 +470,7 @@ export class FlowEngine {
       };
     }
 
-    // 2. Get flow definition to find the node
+    // 2. Get flow definition
     const flow = await db.query.flowDefinitions.findFirst({
       where: eq(flowDefinitions.id, ctx.flowId),
     });
@@ -475,80 +480,98 @@ export class FlowEngine {
     }
 
     const definition = flow.definition as unknown as FlowDefinition;
-    const node = definition.nodes.find((n: FlowNode) => n.id === nodeId);
+    const stack: Array<{ nodeId: string; edgePort?: string }> = [{ nodeId: startNodeId }];
+    const visited = new Set<string>();
 
-    if (!node) {
-      throw new Error(`Node ${nodeId} not found in flow ${ctx.flowId}`);
-    }
+    while (stack.length > 0) {
+      const { nodeId, edgePort } = stack.pop()!;
 
-    // 3. Update current_node_id
-    await db
-      .update(flowExecutions)
-      .set({ currentNodeId: nodeId, lastStepAt: new Date() })
-      .where(eq(flowExecutions.id, executionId));
+      // Cycle / depth guard
+      if (visited.has(nodeId) || visited.size >= MAX_DEPTH) {
+        await this._failExecution(executionId, 'max_depth_exceeded');
+        return;
+      }
+      visited.add(nodeId);
 
-    // 4. Look up and call processor
-    const processor = processorRegistry[node.type];
+      const node = definition.nodes.find((n: FlowNode) => n.id === nodeId);
+      if (!node) {
+        throw new Error(`Node ${nodeId} not found in flow ${ctx.flowId}`);
+      }
 
-    if (!processor) {
-      // Unknown node type — log and skip
-      ctx.executionLog.push({
-        nodeId: node.id,
-        nodeType: node.type,
-        timestamp: new Date().toISOString(),
-        status: 'skipped',
-        skipReason: `unknown_node_type:${node.type}`,
-      });
-      // Try to follow default edge
-      await this._followEdge(ctx, definition, nodeId, 'default');
-      return;
-    }
-
-    const result = await processor(node, ctx, this.processorDeps);
-
-    // 5. Update execution log in DB
-    await db
-      .update(flowExecutions)
-      .set({
-        context: {
-          buyer: ctx.buyer,
-          trigger: ctx.trigger,
-          variables: ctx.variables,
-          executionLog: ctx.executionLog,
-        },
-        lastStepAt: new Date(),
-      })
-      .where(eq(flowExecutions.id, executionId));
-
-    // 6. Handle status results
-    if (result.status === 'completed') {
-      await this._markCompleted(ctx);
-      return;
-    }
-
-    if (result.status === 'delayed') {
+      // Update current_node_id
       await db
         .update(flowExecutions)
-        .set({ status: 'running', currentNodeId: nodeId, lastStepAt: new Date() })
+        .set({ currentNodeId: nodeId, lastStepAt: new Date() })
         .where(eq(flowExecutions.id, executionId));
-      return;
-    }
 
-    if (result.status === 'waiting_reply') {
+      // Look up and call processor
+      const processor = processorRegistry[node.type];
+      let result: import('./nodeProcessors/types').NodeResult;
+
+      if (!processor) {
+        ctx.executionLog.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          timestamp: new Date().toISOString(),
+          status: 'skipped',
+          skipReason: `unknown_node_type:${node.type}`,
+        });
+        result = { status: undefined, nextNodeId: 'default' };
+      } else {
+        result = await processor(node, ctx, this.processorDeps);
+      }
+
+      // Update execution log in DB
       await db
         .update(flowExecutions)
         .set({
-          status: 'waiting_reply',
-          currentNodeId: nodeId,
+          context: {
+            buyer: ctx.buyer,
+            trigger: ctx.trigger,
+            variables: ctx.variables,
+            executionLog: ctx.executionLog,
+          },
           lastStepAt: new Date(),
         })
         .where(eq(flowExecutions.id, executionId));
-      return;
+
+      // Handle terminal statuses
+      if (result.status === 'completed') {
+        await this._markCompleted(ctx);
+        return;
+      }
+
+      if (result.status === 'delayed') {
+        await db
+          .update(flowExecutions)
+          .set({ status: 'running', currentNodeId: nodeId, lastStepAt: new Date() })
+          .where(eq(flowExecutions.id, executionId));
+        return;
+      }
+
+      if (result.status === 'waiting_reply') {
+        await db
+          .update(flowExecutions)
+          .set({
+            status: 'waiting_reply',
+            currentNodeId: nodeId,
+            lastStepAt: new Date(),
+          })
+          .where(eq(flowExecutions.id, executionId));
+        return;
+      }
+
+      // Follow edges to next nodes
+      const port = result.nextNodeId ?? 'default';
+      const edges = this._getOutgoingEdges(definition, nodeId, port);
+      // Push in reverse so first edge is processed first (LIFO)
+      for (let i = edges.length - 1; i >= 0; i--) {
+        stack.push({ nodeId: edges[i].target });
+      }
     }
 
-    // 7. Follow edge to next node
-    const port = result.nextNodeId ?? 'default';
-    await this._followEdge(ctx, definition, nodeId, port);
+    // Stack exhausted — flow complete
+    await this._markCompleted(ctx);
   }
 
   /**
@@ -611,14 +634,19 @@ export class FlowEngine {
 
     // AGENT nodes own their conversation loop — re-execute the same node so
     // the processor can process the new buyer message and decide whether to
-    // continue waiting or exit via the 'exit' port.
+    // continue waiting or exit via the configured action ports.
     const currentNode = definition.nodes.find(n => n.id === currentNodeId);
     if (currentNode?.type === 'AGENT') {
       await this.executeNode(executionId, currentNodeId, ctx);
       return;
     }
 
-    await this._followEdge(ctx, definition, currentNodeId, 'default');
+    const edges = this._getOutgoingEdges(definition, currentNodeId, 'default');
+    if (edges.length === 0) {
+      await this._markCompleted(ctx);
+      return;
+    }
+    await this.executeNode(executionId, edges[0].target, ctx);
   }
 
   /**
@@ -666,7 +694,7 @@ export class FlowEngine {
    * - Excludes doNotContact=true buyers
    * - Excludes buyers with an already-running execution for this flow
    * - Honors global 1000/hour marketing cap via Redis counter
-   * - Enqueues one flow.start_execution job per eligible buyer
+   * - Enqueues batch jobs (500 buyers each) to prevent API timeout
    *
    * Rate limit: Redis counter `ratelimit:waba:{wabaId}:marketing:{YYYY-MM-DD-HH}`
    */
@@ -676,6 +704,7 @@ export class FlowEngine {
     segmentFilter: SegmentFilter | Record<string, unknown>,
   ): Promise<void> {
     const sf = segmentFilter as SegmentFilter;
+    const BATCH_SIZE = Number(process.env.BROADCAST_BATCH_SIZE ?? 500);
 
     // Resolve tenant for WABA rate-limit key
     const tenant = await db.query.tenants.findFirst({
@@ -706,7 +735,6 @@ export class FlowEngine {
     ];
 
     if (sf.tags && sf.tags.length > 0) {
-      // Match buyers whose tags JSON array contains any of the specified tags
       conditions.push(
         sql`${buyers.tags} ?| ARRAY[${sql.raw(sf.tags.map(t => `'${t.replace(/'/g, "''")}'`).join(','))}]::text[]`,
       );
@@ -756,12 +784,27 @@ export class FlowEngine {
     const remaining = Math.max(0, 1000 - currentCount);
     const toEnqueue = targetBuyers.slice(0, remaining);
 
-    // Enqueue one job per buyer (BullMQ handles rate limiting via concurrency)
-    for (const buyer of toEnqueue) {
-      await this.queue.add(
-        'flow.start_execution',
-        { tenantId, flowId, buyerId: buyer.id, triggerType: 'broadcast' },
-        { removeOnComplete: 100, removeOnFail: 200 },
+    // ── Batch enqueue ─────────────────────────────────────────────────────────
+    const batchQueue = new Queue(QUEUES.BROADCAST_BATCH, {
+      connection: this.redisConnection,
+    });
+
+    for (let i = 0; i < toEnqueue.length; i += BATCH_SIZE) {
+      const batch = toEnqueue.slice(i, i + BATCH_SIZE);
+      await batchQueue.add(
+        'broadcast.batch',
+        {
+          tenantId,
+          flowId,
+          buyerIds: batch.map(b => b.id),
+          executionContext: { segmentFilter: sf },
+        },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: 100,
+          removeOnFail: false,
+        },
       );
     }
 
@@ -770,42 +813,28 @@ export class FlowEngine {
     await this.redisClient.expire(hourKey, 7200);
 
     console.log(
-      `[FlowEngine] broadcastToSegment: enqueued ${toEnqueue.length} jobs for flow=${flowId} tenant=${tenantId}`,
+      `[FlowEngine] broadcastToSegment: enqueued ${Math.ceil(toEnqueue.length / BATCH_SIZE)} batch jobs (${toEnqueue.length} buyers) for flow=${flowId} tenant=${tenantId}`,
     );
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private async _followEdge(
-    ctx: ExecutionContext,
+  private _getOutgoingEdges(
     definition: FlowDefinition,
     fromNodeId: string,
     port: string,
-  ): Promise<void> {
-    // Look up node type so we can do IF_CONDITION / KEYWORD_ROUTER backward-compat mapping
+  ): Array<{ source: string; target: string; sourcePort?: string }> {
     const fromNode = definition.nodes.find(n => n.id === fromNodeId);
     const nodeType = (fromNode?.type as string) ?? '';
-    // Drawflow-style key equivalent for this semantic port (may be undefined if no mapping)
     const drawflowKey = semanticPortToDrawflow(nodeType, port);
 
-    const edge = (definition.edges ?? []).find(e => {
+    return (definition.edges ?? []).filter(e => {
       if (e.source !== fromNodeId) return false;
-      // Exact semantic match (new saves after fix)
       if (e.sourcePort === port) return true;
-      // Backward-compat: edge stored with Drawflow-style key (old saves)
       if (drawflowKey && e.sourcePort === drawflowKey) return true;
-      // 'default' also matches edges with no sourcePort at all
       if (port === 'default' && !e.sourcePort) return true;
       return false;
     });
-
-    if (!edge) {
-      // No edge found — auto-complete
-      await this._markCompleted(ctx);
-      return;
-    }
-
-    await this.executeNode(ctx.executionId, edge.target, ctx);
   }
 
   private async _markCompleted(ctx: ExecutionContext): Promise<void> {
@@ -818,12 +847,23 @@ export class FlowEngine {
       })
       .where(eq(flowExecutions.id, ctx.executionId));
 
-    // Decrement buyers.active_flow_count (minimum 0)
     await db
       .update(buyers)
       .set({
         activeFlowCount: sql`GREATEST(0, ${buyers.activeFlowCount} - 1)`,
       })
       .where(eq(buyers.id, ctx.buyerId));
+  }
+
+  private async _failExecution(executionId: string, reason: string): Promise<void> {
+    await db
+      .update(flowExecutions)
+      .set({
+        status: 'failed',
+        completedAt: new Date(),
+        lastStepAt: new Date(),
+        context: sql`jsonb_set(coalesce(${flowExecutions.context}, '{}'::jsonb), '{error}', ${JSON.stringify({ reason })}::jsonb)`,
+      })
+      .where(eq(flowExecutions.id, executionId));
   }
 }

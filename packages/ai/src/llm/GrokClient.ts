@@ -21,18 +21,30 @@ export class GrokClient implements ILLMClient {
   private client: OpenAI;
   private model: string;
   private fallbackModel: string;
+  private lastFailureAt: number | null = null;
+  private readonly failureCooldownMs = 60_000;
 
-  constructor() {
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) throw new Error('XAI_API_KEY is not set');
+  constructor(apiKey?: string, baseURL?: string, model?: string, fallbackModel?: string) {
+    const key = apiKey ?? process.env.XAI_API_KEY;
+    if (!key) throw new Error('XAI_API_KEY is not set');
     this.client = makeOpenAI({
-      apiKey,
-      baseURL: process.env.XAI_BASE_URL ?? 'https://api.x.ai/v1',
-      timeout: 120_000, // 2 min — reasoning models can be slow; fail cleanly rather than hanging forever
-      maxRetries: 0,    // BullMQ handles retries; don't double-retry inside the SDK
+      apiKey: key,
+      baseURL: baseURL ?? process.env.XAI_BASE_URL ?? 'https://api.x.ai/v1',
+      timeout: 120_000,
+      maxRetries: 0,
     });
-    this.model = process.env.LLM_MODEL ?? 'grok-4-1-fast-reasoning';
-    this.fallbackModel = process.env.LLM_FALLBACK_MODEL ?? 'grok-3';
+    this.model = model ?? process.env.LLM_MODEL ?? 'grok-4-1-fast-reasoning';
+    this.fallbackModel = fallbackModel ?? process.env.LLM_FALLBACK_MODEL ?? 'grok-3';
+  }
+
+  supportsModel(model: string): boolean {
+    const xaiModels = ['grok'];
+    return xaiModels.some(m => model.toLowerCase().startsWith(m));
+  }
+
+  isHealthy(): boolean {
+    if (!this.lastFailureAt) return true;
+    return Date.now() - this.lastFailureAt > this.failureCooldownMs;
   }
 
   async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<LLMResponse> {
@@ -42,18 +54,8 @@ export class GrokClient implements ILLMClient {
     try {
       return await this._chat(messages, primaryModel, opts, start);
     } catch (primaryErr) {
-      console.error(`Primary model ${primaryModel} failed, trying fallback ${this.fallbackModel}:`, primaryErr);
-      try {
-        return await this._chat(messages, this.fallbackModel, opts, start);
-      } catch (fallbackErr) {
-        console.error(`Fallback model ${this.fallbackModel} also failed:`, fallbackErr);
-        return {
-          content: 'Sedang ada gangguan, mohon tunggu sebentar.',
-          tokensUsed: 0,
-          modelId: 'error',
-          latencyMs: Date.now() - start,
-        };
-      }
+      this.lastFailureAt = Date.now();
+      throw primaryErr;
     }
   }
 

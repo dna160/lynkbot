@@ -25,9 +25,12 @@ export interface ChatOptions {
   system?: string;
   /** Override the default model for this specific call (e.g. use fast model for classification). */
   model?: string;
+  timeoutMs?: number;
 }
 
 export interface ILLMClient {
   chat(messages: ChatMessage[], opts?: ChatOptions): Promise<LLMResponse>;
   stream(messages: ChatMessage[], onChunk: (chunk: string) => void): Promise<void>;
+  supportsModel(model: string): boolean;
+  isHealthy(): boolean;
 }

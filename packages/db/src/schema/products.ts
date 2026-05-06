@@ -54,6 +54,7 @@ export const products = pgTable('products', {
   dimensionsCm: jsonb('dimensions_cm').$type<{ l: number; w: number; h: number }>(),
   coverImageUrl: text('cover_image_url'),
   pdfS3Key: text('pdf_s3_key'),
+  pdfUploadedAt: timestamp('pdf_uploaded_at'),
   /** Raw PDF bytes stored when S3 is not configured (inline mode). Enables re-training without re-upload. */
   pdfBytes: bytea('pdf_bytes'),
   knowledgeStatus: knowledgeStatusEnum('knowledge_status').default('pending'),
