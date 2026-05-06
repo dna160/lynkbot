@@ -62,16 +62,16 @@ function ServiceModal({
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Nama Layanan *</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Service Name *</label>
             <input
               value={form.name}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
               className="w-full bg-[#0F172A] border border-[#334155] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              placeholder="Konsultasi Awal"
+              placeholder="Initial Consultation"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Durasi (menit) *</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Duration (minutes) *</label>
             <input
               type="number"
               min={5}
@@ -83,9 +83,9 @@ function ServiceModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-2">Staf yang Menangani</label>
+            <label className="block text-xs font-medium text-slate-400 mb-2">Assigned Staff</label>
             {staffList.length === 0 ? (
-              <p className="text-xs text-slate-500">Belum ada staf. Tambahkan staf di halaman Staf terlebih dahulu.</p>
+              <p className="text-xs text-slate-500">No staff yet. Add staff members on the Staff page first.</p>
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {staffList.filter(s => s.isActive).map(s => (
@@ -121,19 +121,19 @@ function ServiceModal({
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
-            <span className="text-sm text-slate-300">Aktif</span>
+            <span className="text-sm text-slate-300">Active</span>
           </div>
         </div>
         <div className="flex justify-end gap-3 px-5 py-4 border-t border-[#334155]">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-white/5">
-            Batal
+            Cancel
           </button>
           <button
             onClick={() => onSubmit(form)}
             disabled={!form.name || isLoading}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           >
-            {isLoading ? 'Menyimpan...' : 'Simpan'}
+            {isLoading ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
@@ -157,10 +157,10 @@ export function ServicesPage() {
   async function handleCreate(data: ServiceFormState) {
     try {
       await createService.mutateAsync(data);
-      toast({ type: 'success', message: 'Layanan berhasil ditambahkan' });
+      toast({ type: 'success', message: 'Service created' });
       setShowCreate(false);
     } catch {
-      toast({ type: 'error', message: 'Gagal menambahkan layanan' });
+      toast({ type: 'error', message: 'Failed to create service' });
     }
   }
 
@@ -168,27 +168,27 @@ export function ServicesPage() {
     if (!editTarget) return;
     try {
       await updateService.mutateAsync({ id: editTarget.id, ...data });
-      toast({ type: 'success', message: 'Layanan berhasil diperbarui' });
+      toast({ type: 'success', message: 'Service updated' });
       setEditTarget(null);
     } catch {
-      toast({ type: 'error', message: 'Gagal memperbarui layanan' });
+      toast({ type: 'error', message: 'Failed to update service' });
     }
   }
 
   function formatDuration(minutes: number): string {
     const h = Math.floor(minutes / 60);
     const m = minutes % 60;
-    if (h === 0) return `${m} menit`;
-    if (m === 0) return `${h} jam`;
-    return `${h} jam ${m} menit`;
+    if (h === 0) return `${m} min`;
+    if (m === 0) return `${h} hr`;
+    return `${h} hr ${m} min`;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-white">Layanan</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Buat dan atur layanan yang bisa dibooking</p>
+          <h1 className="text-xl font-semibold text-white">Services</h1>
+          <p className="text-slate-400 text-sm mt-0.5">Create and manage bookable services</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -197,7 +197,7 @@ export function ServicesPage() {
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Tambah Layanan
+          Add Service
         </button>
       </div>
 
@@ -217,7 +217,7 @@ export function ServicesPage() {
                   d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
             </div>
-            <p className="text-slate-400 text-sm">Belum ada layanan. Buat layanan pertama kamu.</p>
+            <p className="text-slate-400 text-sm">No services yet. Create your first service.</p>
           </div>
         ) : (
           services.map(svc => (
@@ -227,7 +227,7 @@ export function ServicesPage() {
                 <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium border ${
                   svc.isActive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-500 border-slate-500/20'
                 }`}>
-                  {svc.isActive ? 'Aktif' : 'Nonaktif'}
+                  {svc.isActive ? 'Active' : 'Inactive'}
                 </span>
               </div>
 
@@ -253,7 +253,7 @@ export function ServicesPage() {
                 onClick={() => setEditTarget(svc)}
                 className="w-full px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-xs font-medium transition-colors border border-white/10 mt-1"
               >
-                Edit Layanan
+                Edit Service
               </button>
             </div>
           ))
@@ -262,7 +262,7 @@ export function ServicesPage() {
 
       {showCreate && (
         <ServiceModal
-          title="Tambah Layanan Baru"
+          title="Add New Service"
           initial={EMPTY_FORM}
           onSubmit={handleCreate}
           onClose={() => setShowCreate(false)}
