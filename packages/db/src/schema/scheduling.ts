@@ -28,6 +28,7 @@ export const appointmentStatusEnum = pgEnum('appointment_status', [
   'pending_doctor',
   'confirmed',
   'cancelled',
+  'rescheduling_requested',
 ]);
 
 /**
@@ -41,10 +42,12 @@ export const services = pgTable('services', {
   name: text('name').notNull(),
   durationMinutes: integer('duration_minutes').notNull().default(60),
   isActive: boolean('is_active').notNull().default(true),
+  confirmationStaffId: uuid('confirmation_staff_id').references(() => staff.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({
   tenantNameUnique: unique('services_tenant_name_unique').on(t.tenantId, t.name),
   tenantIdx: index('services_tenant_idx').on(t.tenantId),
+  confirmationStaffIdx: index('services_confirmation_staff_idx').on(t.confirmationStaffId),
 }));
 
 /**
@@ -98,7 +101,7 @@ export const staffAvailability = pgTable('staff_availability', {
  * status state machine: negotiating → pending_doctor → confirmed | cancelled
  * BullMQ reminder job enqueued only after status = confirmed.
  */
-export const appointments = pgTable('appointments', {
+export const appointments: any = pgTable('appointments', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   buyerId: uuid('buyer_id').notNull().references(() => buyers.id, { onDelete: 'cascade' }),
@@ -107,6 +110,7 @@ export const appointments = pgTable('appointments', {
   startTime: timestamp('start_time', { withTimezone: true }).notNull(),
   endTime: timestamp('end_time', { withTimezone: true }).notNull(),
   status: appointmentStatusEnum('status').notNull().default('negotiating'),
+  previousAppointmentId: uuid('previous_appointment_id').references((): any => appointments.id, { onDelete: 'set null' }),
   reminderOffsetH: integer('reminder_offset_h').notNull().default(24),
   bullmqJobId: text('bullmq_job_id'),
   reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
@@ -117,4 +121,5 @@ export const appointments = pgTable('appointments', {
   tenantIdx: index('appointments_tenant_idx').on(t.tenantId),
   staffTimeIdx: index('appointments_staff_time_idx').on(t.staffId, t.startTime),
   statusIdx: index('appointments_status_idx').on(t.status),
+  previousIdx: index('appointments_previous_idx').on(t.previousAppointmentId),
 }));

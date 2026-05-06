@@ -33,7 +33,7 @@ function AvailabilityEditor({
   initial: AvailabilitySlot[];
   onClose: () => void;
 }) {
-  const { toast } = useToast();
+  const { addToast } = useToast();
   const setAvailability = useSetAvailability();
 
   // Build a slot-per-day structure (one slot per day max for simplicity)
@@ -63,10 +63,10 @@ function AvailabilityEditor({
         staffId,
         slots: slots.filter((s): s is AvailabilitySlot => s !== null),
       });
-      toast({ type: 'success', message: `Schedule for ${staffName} saved` });
+      addToast(`Schedule for ${staffName} saved`, 'success');
       onClose();
     } catch {
-      toast({ type: 'error', message: 'Failed to save schedule' });
+      addToast('Failed to save schedule', 'error');
     }
   }
 
@@ -229,7 +229,7 @@ function StaffModal({
 const EMPTY_FORM: StaffFormState = { name: '', phoneNumber: '', role: '', isActive: true };
 
 export function StaffPage() {
-  const { toast } = useToast();
+  const { addToast } = useToast();
   const { data: staffList = [], isLoading } = useStaff();
   const createStaff = useCreateStaff();
   const updateStaff = useUpdateStaff();
@@ -241,11 +241,11 @@ export function StaffPage() {
   async function handleCreate(data: StaffFormState) {
     try {
       await createStaff.mutateAsync(data);
-      toast({ type: 'success', message: 'Staff member added' });
+      addToast('Staff member added', 'success');
       setShowCreate(false);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast({ type: 'error', message: msg ?? 'Failed to add staff member' });
+      addToast(msg ?? 'Failed to add staff member', 'error');
     }
   }
 
@@ -253,11 +253,11 @@ export function StaffPage() {
     if (!editTarget) return;
     try {
       await updateStaff.mutateAsync({ id: editTarget.id, ...data });
-      toast({ type: 'success', message: 'Staff member updated' });
+      addToast('Staff member updated', 'success');
       setEditTarget(null);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast({ type: 'error', message: msg ?? 'Failed to update staff member' });
+      addToast(msg ?? 'Failed to update staff member', 'error');
     }
   }
 

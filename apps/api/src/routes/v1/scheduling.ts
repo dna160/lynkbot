@@ -137,7 +137,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
     { preHandler: authAndFeature(fastify) },
     async (request, reply) => {
       const { tenantId } = request.user;
-      const { name, durationMinutes, staffIds, isActive } = request.body;
+      const { name, durationMinutes, staffIds, confirmationStaffId, isActive } = request.body;
 
       if (!name) {
         return reply.status(400).send({ error: 'name is required' });
@@ -147,6 +147,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
         name: name as string,
         durationMinutes: durationMinutes as number | undefined,
         staffIds: staffIds as string[] | undefined,
+        confirmationStaffId: confirmationStaffId as string | undefined,
         isActive: isActive !== false,
       });
 
@@ -161,12 +162,13 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
-      const { name, durationMinutes, staffIds, isActive } = request.body;
+      const { name, durationMinutes, staffIds, confirmationStaffId, isActive } = request.body;
 
       const service = await svc.updateService(id, tenantId, {
         name: name as string | undefined,
         durationMinutes: durationMinutes as number | undefined,
         staffIds: staffIds as string[] | undefined,
+        confirmationStaffId: confirmationStaffId as string | null | undefined,
         isActive: isActive as boolean | undefined,
       });
 

@@ -23,6 +23,7 @@ const STATUS_LABELS: Record<AppointmentStatus, string> = {
   pending_doctor: 'Pending Confirmation',
   confirmed: 'Confirmed',
   cancelled: 'Cancelled',
+  rescheduling_requested: 'Reschedule Pending',
 };
 
 const STATUS_COLORS: Record<AppointmentStatus, string> = {
@@ -30,6 +31,7 @@ const STATUS_COLORS: Record<AppointmentStatus, string> = {
   pending_doctor: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
   confirmed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   cancelled: 'bg-red-500/10 text-red-400 border-red-500/20',
+  rescheduling_requested: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
 };
 
 function formatWIB(utcIso: string): string {
@@ -45,7 +47,7 @@ function formatWIB(utcIso: string): string {
 }
 
 export function AppointmentsPage() {
-  const { toast } = useToast();
+  const { addToast } = useToast();
   const [statusFilter, setStatusFilter] = useState<AppointmentStatus | ''>('');
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; action: 'confirmed' | 'cancelled' } | null>(null);
 
@@ -57,9 +59,9 @@ export function AppointmentsPage() {
     if (!confirmTarget) return;
     try {
       await updateStatus.mutateAsync({ id: confirmTarget.id, status: confirmTarget.action });
-      toast({ type: 'success', message: confirmTarget.action === 'confirmed' ? 'Appointment confirmed' : 'Appointment cancelled' });
+      addToast(confirmTarget.action === 'confirmed' ? 'Appointment confirmed' : 'Appointment cancelled', 'success');
     } catch {
-      toast({ type: 'error', message: 'Failed to update status' });
+      addToast('Failed to update status', 'error');
     } finally {
       setConfirmTarget(null);
     }

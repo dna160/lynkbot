@@ -39,12 +39,13 @@ export interface ServiceRow {
   name: string;
   durationMinutes: number;
   isActive: boolean;
+  confirmationStaffId?: string | null;
   staff?: StaffRow[];
   createdAt: string;
   updatedAt: string;
 }
 
-export type AppointmentStatus = 'negotiating' | 'pending_doctor' | 'confirmed' | 'cancelled';
+export type AppointmentStatus = 'negotiating' | 'pending_doctor' | 'confirmed' | 'cancelled' | 'rescheduling_requested';
 
 export interface AppointmentRow {
   id: string;
@@ -55,6 +56,7 @@ export interface AppointmentRow {
   startTime: string;  // UTC ISO8601
   endTime: string;    // UTC ISO8601
   status: AppointmentStatus;
+  previousAppointmentId?: string | null;
   notes: string | null;
   bullmqJobId: string | null;
   // Joined fields (when loaded with detail)
@@ -138,7 +140,7 @@ export function useService(id: string | undefined) {
 
 export function useCreateService() {
   const qc = useQueryClient();
-  return useMutation<ServiceRow, Error, { name: string; durationMinutes?: number; staffIds?: string[]; isActive?: boolean }>({
+  return useMutation<ServiceRow, Error, { name: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string; isActive?: boolean }>({
     mutationFn: (body) => api.post('/scheduling/services', body).then((d) => d.data.service),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.services }),
   });
@@ -146,7 +148,7 @@ export function useCreateService() {
 
 export function useUpdateService() {
   const qc = useQueryClient();
-  return useMutation<ServiceRow, Error, { id: string; name?: string; durationMinutes?: number; staffIds?: string[]; isActive?: boolean }>({
+  return useMutation<ServiceRow, Error, { id: string; name?: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string | null; isActive?: boolean }>({
     mutationFn: ({ id, ...body }) => api.put(`/scheduling/services/${id}`, body).then((d) => d.data.service),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.services });
