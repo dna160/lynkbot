@@ -11,6 +11,7 @@ vi.mock('@lynkbot/db', () => ({
       buyers: { findFirst: vi.fn(), findMany: vi.fn(() => Promise.resolve([])) },
       flowExecutions: { findFirst: vi.fn(), findMany: vi.fn(() => Promise.resolve([])) },
       tenants: { findFirst: vi.fn(() => Promise.resolve({ wabaId: 'test-waba' })) },
+      tenantRiskScores: { findFirst: vi.fn(() => Promise.resolve(null)) },
     },
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
@@ -42,6 +43,7 @@ vi.mock('@lynkbot/db', () => ({
   },
   buyers: { id: 'id', activeFlowCount: 'activeFlowCount' },
   tenants: { id: 'id', wabaId: 'wabaId' },
+  tenantRiskScores: { id: 'id', tenantId: 'tenantId', score: 'score' },
   eq: vi.fn(() => 'eq'),
   and: vi.fn(() => 'and'),
   or: vi.fn(() => 'or'),

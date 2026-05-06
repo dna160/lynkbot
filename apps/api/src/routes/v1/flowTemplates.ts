@@ -11,6 +11,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db, flowTemplates, flowDefinitions, eq, and, desc, count, sql } from '@lynkbot/db';
 import { requireFeature } from '../../middleware/featureGate';
+import { checkQuota } from '../../middleware/tenantQuota';
 import { TemplateStudioService } from '../../services/templateStudio.service';
 import type { MetaTemplateComponent } from '../../services/templateStudio.service';
 
@@ -88,7 +89,7 @@ export const flowTemplateRoutes: FastifyPluginAsync = async (fastify) => {
     };
   }>(
     '/v1/flow-templates',
-    { preHandler: authAndFeature(fastify) },
+    { preHandler: [...authAndFeature(fastify), async (req: any, rep: any) => checkQuota(req.user.tenantId, 'templates')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const template = await svc.createDraft(tenantId, request.body);

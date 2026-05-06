@@ -20,6 +20,8 @@ import { AppointmentsCalendarPage } from './pages/Appointments/AppointmentsCalen
 import { StaffPage } from './pages/Staff/StaffPage';
 import { ServicesPage } from './pages/Services/ServicesPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
+import { AdminPage } from './pages/Admin/AdminPage';
+import { CompliancePage } from './pages/Compliance/CompliancePage';
 import { getTenantIdFromToken } from './lib/api';
 
 interface EBState {
@@ -108,8 +110,24 @@ function isAuthenticated(): boolean {
   return !!getTenantIdFromToken();
 }
 
+function isAdmin(): boolean {
+  const token = localStorage.getItem('lynkbot_token');
+  if (!token) return false;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.role === 'admin' || payload.role === 'admin_impersonate';
+  } catch {
+    return false;
+  }
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  if (!isAdmin()) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -136,6 +154,8 @@ export default function App() {
           <Route path="staff" element={<StaffPage />} />
           <Route path="services" element={<ServicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+          <Route path="compliance" element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
         </Route>
         {/* Canvas routes — full-bleed, no padding wrapper */}
         <Route path="/dashboard" element={<ProtectedRoute><CanvasLayout /></ProtectedRoute>}>

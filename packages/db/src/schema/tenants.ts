@@ -59,6 +59,14 @@ export const tenants = pgTable('tenants', {
   wabaQualityRating: varchar('waba_quality_rating', { length: 10 }),
   /** Last time tenant_risk_scores was computed for this tenant */
   lastRiskScoreAt: timestamp('last_risk_score_at'),
+  /** Privacy notice text shown to buyers */
+  privacyNoticeText: text('privacy_notice_text'),
+  /** Contact info for privacy inquiries */
+  contactInfo: varchar('contact_info', { length: 255 }),
+  /** Keyword buyers use to opt out */
+  optOutKeyword: varchar('opt_out_keyword', { length: 50 }),
+  /** Data retention period in days */
+  retentionDays: integer('retention_days').default(365),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

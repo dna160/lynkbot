@@ -52,6 +52,14 @@ const llmRequestsTotal = client
     })
   : null;
 
+const queueDepthGauge = client
+  ? new client.Gauge({
+      name: 'queue_depth',
+      help: 'Current depth of BullMQ queues',
+      labelNames: ['queue', 'status'],
+    })
+  : null;
+
 export const metricsPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.get('/metrics', async (_request, reply) => {
     if (client) {
@@ -76,4 +84,8 @@ export function recordFlowExecution(status: 'completed' | 'failed' | 'cancelled'
 
 export function recordLLMRequest(provider: string, status: 'success' | 'failure'): void {
   llmRequestsTotal?.inc({ provider, status });
+}
+
+export function recordQueueDepth(queue: string, status: 'waiting' | 'active' | 'completed' | 'failed', count: number): void {
+  queueDepthGauge?.set({ queue, status }, count);
 }

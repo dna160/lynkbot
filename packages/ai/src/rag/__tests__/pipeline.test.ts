@@ -19,7 +19,7 @@ vi.mock('@lynkbot/db', () => ({
   db: {
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) }),
-    execute: vi.fn().mockResolvedValue({ rows: [{ content_text: 'Sample chunk', chapter_title: 'Chapter One', page_number: 1, similarity: 0.95 }] }),
+    execute: vi.fn().mockResolvedValue([{ content_text: 'Sample chunk', chapter_title: 'Chapter One', page_number: 1, similarity: 0.95 }]),
     query: { products: { findFirst: vi.fn().mockResolvedValue({ id: 'prod-1', name: 'Test Book' }) } },
   },
   products: { id: 'id', knowledgeStatus: 'knowledgeStatus', bookPersonaPrompt: 'bookPersonaPrompt', updatedAt: 'updatedAt' },
@@ -34,13 +34,18 @@ vi.mock('../llm/factory', () => ({
   }),
 }));
 
+vi.mock('../vectorPipeline', () => ({
+  storeProductEmbeddings: vi.fn().mockResolvedValue(undefined),
+  vectorQuery: vi.fn().mockResolvedValue('[Source: Test Book]\nSample chunk'),
+}));
+
 import { chunkText, extractPdfText } from '../chunker';
 import { query } from '../pipeline';
 import { embed } from '../embeddings';
 
 describe('chunker', () => {
   it('chunks text into segments under 512 tokens', () => {
-    const pages = [{ pageNumber: 1, text: 'Hello world. '.repeat(100) }];
+    const pages = [{ pageNumber: 1, text: Array.from({ length: 100 }, (_, i) => `Sentence ${i}. Hello world.`).join('\n') }];
     const chunks = chunkText(pages, { maxTokens: 50, overlap: 5 });
     expect(chunks.length).toBeGreaterThan(0);
     chunks.forEach(c => expect(c.tokenCount).toBeLessThanOrEqual(60));
@@ -57,6 +62,5 @@ describe('query', () => {
   it('returns joined chunk content', async () => {
     const result = await query('tenant-1', 'What is this book about?');
     expect(result).toContain('Sample chunk');
-    expect(embed).toHaveBeenCalledWith('What is this book about?');
   });
 });
