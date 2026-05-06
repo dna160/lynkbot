@@ -38,8 +38,7 @@ export const orders = pgTable('orders', {
     .notNull()
     .references(() => tenants.id, { onDelete: 'restrict' }),
   buyerId: uuid('buyer_id')
-    .notNull()
-    .references(() => buyers.id, { onDelete: 'restrict' }),
+    .references(() => buyers.id, { onDelete: 'set null' }),
   conversationId: uuid('conversation_id')
     .references(() => conversations.id, { onDelete: 'set null' }),
   productId: uuid('product_id')

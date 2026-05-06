@@ -322,6 +322,7 @@ export class ConversationService {
 
   async handleLocationShare(conv: ConvRow, location: { latitude: number; longitude: number; name?: string; address?: string } | undefined): Promise<void> {
     if (!location) return;
+    if (!conv.buyerId) return; // buyer was deleted; can't look up or message them
     const validStates: ConversationStateValue[] = ['ADDRESS_COLLECTION', 'CHECKOUT_INTENT', 'LOCATION_RECEIVED'];
     if (!validStates.includes(conv.state as ConversationStateValue)) return;
 

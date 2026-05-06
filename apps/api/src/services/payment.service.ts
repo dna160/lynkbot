@@ -259,8 +259,8 @@ export class PaymentService {
         .where(eq(conversations.id, order.conversationId));
     }
 
-    // Send PAYMENT_CONFIRMED template
-    const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) });
+    // Send PAYMENT_CONFIRMED template (buyer may be null if they were deleted — skip notification)
+    const buyer = order.buyerId ? await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) }) : null;
     const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
     if (buyer && product) {
@@ -308,8 +308,8 @@ export class PaymentService {
         .where(eq(conversations.id, order.conversationId));
     }
 
-    // Send PAYMENT_EXPIRED template
-    const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) });
+    // Send PAYMENT_EXPIRED template (buyer may be null if they were deleted — skip notification)
+    const buyer = order.buyerId ? await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) }) : null;
     const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 
     if (buyer && product) {

@@ -57,8 +57,7 @@ export const conversations = pgTable('conversations', {
     .notNull()
     .references(() => tenants.id, { onDelete: 'cascade' }),
   buyerId: uuid('buyer_id')
-    .notNull()
-    .references(() => buyers.id, { onDelete: 'cascade' }),
+    .references(() => buyers.id, { onDelete: 'set null' }),
   productId: uuid('product_id')
     .references(() => products.id, { onDelete: 'set null' }),
   state: conversationStateEnum('state').notNull().default('INIT'),
