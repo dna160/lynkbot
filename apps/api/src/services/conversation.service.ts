@@ -437,13 +437,30 @@ export class ConversationService {
       return;
     }
 
+    // Load the bot's last message so the classifier can recognise context-dependent
+    // scheduling replies (e.g. "Selasa jam 14:00" after the bot offered a consultation).
+    const lastBotMsg = await db.query.messages.findFirst({
+      where: and(eq(messages.conversationId, conv.id), eq(messages.direction, 'outbound')),
+      orderBy: (m, { desc }) => desc(m.createdAt),
+    });
+    const lastBotMessage = lastBotMsg?.textContent ?? undefined;
+
     // RAG + LLM intent classification run in parallel — classification adds zero latency.
     // classifyMessageIntent loads store/product name from DB so it can correctly
     // distinguish brand questions ("What is Storytellers?") from product questions ("What is Aria?").
     const [ragContext, classifiedIntent] = await Promise.all([
       ragQuery(conv.tenantId, text).catch((): string => ''),
-      classifyMessageIntent(text, conv.tenantId).catch((): MessageIntent => 'BROWSING'),
+      classifyMessageIntent(text, conv.tenantId, lastBotMessage).catch((): MessageIntent => 'BROWSING'),
     ]);
+
+    // Scheduling intent: skip RAG response entirely — route straight to the
+    // scheduling handler so the SCHEDULING_SYSTEM_PROMPT is used (no Glow Pro
+    // contamination from unrelated RAG chunks).
+    if (classifiedIntent === 'SCHEDULING') {
+      await this.transitionState(conv.id, 'SCHEDULING');
+      await this.handleScheduling({ ...conv, state: 'SCHEDULING' }, buyer, payload);
+      return;
+    }
 
     // Transition state before responding so the correct state overlay is included
     if (classifiedIntent === 'PRODUCT_INQUIRY') {
@@ -477,11 +494,26 @@ export class ConversationService {
       return;
     }
 
+    // Load the bot's last message for scheduling context detection
+    const lastBotMsg = await db.query.messages.findFirst({
+      where: and(eq(messages.conversationId, conv.id), eq(messages.direction, 'outbound')),
+      orderBy: (m, { desc }) => desc(m.createdAt),
+    });
+    const lastBotMessage = lastBotMsg?.textContent ?? undefined;
+
     // RAG + classification in parallel
     const [ragContext, classifiedIntent] = await Promise.all([
       ragQuery(conv.tenantId, text).catch((): string => ''),
-      classifyMessageIntent(text, conv.tenantId).catch((): MessageIntent => 'PRODUCT_INQUIRY'),
+      classifyMessageIntent(text, conv.tenantId, lastBotMessage).catch((): MessageIntent => 'PRODUCT_INQUIRY'),
     ]);
+
+    // Scheduling reply from product inquiry: same bypass — route to scheduling handler
+    // so SCHEDULING_SYSTEM_PROMPT is used exclusively (no RAG contamination).
+    if (classifiedIntent === 'SCHEDULING') {
+      await this.transitionState(conv.id, 'SCHEDULING');
+      await this.handleScheduling({ ...conv, state: 'SCHEDULING' }, buyer, payload);
+      return;
+    }
 
     // If the user has moved away from a product question (e.g. asking about the
     // brand or making small talk), transition back to BROWSING so the state label
@@ -832,6 +864,13 @@ export class ConversationService {
     } catch (saveErr) {
       // Non-fatal — message was sent to WA; log so Railway surfaces any schema issues.
       console.error('[sendAiResponse] Failed to persist outbound message to DB:', saveErr);
+    }
+
+    // If the active playbook step expects the buyer to pick a schedule next,
+    // pre-transition to SCHEDULING so the buyer's NEXT message (e.g. "Selasa jam 14:00")
+    // lands directly in handleScheduling rather than going through BROWSING/RAG.
+    if (playbookResult.nextStepType === 'schedule_consultation') {
+      await this.transitionState(conv.id, 'SCHEDULING');
     }
   }
 
