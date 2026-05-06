@@ -70,16 +70,32 @@ export class SchedulingService {
     requestedDatetime?: string,
     count = 3,
   ): Promise<AvailableSlot[]> {
-    // 1. Resolve service (case-insensitive)
-    const service = await db.query.services.findFirst({
+    // 1. Resolve service — exact match first, then partial/fuzzy fallback
+    let service = await db.query.services.findFirst({
       where: and(
         eq(services.tenantId, tenantId),
         sql`lower(${services.name}) = lower(${serviceName})`,
         eq(services.isActive, true),
       ),
     });
+
     if (!service) {
-      throw new Error(`Service "${serviceName}" not found. Available services may have different names.`);
+      // Fuzzy fallback: either the DB name contains the requested term or vice versa
+      service = await db.query.services.findFirst({
+        where: and(
+          eq(services.tenantId, tenantId),
+          sql`lower(${services.name}) like lower(${'%' + serviceName + '%'}) or lower(${serviceName}) like lower(${'%' + services.name + '%'})`,
+          eq(services.isActive, true),
+        ),
+      });
+    }
+
+    if (!service) {
+      const available = await db.query.services.findMany({
+        where: and(eq(services.tenantId, tenantId), eq(services.isActive, true)),
+      });
+      const names = available.map(s => `"${s.name}"`).join(', ');
+      throw new Error(`Service "${serviceName}" not found. Available: ${names || 'none'}.`);
     }
 
     // 2. Get all active staff for this service via join

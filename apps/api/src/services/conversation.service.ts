@@ -588,9 +588,19 @@ export class ConversationService {
       history.push({ role: 'user', content: text });
     }
 
+    // Fetch active services so the LLM uses exact names instead of guessing
+    const activeServices = await this.schedulingService.listServices(conv.tenantId);
+    const serviceList = activeServices
+      .filter(s => s.isActive)
+      .map(s => `- ${s.name}`)
+      .join('\n');
+    const systemPrompt = serviceList
+      ? `${SCHEDULING_SYSTEM_PROMPT}\n\nLAYANAN TERSEDIA (gunakan nama persis ini di service_name):\n${serviceList}`
+      : SCHEDULING_SYSTEM_PROMPT;
+
     try {
       const llmResponse = await llm.chat([
-        { role: 'system', content: SCHEDULING_SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         ...history,
       ]);
 
