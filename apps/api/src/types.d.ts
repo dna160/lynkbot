@@ -12,12 +12,14 @@ declare module '@fastify/jwt' {
     payload: {
       tenantId: string;
       lynkUserId: string;
+      role?: string;
       iat?: number;
       exp?: number;
     };
     user: {
       tenantId: string;
       lynkUserId: string;
+      role?: string;
       iat?: number;
       exp?: number;
     };

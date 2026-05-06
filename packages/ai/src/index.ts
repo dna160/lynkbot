@@ -17,7 +17,7 @@ export { extractPdfText, chunkText } from './rag/chunker';
 export type { TextChunk, PageText } from './rag/chunker';
 export { retrieveTopK } from './rag/retriever';
 export type { RetrievedChunk } from './rag/retriever';
-export { ingest, query } from './rag/pipeline';
+export { storeProductEmbeddings as ingest, vectorQuery as query } from './rag/vectorPipeline';
 export { storeProductEmbeddings, vectorQuery } from './rag/vectorPipeline';
 export { buildSystemPrompt } from './prompts/system';
 export type { SystemPromptContext } from './prompts/system';

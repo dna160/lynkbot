@@ -50,7 +50,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const token = fastify.jwt.sign(
-        { tenantId: tenant!.id, lynkUserId },
+        { tenantId: tenant!.id, lynkUserId, role: 'tenant' },
         { expiresIn: '7d' }
       );
 
@@ -86,9 +86,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       const decoded = fastify.jwt.verify(parsed.data.token) as {
         tenantId: string;
         lynkUserId: string;
+        role?: string;
       };
       const newToken = fastify.jwt.sign(
-        { tenantId: decoded.tenantId, lynkUserId: decoded.lynkUserId },
+        { tenantId: decoded.tenantId, lynkUserId: decoded.lynkUserId, role: decoded.role || 'tenant' },
         { expiresIn: '7d' }
       );
       return reply.send({

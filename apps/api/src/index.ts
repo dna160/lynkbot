@@ -47,6 +47,7 @@ import { internalWabaPoolRoutes } from './routes/internal/wabaPool';
 import { internalCronRoutes } from './routes/internal/cron';
 import { adminRoutes } from './routes/internal/admin';
 import { dlqRoutes } from './routes/internal/dlq';
+import { complianceRoutes } from './routes/internal/compliance';
 import { metricsPlugin } from './plugins/metrics';
 
 // Lazy-load Sentry only when DSN is configured
@@ -138,6 +139,7 @@ async function bootstrap(): Promise<void> {
   await server.register(internalCronRoutes);
   await server.register(adminRoutes);
   await server.register(dlqRoutes);
+  await server.register(complianceRoutes);
   await server.register(metricsPlugin);
 
   // --- Sentry error handler ---

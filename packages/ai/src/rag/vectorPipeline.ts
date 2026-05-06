@@ -6,16 +6,13 @@
  *           Stores embeddings, performs cosine-similarity queries.
  *           Falls back to FTS if vector returns < 3 results.
  */
-import { db, productEmbeddings, products, eq, and, sql } from '@lynkbot/db';
-import { query as ftsQuery } from './pipeline';
+import { db, productEmbeddings, products, eq, sql } from '@lynkbot/db';
 
 // Lazy-load embedding model
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let embeddingModel: any = null;
 
 async function getEmbedding(text: string): Promise<number[]> {
-  // Use OpenAI embeddings by default (text-embedding-3-small, 1536 dims)
-  // For 768-dim, use text-embedding-3-small with dimensions param or local model
   try {
     if (!embeddingModel) {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -51,12 +48,13 @@ export async function storeProductEmbeddings(
 
   for (let i = 0; i < chunks.length; i++) {
     const embedding = await getEmbedding(chunks[i]);
+    const embeddingStr = `[${embedding.join(',')}]`;
     await db.insert(productEmbeddings).values({
       productId,
       tenantId,
       chunkIndex: i,
       chunkText: chunks[i],
-      embedding: sql`${JSON.stringify(embedding)}::vector`,
+      embedding: sql`${embeddingStr}::vector`,
     });
   }
 }
@@ -68,14 +66,17 @@ export async function storeProductEmbeddings(
 export async function vectorQuery(tenantId: string, question: string, limit = 5): Promise<string> {
   try {
     const embedding = await getEmbedding(question);
+    const embeddingStr = `[${embedding.join(',')}]`;
 
     const results = await db.execute(sql`
       SELECT pe.chunk_text, pe.product_id, p.name as product_name,
-             1 - (pe.embedding <=> ${JSON.stringify(embedding)}::vector) as similarity
+             1 - (pe.embedding <=> ${embeddingStr}::vector) as similarity
       FROM product_embeddings pe
       JOIN products p ON p.id = pe.product_id
       WHERE pe.tenant_id = ${tenantId}
-      ORDER BY pe.embedding <=> ${JSON.stringify(embedding)}::vector
+        AND p.knowledge_status = 'ready'
+        AND p.is_active = true
+      ORDER BY pe.embedding <=> ${embeddingStr}::vector
       LIMIT ${limit}
     `);
 
@@ -94,4 +95,67 @@ export async function vectorQuery(tenantId: string, question: string, limit = 5)
     console.error('[vectorPipeline] Vector query failed, falling back to FTS:', err);
     return ftsQuery(tenantId, question);
   }
+}
+
+/** Full-text search fallback using product_chunks */
+async function ftsQuery(tenantId: string, question: string): Promise<string> {
+  const queryTerms = question
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(w => w.length >= 2)
+    .map(w => w.toLowerCase());
+
+  if (queryTerms.length === 0) {
+    const fallback = await db.execute(sql`
+      SELECT pc.content_text, p.name AS product_name
+      FROM product_chunks pc
+      JOIN products p ON p.id = pc.product_id
+      WHERE pc.tenant_id = ${tenantId}
+        AND p.knowledge_status = 'ready'
+        AND p.is_active = true
+      ORDER BY p.updated_at DESC, pc.chunk_index ASC
+      LIMIT 5
+    `);
+    return formatChunks(Array.isArray(fallback) ? fallback : []);
+  }
+
+  const safeQuery = queryTerms.join(' | ');
+
+  const rows = await db.execute(sql`
+    SELECT pc.content_text, p.name AS product_name,
+           ts_rank(to_tsvector('simple', pc.content_text), to_tsquery('simple', ${safeQuery})) AS rank
+    FROM product_chunks pc
+    JOIN products p ON p.id = pc.product_id
+    WHERE pc.tenant_id = ${tenantId}
+      AND p.knowledge_status = 'ready'
+      AND p.is_active = true
+      AND to_tsvector('simple', pc.content_text) @@ to_tsquery('simple', ${safeQuery})
+    ORDER BY rank DESC
+    LIMIT 5
+  `);
+
+  const results = Array.isArray(rows) ? rows : [];
+
+  if (results.length === 0) {
+    const fallback = await db.execute(sql`
+      SELECT pc.content_text, p.name AS product_name
+      FROM product_chunks pc
+      JOIN products p ON p.id = pc.product_id
+      WHERE pc.tenant_id = ${tenantId}
+        AND p.knowledge_status = 'ready'
+        AND p.is_active = true
+      ORDER BY p.updated_at DESC, pc.chunk_index ASC
+      LIMIT 5
+    `);
+    return formatChunks(Array.isArray(fallback) ? fallback : []);
+  }
+
+  return formatChunks(results);
+}
+
+function formatChunks(rows: any[]): string {
+  return rows
+    .map(r => `[Source: ${r.product_name}]\n${r.chunk_text}`)
+    .join('\n\n---\n\n');
 }

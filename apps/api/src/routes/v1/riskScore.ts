@@ -8,6 +8,7 @@
  * Exports : riskScoreRoutes (Fastify plugin)
  */
 import type { FastifyPluginAsync } from 'fastify';
+import { requireFeature } from '../../middleware/featureGate';
 import { RiskScoreService } from '../../services/riskScore.service';
 
 const riskScoreService = new RiskScoreService();
@@ -23,7 +24,7 @@ export const riskScoreRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get(
     '/v1/risk-score',
-    { preHandler: fastify.authenticate },
+    { preHandler: [fastify.authenticate, requireFeature('risk_score')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const result = await riskScoreService.getForTenant(tenantId);
@@ -43,7 +44,7 @@ export const riskScoreRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post(
     '/v1/risk-score/compute',
-    { preHandler: fastify.authenticate },
+    { preHandler: [fastify.authenticate, requireFeature('risk_score')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const result = await riskScoreService.computeAndStore(tenantId);

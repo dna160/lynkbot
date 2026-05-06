@@ -16,6 +16,7 @@ import {
   buyers,
   tenants,
   buyerBroadcastLog,
+  tenantRiskScores,
   eq,
   and,
   or,
@@ -691,6 +692,19 @@ export class FlowEngine {
   ): Promise<void> {
     const sf = segmentFilter as SegmentFilter;
     const BATCH_SIZE = Number(process.env.BROADCAST_BATCH_SIZE ?? 500);
+
+    // Risk score gate — block broadcasts for high-risk tenants
+    const riskScore = await db.query.tenantRiskScores.findFirst({
+      where: eq(tenantRiskScores.tenantId, tenantId),
+    });
+    if (riskScore && riskScore.score > 80) {
+      console.warn(
+        `[FlowEngine] broadcastToSegment BLOCKED: tenant=${tenantId} riskScore=${riskScore.score}`,
+      );
+      throw new Error(
+        `Broadcast blocked: risk score ${riskScore.score} exceeds threshold (80). Contact support.`,
+      );
+    }
 
     // Resolve tenant for WABA rate-limit key
     const tenant = await db.query.tenants.findFirst({

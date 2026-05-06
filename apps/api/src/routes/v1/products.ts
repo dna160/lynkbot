@@ -10,6 +10,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { eq, and } from '@lynkbot/db';
 import { db, products, inventory } from '@lynkbot/db';
+import { checkQuota } from '../../middleware/tenantQuota';
 import { Queue } from 'bullmq';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { QUEUES } from '@lynkbot/shared';
@@ -19,17 +20,19 @@ import fs from 'fs/promises';
 
 const ingestQueue = new Queue(QUEUES.INGEST, { connection: getRedisConnection() });
 
-// S3 client — only used when S3_BUCKET is configured
-const s3 = config.S3_BUCKET
-  ? new S3Client({
-      region: config.S3_REGION,
-      credentials: {
-        accessKeyId: config.S3_ACCESS_KEY_ID,
-        secretAccessKey: config.S3_SECRET_ACCESS_KEY,
-      },
-      ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
-    })
-  : null;
+// S3 client — required for all PDF operations
+if (!config.S3_BUCKET) {
+  console.error('❌ S3_BUCKET is required. PDF storage via inline bytea has been removed.');
+}
+
+const s3 = new S3Client({
+  region: config.S3_REGION,
+  credentials: {
+    accessKeyId: config.S3_ACCESS_KEY_ID,
+    secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+  },
+  ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
+});
 
 const createProductSchema = z.object({
   name: z.string().min(1).max(255),
@@ -71,7 +74,7 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post(
     '/v1/products',
-    { preHandler: fastify.authenticate },
+    { preHandler: [fastify.authenticate, async (req: any, rep: any) => checkQuota(req.user.tenantId, 'products')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const parsed = createProductSchema.safeParse(request.body);
@@ -195,47 +198,26 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
       const data = await request.file();
       if (!data) return reply.status(400).send({ error: 'No file uploaded' });
 
-      const fileBuffer = await data.toBuffer();
-      let s3Key: string;
-      let storage: 'local' | 's3';
-
-      if (s3 && config.S3_BUCKET) {
-        // Upload to S3
-        s3Key = `tenants/${tenantId}/products/${id}/pdf.pdf`;
-        const command = new PutObjectCommand({
-          Bucket: config.S3_BUCKET,
-          Key: s3Key,
-          ContentType: 'application/pdf',
-          Body: fileBuffer,
-        });
-        await s3.send(command);
-        storage = 's3';
-
-        await db.update(products)
-          .set({ pdfS3Key: s3Key, updatedAt: new Date() })
-          .where(eq(products.id, id));
-      } else {
-        // No S3 — persist raw PDF bytes in the products table (pdf_bytes column)
-        // so any future re-train can read them without requiring a re-upload.
-        // The worker is a separate Railway container and cannot access the API's disk.
-        s3Key = `inline://${id}`;
-        storage = 'local';
-
-        await db.update(products)
-          .set({ pdfS3Key: s3Key, pdfBytes: fileBuffer, knowledgeStatus: 'processing', updatedAt: new Date() })
-          .where(eq(products.id, id));
-
-        // Enqueue with base64-encoded PDF — worker reads from job data
-        await ingestQueue.add('ingest-product', {
-          productId: id,
-          tenantId,
-          pdfBase64: fileBuffer.toString('base64'),
-        });
-
-        return reply.send({ s3Key, storage, ingestQueued: true });
+      if (!config.S3_BUCKET) {
+        return reply.status(503).send({ error: 'S3 storage is required. Please configure S3_BUCKET.' });
       }
 
-      return reply.send({ s3Key, storage });
+      const fileBuffer = await data.toBuffer();
+      const s3Key = `tenants/${tenantId}/products/${id}/pdf.pdf`;
+
+      const command = new PutObjectCommand({
+        Bucket: config.S3_BUCKET,
+        Key: s3Key,
+        ContentType: 'application/pdf',
+        Body: fileBuffer,
+      });
+      await s3.send(command);
+
+      await db.update(products)
+        .set({ pdfS3Key: s3Key, pdfUploadedAt: new Date(), updatedAt: new Date() })
+        .where(eq(products.id, id));
+
+      return reply.send({ s3Key, storage: 's3' });
     },
   );
 
@@ -258,29 +240,10 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(422).send({ error: 'No PDF uploaded for this product' });
       }
 
-      // Inline mode: PDF bytes stored in DB — pass them directly so the worker
-      // never needs S3. If bytes are missing (uploaded before migration), ask for re-upload.
-      if (product.pdfS3Key.startsWith('inline://')) {
-        if (!product.pdfBytes) {
-          return reply.status(422).send({
-            error: 'PDF bytes not found. Please re-upload the PDF to retrain.',
-          });
-        }
-
-        await db.update(products)
-          .set({ knowledgeStatus: 'processing', updatedAt: new Date() })
-          .where(eq(products.id, id));
-
-        await ingestQueue.add('ingest-product', {
-          productId: id,
-          tenantId,
-          pdfBase64: (product.pdfBytes as Buffer).toString('base64'),
-        });
-
-        return reply.status(202).send({ message: 'Ingest job enqueued', productId: id });
+      if (!product.pdfS3Key) {
+        return reply.status(422).send({ error: 'No PDF uploaded for this product' });
       }
 
-      // S3 mode: worker downloads from S3 using the stored key
       await db.update(products)
         .set({ knowledgeStatus: 'processing', updatedAt: new Date() })
         .where(eq(products.id, id));
