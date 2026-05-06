@@ -589,14 +589,18 @@ export class ConversationService {
     }
 
     // Fetch active services so the LLM uses exact names instead of guessing
-    const activeServices = await this.schedulingService.listServices(conv.tenantId);
-    const serviceList = activeServices
-      .filter(s => s.isActive)
-      .map(s => `- ${s.name}`)
-      .join('\n');
-    const systemPrompt = serviceList
-      ? `${SCHEDULING_SYSTEM_PROMPT}\n\nLAYANAN TERSEDIA (gunakan nama persis ini di service_name):\n${serviceList}`
-      : SCHEDULING_SYSTEM_PROMPT;
+    const allServices = await this.schedulingService.listServices(conv.tenantId);
+    const activeServices = allServices.filter(s => s.isActive);
+
+    if (activeServices.length === 0) {
+      await this.sendAndRecord(conv, buyer.waPhone,
+        'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung untuk membuat janji. 🙏',
+      );
+      return;
+    }
+
+    const serviceList = activeServices.map(s => `- ${s.name}`).join('\n');
+    const systemPrompt = `${SCHEDULING_SYSTEM_PROMPT}\n\nLAYANAN TERSEDIA (gunakan nama persis ini di service_name):\n${serviceList}`;
 
     try {
       const llmResponse = await llm.chat([
