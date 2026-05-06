@@ -215,18 +215,17 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
           .set({ pdfS3Key: s3Key, updatedAt: new Date() })
           .where(eq(products.id, id));
       } else {
-        // No S3 — store a placeholder key so the product record is updated,
-        // then pass the raw PDF bytes in the job payload.
-        // The worker (separate container) cannot access the API's local disk,
-        // so we never write to disk at all.
+        // No S3 — persist raw PDF bytes in the products table (pdf_bytes column)
+        // so any future re-train can read them without requiring a re-upload.
+        // The worker is a separate Railway container and cannot access the API's disk.
         s3Key = `inline://${id}`;
         storage = 'local';
 
         await db.update(products)
-          .set({ pdfS3Key: s3Key, knowledgeStatus: 'processing', updatedAt: new Date() })
+          .set({ pdfS3Key: s3Key, pdfBytes: fileBuffer, knowledgeStatus: 'processing', updatedAt: new Date() })
           .where(eq(products.id, id));
 
-        // Enqueue immediately with base64-encoded PDF — worker reads from job data
+        // Enqueue with base64-encoded PDF — worker reads from job data
         await ingestQueue.add('ingest-product', {
           productId: id,
           tenantId,
@@ -259,6 +258,29 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(422).send({ error: 'No PDF uploaded for this product' });
       }
 
+      // Inline mode: PDF bytes stored in DB — pass them directly so the worker
+      // never needs S3. If bytes are missing (uploaded before migration), ask for re-upload.
+      if (product.pdfS3Key.startsWith('inline://')) {
+        if (!product.pdfBytes) {
+          return reply.status(422).send({
+            error: 'PDF bytes not found. Please re-upload the PDF to retrain.',
+          });
+        }
+
+        await db.update(products)
+          .set({ knowledgeStatus: 'processing', updatedAt: new Date() })
+          .where(eq(products.id, id));
+
+        await ingestQueue.add('ingest-product', {
+          productId: id,
+          tenantId,
+          pdfBase64: (product.pdfBytes as Buffer).toString('base64'),
+        });
+
+        return reply.status(202).send({ message: 'Ingest job enqueued', productId: id });
+      }
+
+      // S3 mode: worker downloads from S3 using the stored key
       await db.update(products)
         .set({ knowledgeStatus: 'processing', updatedAt: new Date() })
         .where(eq(products.id, id));
@@ -266,7 +288,6 @@ export const productRoutes: FastifyPluginAsync = async (fastify) => {
       await ingestQueue.add('ingest-product', {
         productId: id,
         tenantId,
-        s3Key: product.pdfS3Key,
       });
 
       return reply.status(202).send({ message: 'Ingest job enqueued', productId: id });

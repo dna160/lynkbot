@@ -76,9 +76,15 @@ export const ingestProcessor: Processor = async (job) => {
       job.log(`[2/6] Reading PDF from local disk: ${localPath}`);
       pdfBuffer = await withTimeout(readFile(localPath), 30_000, 'local file read');
     } else if (product.pdfS3Key) {
+      if (!process.env.S3_BUCKET) {
+        throw new Error(
+          `Product ${productId} has pdfS3Key="${product.pdfS3Key}" but S3_BUCKET env var is not set. ` +
+          `Re-upload the PDF from the dashboard to refresh the stored bytes.`
+        );
+      }
       job.log(`[2/6] Downloading PDF from S3 key=${product.pdfS3Key}`);
       const s3Response = await withTimeout(
-        s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: product.pdfS3Key })),
+        s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET, Key: product.pdfS3Key })),
         60_000, 'S3 download'
       );
       if (!s3Response.Body) throw new Error('S3 returned empty body');

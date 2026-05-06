@@ -17,7 +17,15 @@ import {
   jsonb,
   integer,
   boolean,
+  customType,
 } from 'drizzle-orm/pg-core';
+
+/** Native Postgres bytea column — maps to Node.js Buffer. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() { return 'bytea'; },
+  toDriver(value) { return value; },
+  fromDriver(value) { return Buffer.isBuffer(value) ? value : Buffer.from(value as unknown as Uint8Array); },
+});
 import { tenants } from './tenants';
 
 export const knowledgeStatusEnum = pgEnum('knowledge_status', [
@@ -46,6 +54,8 @@ export const products = pgTable('products', {
   dimensionsCm: jsonb('dimensions_cm').$type<{ l: number; w: number; h: number }>(),
   coverImageUrl: text('cover_image_url'),
   pdfS3Key: text('pdf_s3_key'),
+  /** Raw PDF bytes stored when S3 is not configured (inline mode). Enables re-training without re-upload. */
+  pdfBytes: bytea('pdf_bytes'),
   knowledgeStatus: knowledgeStatusEnum('knowledge_status').default('pending'),
   knowledgeError: text('knowledge_error'),
   bookPersonaPrompt: text('book_persona_prompt'),
