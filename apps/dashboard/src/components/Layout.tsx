@@ -5,7 +5,7 @@ export function Layout() {
   return (
     <div className="min-h-screen bg-bg text-primary font-sans">
       <Sidebar />
-      <main className="ml-60 min-h-screen">
+      <main className="ml-56 min-h-screen">
         <div className="max-w-[1280px] mx-auto px-8 py-8">
           <Outlet />
         </div>

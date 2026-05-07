@@ -10,7 +10,7 @@ export function CanvasLayout() {
   return (
     <div className="h-screen overflow-hidden bg-bg text-primary font-sans flex">
       <Sidebar />
-      <main className="ml-60 flex-1 overflow-hidden h-full">
+      <main className="ml-56 flex-1 overflow-hidden h-full">
         <Outlet />
       </main>
     </div>
