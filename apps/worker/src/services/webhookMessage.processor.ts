@@ -7,10 +7,10 @@
  *           so the worker does not need to import from apps/*.
  */
 import { createDecipheriv } from 'node:crypto';
-import { db, buyers, conversations, messages, tenants, flowExecutions, staff, appointments, products, intentPlaybooks, eq, and, or, not, sql } from '@lynkbot/db';
+import { db, buyers, conversations, messages, tenants, flowExecutions, staff, appointments, products, intentPlaybooks, services, serviceStaff, staffAvailability, eq, and, or, not, sql } from '@lynkbot/db';
 import { MetaClient, extractFirstMessage, isStatusUpdate, extractText, extractMessageId } from '@lynkbot/meta';
 import { FlowEngine } from '@lynkbot/flow-engine';
-import { getLLMClient, query as ragQuery, formatWIBDatetime, classifyMessageIntent, buildSystemPrompt, STATE_PROMPTS } from '@lynkbot/ai';
+import { getLLMClient, query as ragQuery, formatWIBDatetime, classifyMessageIntent, buildSystemPrompt, STATE_PROMPTS, SCHEDULING_SYSTEM_PROMPT, parseSchedulingEnvelope } from '@lynkbot/ai';
 import type { MessageIntent } from '@lynkbot/ai';
 import { STAFF_CONFIRMATION_KEYWORDS, STAFF_REJECTION_KEYWORDS, BOOKING_INTENT_KEYWORDS } from '@lynkbot/shared';
 import Redis from 'ioredis';
@@ -77,6 +77,178 @@ const AGENT_KEYWORDS = ['agent', 'human', 'orang', 'cs', 'customer service', 'ba
 
 function isWithin24HourWindow(lastMessageAt: Date): boolean {
   return Date.now() - lastMessageAt.getTime() < 24 * 60 * 60 * 1000;
+}
+
+// ── Scheduling constants (mirrors scheduling.service.ts) ─────────────────────
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+const SLOT_LOOKAHEAD_DAYS = parseInt(process.env.BOOKING_SLOT_LOOKAHEAD_DAYS ?? '14', 10);
+const MIN_LEAD_TIME_HOURS = parseInt(process.env.BOOKING_MIN_LEAD_TIME_HOURS ?? '1', 10);
+
+function parseHHMM(hhmm: string): [number, number] {
+  const [h, m] = hhmm.split(':').map(Number);
+  return [h ?? 0, m ?? 0];
+}
+
+function wibDateString(utcDate: Date): string {
+  const wib = new Date(utcDate.getTime() + WIB_OFFSET_MS);
+  return wib.toISOString().slice(0, 10);
+}
+
+async function isSlotAvailable(staffId: string, start: Date, end: Date): Promise<boolean> {
+  const conflicts = await db
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.staffId, staffId),
+        or(eq(appointments.status, 'pending_doctor'), eq(appointments.status, 'confirmed')),
+        sql`${appointments.startTime} < ${end.toISOString()}::timestamptz`,
+        sql`${appointments.endTime} > ${start.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1);
+  return conflicts.length === 0;
+}
+
+interface AvailableSlot {
+  start: Date;
+  end: Date;
+  staffId: string;
+  staffName: string;
+  serviceId: string;
+  durationMinutes: number;
+}
+
+async function getAvailableSlots(
+  tenantId: string,
+  serviceName: string,
+  requestedDatetime?: string,
+  count = 3,
+): Promise<AvailableSlot[]> {
+  let service = await db.query.services.findFirst({
+    where: and(
+      eq(services.tenantId, tenantId),
+      sql`lower(${services.name}) = lower(${serviceName})`,
+      eq(services.isActive, true),
+    ),
+  });
+
+  if (!service) {
+    service = await db.query.services.findFirst({
+      where: and(
+        eq(services.tenantId, tenantId),
+        sql`lower(${services.name}) like lower(${'%' + serviceName + '%'}) or lower(${serviceName}) like lower(${'%' + services.name + '%'})`,
+        eq(services.isActive, true),
+      ),
+    });
+  }
+
+  if (!service) {
+    const available = await db.query.services.findMany({
+      where: and(eq(services.tenantId, tenantId), eq(services.isActive, true)),
+    });
+    const names = available.map(s => `"${s.name}"`).join(', ');
+    throw new Error(`Service "${serviceName}" not found. Available: ${names || 'none'}.`);
+  }
+
+  const staffLinks = await db
+    .select({ staffId: serviceStaff.staffId })
+    .from(serviceStaff)
+    .innerJoin(staff, eq(staff.id, serviceStaff.staffId))
+    .where(and(eq(serviceStaff.serviceId, service.id), eq(staff.isActive, true)));
+
+  if (staffLinks.length === 0) {
+    throw new Error(`No active staff assigned to service "${serviceName}".`);
+  }
+
+  const staffIds = staffLinks.map(l => l.staffId);
+  const staffRows = await db.query.staff.findMany({
+    where: and(
+      eq(staff.tenantId, tenantId),
+      eq(staff.isActive, true),
+      sql`${staff.id} = ANY(ARRAY[${sql.join(staffIds.map(id => sql`${id}::uuid`), sql`, `)}])`,
+    ),
+  });
+  const availRows = await db.query.staffAvailability.findMany({
+    where: sql`${staffAvailability.staffId} = ANY(ARRAY[${sql.join(staffIds.map(id => sql`${id}::uuid`), sql`, `)}])`,
+  });
+
+  const now = new Date();
+  const minStart = new Date(now.getTime() + MIN_LEAD_TIME_HOURS * 3600 * 1000);
+  const maxEnd = new Date(now.getTime() + SLOT_LOOKAHEAD_DAYS * 86400 * 1000);
+  const durationMs = service.durationMinutes * 60 * 1000;
+
+  const freeSlots: AvailableSlot[] = [];
+
+  for (const staffRow of staffRows.sort((a, b) => a.name.localeCompare(b.name))) {
+    const myAvail = availRows.filter(r => r.staffId === staffRow.id);
+    const cursor = new Date(minStart);
+    cursor.setUTCHours(0, 0, 0, 0);
+
+    while (cursor <= maxEnd) {
+      const wibDay = new Date(cursor.getTime() + WIB_OFFSET_MS);
+      const dayOfWeek = wibDay.getUTCDay();
+      const dayAvail = myAvail.filter(a => a.dayOfWeek === dayOfWeek);
+
+      for (const avail of dayAvail) {
+        const [sh, sm] = parseHHMM(avail.startTime);
+        const [eh, em] = parseHHMM(avail.endTime);
+
+        let slotStart = new Date(Date.UTC(
+          wibDay.getUTCFullYear(), wibDay.getUTCMonth(), wibDay.getUTCDate(),
+          sh - 7, sm,
+        ));
+        const dayEndUTC = new Date(Date.UTC(
+          wibDay.getUTCFullYear(), wibDay.getUTCMonth(), wibDay.getUTCDate(),
+          eh - 7, em,
+        ));
+
+        while (slotStart < dayEndUTC) {
+          const slotEnd = new Date(slotStart.getTime() + durationMs);
+          if (slotEnd > dayEndUTC) break;
+          if (slotStart >= minStart) {
+            const available = await isSlotAvailable(staffRow.id, slotStart, slotEnd);
+            if (available) {
+              freeSlots.push({
+                start: new Date(slotStart),
+                end: new Date(slotEnd),
+                staffId: staffRow.id,
+                staffName: staffRow.name,
+                serviceId: service.id,
+                durationMinutes: service.durationMinutes,
+              });
+            }
+          }
+          slotStart = new Date(slotStart.getTime() + durationMs);
+        }
+      }
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
+
+  freeSlots.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  if (requestedDatetime) {
+    const reqDate = new Date(requestedDatetime);
+    const exact = freeSlots.find(s => s.start.getTime() === reqDate.getTime());
+    if (exact) return [exact];
+    freeSlots.sort((a, b) =>
+      Math.abs(a.start.getTime() - reqDate.getTime()) - Math.abs(b.start.getTime() - reqDate.getTime())
+    );
+    return freeSlots.slice(0, 1);
+  }
+
+  const result: AvailableSlot[] = [];
+  const seenDates = new Set<string>();
+  for (const slot of freeSlots) {
+    const dateStr = wibDateString(slot.start);
+    if (!seenDates.has(dateStr)) {
+      seenDates.add(dateStr);
+      result.push(slot);
+      if (result.length >= count) break;
+    }
+  }
+  return result;
 }
 
 function detectBookingIntent(text: string): boolean {
@@ -466,6 +638,12 @@ async function handleInboundConversation(
 
   // ── State routing with intent classification & playbook injection ───────────
 
+  // Already in scheduling flow — bypass intent classification entirely
+  if (conv.state === 'SCHEDULING' || conv.state === 'SCHEDULING_CONFIRMED') {
+    await handleSchedulingBuyerMessage(tenantId, conv, buyer, text);
+    return;
+  }
+
   if (conv.state === 'INIT') {
     await db.update(conversations).set({ state: 'GREETING' }).where(eq(conversations.id, conv.id));
     conv = { ...conv, state: 'GREETING' };
@@ -491,19 +669,12 @@ async function handleInboundConversation(
 
   console.log(`[webhookProcessor] buyer=${buyer.id} conv=${conv.id} state=${conv.state} intent=${classifiedIntent} ragLen=${ragContext.length}`);
 
-  // Booking / scheduling intent detection
+  // Booking / scheduling intent — transition to SCHEDULING and use the proper scheduling system
   const isBookingKeyword = detectBookingIntent(text);
   if (isBookingKeyword || classifiedIntent === 'SCHEDULING') {
-    const wasAlreadyScheduling = conv.state === 'SCHEDULING';
     await db.update(conversations).set({ state: 'SCHEDULING', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
-
-    // Playbook activates ONLY after buyer has already provided a time/date
-    // (i.e. conversation was already in SCHEDULING state). On the first
-    // scheduling message we collect the date/time without the playbook so
-    // staff confirmation later includes the actual slot.
-    const intentForPlaybook = wasAlreadyScheduling ? ('SCHEDULING' as MessageIntent) : undefined;
-    console.log(`[webhookProcessor] buyer=${buyer.id} scheduling detected wasAlreadyScheduling=${wasAlreadyScheduling} intentForPlaybook=${intentForPlaybook ?? 'none'}`);
-    await sendAiResponse(tenantId, { ...conv, state: 'SCHEDULING' }, buyer, text, ragContext || undefined, intentForPlaybook);
+    console.log(`[webhookProcessor] buyer=${buyer.id} scheduling detected — transitioning to SCHEDULING`);
+    await handleSchedulingBuyerMessage(tenantId, { ...conv, state: 'SCHEDULING' }, buyer, text);
     return;
   }
 
@@ -602,6 +773,220 @@ async function handleStaffKeywordReply(tenantId: string, staffId: string, staffP
 
   if (!pending) return;
   await handleStaffButtonReply(tenantId, pending.id, isConfirm);
+}
+
+// ── Scheduling envelope executor (mirrors SchedulingService.handleLLMEnvelope) ─
+
+async function executeSchedulingEnvelope(
+  tenantId: string,
+  conv: any,
+  buyer: any,
+  envelope: { action: string; service_name?: string; requested_datetime?: string; staff_id?: string; service_id?: string; start_time?: string; previous_appointment_id?: string },
+): Promise<string> {
+  if (envelope.action === 'check_availability') {
+    try {
+      const slots = await getAvailableSlots(tenantId, envelope.service_name ?? '', envelope.requested_datetime);
+      if (slots.length === 0) {
+        return 'Maaf, tidak ada jadwal yang tersedia dalam 14 hari ke depan untuk layanan ini. Coba hubungi kami langsung ya.';
+      }
+      const lines = slots.map((s, i) => {
+        const label = ['1️⃣', '2️⃣', '3️⃣'][i] ?? `${i + 1}.`;
+        return `${label} *${formatWIBDatetime(s.start, s.end)}* — ${s.staffName}`;
+      });
+      return `Berikut jadwal yang tersedia:\n\n${lines.join('\n')}\n\nPilih nomor berapa, Kak? 😊`;
+    } catch (err: any) {
+      return err?.message ?? 'Maaf, gagal cek jadwal. Coba lagi ya.';
+    }
+  }
+
+  if (envelope.action === 'confirm_booking') {
+    if (!envelope.staff_id || !envelope.service_id || !envelope.start_time) {
+      return 'Terjadi kesalahan saat memproses booking. Coba ulangi pilihan jadwal kamu.';
+    }
+
+    const startTime = new Date(envelope.start_time);
+    const serviceRow = await db.query.services.findFirst({ where: eq(services.id, envelope.service_id) });
+    const durationMs = (serviceRow?.durationMinutes ?? 60) * 60 * 1000;
+    const endTime = new Date(startTime.getTime() + durationMs);
+
+    const [appt] = await db.insert(appointments).values({
+      tenantId,
+      buyerId: buyer.id,
+      staffId: envelope.staff_id,
+      serviceId: envelope.service_id,
+      startTime,
+      endTime,
+      status: 'pending_doctor',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning();
+
+    const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, envelope.staff_id) });
+    let notifyStaff = slotStaff;
+
+    // playbookOverride 'staff:<uuid>' routes confirmation to a different staff member
+    if (conv.playbookOverride?.startsWith('staff:')) {
+      const overrideId = conv.playbookOverride.slice('staff:'.length);
+      const overrideStaff = await db.query.staff.findFirst({
+        where: and(eq(staff.id, overrideId), eq(staff.tenantId, tenantId)),
+      });
+      if (overrideStaff) notifyStaff = overrideStaff;
+    }
+
+    if (notifyStaff && serviceRow && appt) {
+      const timeDisplay = formatWIBDatetime(appt.startTime, appt.endTime);
+      const staffMsg = `📅 Ada permintaan appointment baru!\n\n*Pasien:* ${buyer.displayName ?? 'Pelanggan'}\n*Layanan:* ${serviceRow.name}\n*Waktu:* ${timeDisplay}\n\nBalas *Konfirmasi* untuk menerima atau *Tolak* untuk menolak.`;
+      await sendText(tenantId, notifyStaff.phoneNumber, staffMsg).catch(() => null);
+    }
+
+    await db.update(conversations)
+      .set({ state: 'SCHEDULING_CONFIRMED' as any, lastMessageAt: new Date() })
+      .where(eq(conversations.id, conv.id));
+
+    return `Baik, permintaan appointment *${serviceRow?.name ?? ''}* sudah kami kirim ke ${notifyStaff?.name ?? 'staf'}. Tunggu konfirmasinya ya, Kak 🙏\n\nKamu akan dapat notifikasi begitu dikonfirmasi.`;
+  }
+
+  if (envelope.action === 'reschedule_booking') {
+    if (!envelope.previous_appointment_id || !envelope.requested_datetime) {
+      return 'Terjadi kesalahan saat memproses perubahan jadwal. Coba ulangi ya.';
+    }
+
+    const oldAppt = await db.query.appointments.findFirst({
+      where: and(eq(appointments.id, envelope.previous_appointment_id), eq(appointments.tenantId, tenantId)),
+    });
+    if (!oldAppt) return 'Appointment tidak ditemukan. Silakan mulai booking baru.';
+
+    const newStartTime = new Date(envelope.requested_datetime);
+    const serviceRow = await db.query.services.findFirst({ where: eq(services.id, oldAppt.serviceId) });
+    const durationMs = (serviceRow?.durationMinutes ?? 60) * 60 * 1000;
+    const newEndTime = new Date(newStartTime.getTime() + durationMs);
+
+    const [newAppt] = await db.insert(appointments).values({
+      tenantId,
+      buyerId: buyer.id,
+      staffId: oldAppt.staffId,
+      serviceId: oldAppt.serviceId,
+      startTime: newStartTime,
+      endTime: newEndTime,
+      status: 'rescheduling_requested' as any,
+      previousAppointmentId: oldAppt.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning();
+
+    const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, oldAppt.staffId) });
+    let notifyStaff = slotStaff;
+    if (conv.playbookOverride?.startsWith('staff:')) {
+      const overrideId = conv.playbookOverride.slice('staff:'.length);
+      const overrideStaff = await db.query.staff.findFirst({
+        where: and(eq(staff.id, overrideId), eq(staff.tenantId, tenantId)),
+      });
+      if (overrideStaff) notifyStaff = overrideStaff;
+    }
+
+    if (notifyStaff && newAppt) {
+      const oldTimeDisplay = formatWIBDatetime(oldAppt.startTime, oldAppt.endTime);
+      const newTimeDisplay = formatWIBDatetime(newAppt.startTime, newAppt.endTime);
+      const staffMsg = `🔄 Permintaan reschedule!\n\n*Pasien:* ${buyer.displayName ?? 'Pelanggan'}\n*Layanan:* ${serviceRow?.name ?? ''}\n*Dari:* ${oldTimeDisplay}\n*Ke:* ${newTimeDisplay}\n\nBalas *Konfirmasi* untuk menyetujui atau *Tolak* untuk menolak.`;
+      await sendText(tenantId, notifyStaff.phoneNumber, staffMsg).catch(() => null);
+    }
+
+    return `Permintaan reschedule sudah dikirim! Dari ${formatWIBDatetime(oldAppt.startTime)} ke ${formatWIBDatetime(newStartTime, newEndTime)}. Tunggu konfirmasi dari staf ya 🙏`;
+  }
+
+  return 'Maaf, terjadi kesalahan. Coba lagi ya.';
+}
+
+// ── Proper scheduling handler (replaces sendAiResponse for SCHEDULING state) ──
+
+async function handleSchedulingBuyerMessage(
+  tenantId: string,
+  conv: any,
+  buyer: any,
+  text: string,
+): Promise<void> {
+  if (!isWithin24HourWindow(conv.lastMessageAt)) return;
+
+  const llm = getLLMClient();
+
+  // Build conversation history (last 10 messages, oldest first)
+  const recentMessages = await db.query.messages.findMany({
+    where: eq(messages.conversationId, conv.id),
+    orderBy: (m, { desc }) => [desc(m.createdAt)],
+    limit: 10,
+  });
+
+  const history = recentMessages
+    .reverse()
+    .map(m => ({
+      role: m.direction === 'inbound' ? ('user' as const) : ('assistant' as const),
+      content: m.textContent ?? '',
+    }))
+    .filter(m => m.content.length > 0);
+
+  if (!history.length || history[history.length - 1].role !== 'user') {
+    history.push({ role: 'user', content: text });
+  }
+
+  // Fetch active services so LLM uses exact names in service_name field
+  const activeServices = await db.query.services.findMany({
+    where: and(eq(services.tenantId, tenantId), eq(services.isActive, true)),
+  });
+
+  if (activeServices.length === 0) {
+    await sendText(tenantId, buyer.waPhone, 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung untuk membuat janji. 🙏');
+    return;
+  }
+
+  const serviceList = activeServices.map(s => `- ${s.name}`).join('\n');
+  const systemPrompt = `${SCHEDULING_SYSTEM_PROMPT}\n\nLAYANAN TERSEDIA (gunakan nama persis ini di service_name):\n${serviceList}`;
+
+  let responseText: string;
+  try {
+    const llmResponse = await llm.chat([
+      { role: 'system', content: systemPrompt },
+      ...history,
+    ]);
+    responseText = llmResponse.content.trim();
+  } catch (err) {
+    console.error('[webhookProcessor] Scheduling LLM call failed:', err);
+    await sendText(tenantId, buyer.waPhone, 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.');
+    return;
+  }
+
+  const envelope = parseSchedulingEnvelope(responseText);
+  let replyText: string;
+
+  if (envelope) {
+    console.log(`[webhookProcessor] scheduling envelope action=${envelope.action} conv=${conv.id}`);
+    replyText = await executeSchedulingEnvelope(tenantId, conv, buyer, envelope);
+  } else {
+    replyText = responseText;
+  }
+
+  // Send reply to buyer
+  try {
+    const meta = await getTenantMetaClient(tenantId);
+    await meta.sendText({ to: buyer.waPhone, message: replyText, isWithin24hrWindow: true });
+  } catch (err) {
+    console.error('[webhookProcessor] handleSchedulingBuyerMessage send failed:', err);
+    return;
+  }
+
+  // Persist outbound message
+  try {
+    await db.insert(messages).values({
+      conversationId: conv.id,
+      tenantId,
+      direction: 'outbound',
+      messageType: 'text',
+      textContent: replyText,
+      createdAt: new Date(),
+    });
+    await db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+  } catch (err) {
+    console.error('[webhookProcessor] handleSchedulingBuyerMessage persist failed:', err);
+  }
 }
 
 async function sendText(tenantId: string, to: string, message: string): Promise<void> {
