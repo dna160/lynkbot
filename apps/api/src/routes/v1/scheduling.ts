@@ -33,7 +33,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
   // ──────────────────────────────────────────────────────────────────────────
 
   /** GET /v1/scheduling/staff — list all staff for tenant */
-  fastify.get('/v1/scheduling/staff', { preHandler: authAndFeature(fastify) }, async (request, reply) => {
+  fastify.get('/v1/scheduling/staff', { preHandler: fastify.authenticate }, async (request, reply) => {
     const { tenantId } = request.user;
     const staff = await svc.listStaff(tenantId);
     return reply.send({ staff });
@@ -42,7 +42,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
   /** POST /v1/scheduling/staff — create new staff member */
   fastify.post<{ Body: Record<string, unknown> }>(
     '/v1/scheduling/staff',
-    { preHandler: [...authAndFeature(fastify), async (req: any, rep: any) => checkQuota(req.user.tenantId, 'staff')] },
+    { preHandler: [fastify.authenticate, async (req: any, rep: any) => checkQuota(req.user.tenantId, 'staff')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { name, phoneNumber, role, isActive } = request.body;
@@ -73,7 +73,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
   /** PUT /v1/scheduling/staff/:id — update staff member */
   fastify.put<{ Params: { id: string }; Body: Record<string, unknown> }>(
     '/v1/scheduling/staff/:id',
-    { preHandler: authAndFeature(fastify) },
+    { preHandler: fastify.authenticate },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
@@ -106,7 +106,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
     Body: { slots: { dayOfWeek: number; startTime: string; endTime: string }[] };
   }>(
     '/v1/scheduling/staff/:id/availability',
-    { preHandler: authAndFeature(fastify) },
+    { preHandler: fastify.authenticate },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { id } = request.params;
