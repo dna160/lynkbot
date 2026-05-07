@@ -14,6 +14,8 @@ import Drawflow from 'drawflow';
 import 'drawflow/dist/drawflow.min.css';
 import { flowsApi, aiApi, api } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
+import { useStaff } from '@/hooks/useScheduling';
+import { useIntentPlaybooks, INTENT_KEY_LABELS, type IntentKey } from '@/hooks/useIntentPlaybooks';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,7 +23,7 @@ type NodeType =
   | 'TRIGGER' | 'SEND_TEMPLATE' | 'SEND_TEXT' | 'SEND_INTERACTIVE'
   | 'DELAY' | 'WAIT_FOR_REPLY' | 'IF_CONDITION' | 'KEYWORD_ROUTER'
   | 'TAG_BUYER' | 'UPDATE_BUYER' | 'SEGMENT_QUALITY_GATE' | 'END_FLOW'
-  | 'AGENT';
+  | 'START_SCHEDULING' | 'ACTIVATE_PLAYBOOK' | 'AGENT';
 
 interface FlowNode {
   id: string;
@@ -57,7 +59,7 @@ interface NodePaletteEntry {
   icon: string;
   color: string;
   description: string;
-  category: 'trigger' | 'message' | 'logic' | 'action' | 'control';
+  category: 'trigger' | 'message' | 'logic' | 'action' | 'control' | 'handoff';
 }
 
 // ── Node Palette Config ───────────────────────────────────────────────────────
@@ -73,9 +75,11 @@ const PALETTE_NODES: NodePaletteEntry[] = [
   { type: 'KEYWORD_ROUTER',       label: 'Keyword Router',  icon: '🗝',  color: '#10B981', description: 'Route by keyword match',      category: 'logic'    },
   { type: 'TAG_BUYER',            label: 'Tag Buyer',       icon: '🏷',  color: '#EC4899', description: 'Add or remove a tag',        category: 'action'   },
   { type: 'UPDATE_BUYER',         label: 'Update Buyer',    icon: '✏️', color: '#EC4899', description: 'Update buyer profile field',  category: 'action'   },
-  { type: 'SEGMENT_QUALITY_GATE', label: 'Quality Gate',    icon: '🛡',  color: '#EF4444', description: 'Filter low-quality contacts', category: 'logic'    },
-  { type: 'END_FLOW',             label: 'End Flow',        icon: '🔚', color: '#64748B', description: 'Terminate the flow',          category: 'control'  },
-  { type: 'AGENT',               label: 'Agent',           icon: '🤖', color: '#6366F1', description: 'AI agent with booking tools',  category: 'action'   },
+  { type: 'SEGMENT_QUALITY_GATE', label: 'Quality Gate',     icon: '🛡',  color: '#EF4444', description: 'Filter low-quality contacts',        category: 'logic'    },
+  { type: 'END_FLOW',             label: 'End Flow',         icon: '🔚', color: '#64748B', description: 'Terminate the flow',                 category: 'control'  },
+  { type: 'START_SCHEDULING',     label: 'Start Scheduling', icon: '📅', color: '#0EA5E9', description: 'Hand off to the scheduling system',  category: 'handoff'  },
+  { type: 'ACTIVATE_PLAYBOOK',    label: 'Activate Playbook',icon: '🤖', color: '#A855F7', description: 'Use a specific AI Playbook next',    category: 'handoff'  },
+  { type: 'AGENT',                label: 'Agent',            icon: '🤖', color: '#6366F1', description: 'AI agent with booking tools',        category: 'action'   },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -84,12 +88,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   logic: 'Logic',
   action: 'Actions',
   control: 'Flow Control',
+  handoff: 'Handoffs',
 };
 
 // ── Node I/O counts ───────────────────────────────────────────────────────────
 
 function nodeOutputCount(type: NodeType): number {
-  if (type === 'END_FLOW') return 0;
+  if (type === 'END_FLOW' || type === 'START_SCHEDULING' || type === 'ACTIVATE_PLAYBOOK') return 0;
   if (type === 'IF_CONDITION' || type === 'KEYWORD_ROUTER' || type === 'AGENT') return 2;
   return 1;
 }
@@ -141,6 +146,10 @@ function nodePreview(type: NodeType, config: Record<string, unknown>): string {
       return 'Filters contacts by quality';
     case 'END_FLOW':
       return config.reason ? `Reason: ${config.reason}` : 'End conversation';
+    case 'START_SCHEDULING':
+      return config.consultationType ? `📅 ${config.consultationType}` : 'Hand off to scheduling →';
+    case 'ACTIVATE_PLAYBOOK':
+      return config.intentKey ? `🤖 ${INTENT_KEY_LABELS[config.intentKey as IntentKey] ?? config.intentKey}` : 'Select a playbook →';
     case 'AGENT': {
       const instr = String(config.instructions ?? '');
       return instr ? `"${instr.slice(0, 40)}${instr.length > 40 ? '…' : ''}"` : 'Configure instructions →';
@@ -684,6 +693,9 @@ interface ConfigEditorProps {
 }
 
 function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, onDelete }: ConfigEditorProps) {
+  const { data: staffList } = useStaff();
+  const { data: playbookList } = useIntentPlaybooks();
+
   if (!node) {
     return (
       <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
@@ -1019,6 +1031,85 @@ function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, on
                 className="w-4 h-4 rounded border-border text-accent"
               />
               <span className="text-sm text-secondary">Require inbound message history</span>
+            </label>
+          </div>
+        )}
+
+        {node.type === 'START_SCHEDULING' && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-sky-900/20 border border-sky-700/30 px-3 py-2 text-xs text-sky-300/80">
+              Ends the flow and hands the buyer off to the scheduling system. The buyer will be guided through booking an appointment, with the selected staff receiving a confirmation request.
+            </div>
+
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Consultation Type <span className="text-secondary/40">(optional)</span></span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                placeholder="e.g. Skin Consultation, Product Demo"
+                value={String(node.config.consultationType ?? '')}
+                onChange={e => update({ consultationType: e.target.value })}
+              />
+            </label>
+
+            <MessageEditor
+              label="Intro message (optional)"
+              value={String(node.config.introMessage ?? '')}
+              onChange={v => update({ introMessage: v })}
+              placeholder={'Hi {{buyer.name}}! Let me help you book an appointment 📅'}
+              rows={3}
+              hint="Sent to the buyer before the scheduling flow begins."
+            />
+
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Assigned Staff for Confirmation</span>
+              <select
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                value={String(node.config.assignedStaffId ?? '')}
+                onChange={e => update({ assignedStaffId: e.target.value || undefined })}
+              >
+                <option value="">— Auto-route to slot staff —</option>
+                {(staffList ?? []).filter((s: any) => s.isActive !== false).map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <span className="text-[10px] text-secondary/50 mt-1 block">
+                This staff member receives a WhatsApp confirmation request and must reply CONFIRM.
+              </span>
+            </label>
+
+            {!!node.config.assignedStaffId && (
+              <div className="rounded-lg bg-sky-900/20 border border-sky-700/30 px-3 py-2 text-xs text-sky-300/80 space-y-1">
+                <p>✓ Staff notified: <strong>{staffList?.find((s: any) => s.id === (node.config.assignedStaffId as string))?.name ?? 'selected staff'}</strong></p>
+                <p>✓ Staff types <span className="font-mono bg-slate-700 px-1 rounded">CONFIRM</span> to approve booking</p>
+                <p>✓ Buyer can reschedule — staff will re-approve</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {node.type === 'ACTIVATE_PLAYBOOK' && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-purple-900/20 border border-purple-700/30 px-3 py-2 text-xs text-purple-300/80">
+              Ends the flow and activates a specific AI Playbook for the buyer's next conversation. The AI will respond using that playbook's system prompt and behavior instead of auto-detecting intent.
+            </div>
+
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">AI Playbook to activate</span>
+              <select
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                value={String(node.config.intentKey ?? '')}
+                onChange={e => update({ intentKey: e.target.value })}
+              >
+                <option value="">— Select a playbook —</option>
+                {(playbookList ?? []).filter((p: any) => p.isActive).map((p: any) => (
+                  <option key={p.id} value={p.intentKey}>
+                    {INTENT_KEY_LABELS[p.intentKey as IntentKey] ?? p.intentKey} — {p.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-secondary/50 mt-1 block">
+                Only active playbooks are shown. Create playbooks in AI Playbooks →
+              </span>
             </label>
           </div>
         )}

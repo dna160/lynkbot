@@ -20,6 +20,7 @@ export const intentKeyEnum = pgEnum('intent_key', [
   'OUT_OF_STOCK',
   'WANTS_CONSULTATION',
   'GENERAL_INQUIRY',
+  'SCHEDULING',
 ]);
 
 export const nextStepTypeEnum = pgEnum('next_step_type', [

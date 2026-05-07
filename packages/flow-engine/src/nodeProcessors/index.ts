@@ -21,6 +21,8 @@ import { sendWindowProcessor } from './sendWindow';
 import { rateLimitProcessor } from './rateLimit';
 import { segmentQualityGateProcessor } from './segmentQualityGate';
 import { endFlowProcessor } from './endFlow';
+import { startSchedulingProcessor } from './startScheduling';
+import { activatePlaybookProcessor } from './activatePlaybook';
 import { agentProcessor } from './agent';
 
 export const processorRegistry: Partial<Record<NodeType, NodeProcessor>> = {
@@ -38,5 +40,7 @@ export const processorRegistry: Partial<Record<NodeType, NodeProcessor>> = {
   RATE_LIMIT: rateLimitProcessor,
   SEGMENT_QUALITY_GATE: segmentQualityGateProcessor,
   END_FLOW: endFlowProcessor,
+  START_SCHEDULING: startSchedulingProcessor,
+  ACTIVATE_PLAYBOOK: activatePlaybookProcessor,
   AGENT: agentProcessor,
 };

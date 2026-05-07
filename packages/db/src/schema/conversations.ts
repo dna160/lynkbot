@@ -83,6 +83,8 @@ export const conversations = pgTable('conversations', {
     name: string;
   }>(),
   pendingOrderId: uuid('pending_order_id'),
+  // Set by ACTIVATE_PLAYBOOK flow node — overrides auto-detected intent for AI prompt lookup
+  playbookOverride: varchar('playbook_override', { length: 50 }),
   messageCount: integer('message_count').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
   startedAt: timestamp('started_at').notNull().defaultNow(),

@@ -28,7 +28,7 @@ export type MessageIntent =
   | 'GENERAL_INQUIRY'     // question about the brand/store/company itself
   | 'OBJECTION_HANDLING'  // price concern, hesitation, "nanti", "mahal", "pikir dulu"
   | 'CHECKOUT_INTENT'     // explicit purchase signal missed by keyword scan
-  | 'SCHEDULING'          // date/time reply OR explicit request to book/schedule a meeting
+  | 'SCHEDULING'          // any scheduling signal: asking to book/consult OR giving a specific date/time
   | 'BROWSING';           // greeting, casual, unclear, or unrelated
 
 const VALID_INTENTS = new Set<MessageIntent>([
@@ -90,11 +90,8 @@ export async function classifyMessageIntent(
     `GENERAL_INQUIRY    — asking about the brand, store, or company itself (not the product)`,
     `OBJECTION_HANDLING — expressing price concern, hesitation, doubt, or reluctance to buy`,
     `CHECKOUT_INTENT    — explicitly wanting to purchase or order`,
-    `SCHEDULING         — confirming or proposing a date/time, OR explicitly requesting to book/schedule a meeting or consultation`,
+    `SCHEDULING         — any scheduling signal: asking to book/meet/consult OR giving a specific date or time (e.g. "mau konsultasi", "bisa meeting?", "Selasa jam 14:00", "besok pagi")`,
     `BROWSING           — greeting, casual small talk, unclear intent, or anything else`,
-    ``,
-    `IMPORTANT: If the bot's previous message offered a consultation or asked when the buyer is available,`,
-    `and the buyer replies with a day, time, or date (e.g. "Selasa", "jam 2", "besok pagi"), classify as SCHEDULING.`,
     ``,
     `Reply with ONLY the label. No explanation, no punctuation.`,
   ].filter(Boolean).join('\n');

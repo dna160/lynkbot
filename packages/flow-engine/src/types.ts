@@ -30,7 +30,7 @@ export type NodeType =
   | 'END_FLOW'
   | 'START_SCHEDULING'    // Hands off to the scheduling system; terminal
   | 'ACTIVATE_PLAYBOOK'  // Activates a specific AI Playbook for subsequent AI responses; terminal
-  | 'AGENT';             // Embedded conversational agent with scheduling tools; 2 exits: customer_reply / exit
+  | 'AGENT';             // Embedded conversational agent with scheduling tools; fires all configured actions on completion
 
 // ── Trigger Types ─────────────────────────────────────────────────────────────
 
@@ -149,12 +149,16 @@ export interface EndFlowConfig {
 }
 
 export interface StartSchedulingConfig {
+  /** Optional intro message sent to buyer before handing off */
   introMessage?: string;
+  /** Optional consultation type label (e.g. "Skin Consultation") */
   consultationType?: string;
+  /** Staff UUID to receive the booking confirmation notification */
   assignedStaffId?: string;
 }
 
 export interface ActivatePlaybookConfig {
+  /** The intent key of the playbook to activate (e.g. 'SCHEDULING', 'PRODUCT_INQUIRY') */
   intentKey: string;
 }
 
@@ -166,7 +170,7 @@ export interface AgentStaffNotification {
 export interface AgentAction {
   /** Label shown on the output port in the flow editor */
   label: string;
-  /** Tells the agent when to trigger this action (sent to the LLM as context) */
+  /** Describes what this action does / what should be connected here */
   instructions: string;
 }
 
@@ -179,9 +183,10 @@ export interface AgentConfig {
   assignedStaffId?: string;
   staffMessage?: string;
   additionalStaffNotifications?: AgentStaffNotification[];
-  /** Two configurable exit actions — agent decides which to trigger based on conversation */
+  /** Configurable exit actions — all fire simultaneously when agent completes */
   actions?: [AgentAction, AgentAction];
 }
+
 
 export type NodeConfig =
   | SendTemplateConfig

@@ -22,6 +22,7 @@ import {
   INTENT_KEY_LABELS,
   NEXT_STEP_LABELS,
 } from '@/hooks/useIntentPlaybooks';
+import { useStaff } from '@/hooks/useScheduling';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ const INTENT_KEYS: IntentKey[] = [
   'OBJECTION_HANDLING',
   'CHECKOUT_INTENT',
   'OUT_OF_STOCK',
-  'WANTS_CONSULTATION',
+  'SCHEDULING',
   'GENERAL_INQUIRY',
 ];
 
@@ -59,7 +60,7 @@ const INTENT_BADGE_COLOR: Record<IntentKey, string> = {
   OBJECTION_HANDLING: 'bg-red-900/30 text-red-400 border-red-800/40',
   CHECKOUT_INTENT: 'bg-green-900/30 text-green-400 border-green-800/40',
   OUT_OF_STOCK: 'bg-yellow-900/30 text-yellow-400 border-yellow-800/40',
-  WANTS_CONSULTATION: 'bg-blue-900/30 text-blue-400 border-blue-800/40',
+  SCHEDULING: 'bg-cyan-900/30 text-cyan-400 border-cyan-800/40',
   GENERAL_INQUIRY: 'bg-slate-700/50 text-slate-300 border-slate-600/40',
 };
 
@@ -96,6 +97,7 @@ function EditorModal({ initial, onSave, onClose, saving, mode }: EditorModalProp
   const [keywordsRaw, setKeywordsRaw] = useState<string>(
     (initial.detectionKeywords ?? []).join(', '),
   );
+  const { data: staffList } = useStaff();
 
   const set = <K extends keyof PlaybookRow>(k: K, v: PlaybookRow[K] | null) =>
     setForm(f => ({ ...f, [k]: v }));
@@ -227,20 +229,22 @@ function EditorModal({ initial, onSave, onClose, saving, mode }: EditorModalProp
           )}
 
           {nst === 'schedule_consultation' && (
-            <div className="bg-blue-900/20 border border-blue-800/30 rounded-lg p-4 space-y-3">
-              <p className="text-xs text-blue-400/80 font-medium">Consultation scheduling config</p>
+            <div className="bg-blue-900/20 border border-blue-800/30 rounded-lg p-4 space-y-4">
+              <p className="text-xs text-blue-400/80 font-semibold uppercase tracking-wide">Scheduling Config</p>
+
               <div>
                 <label className="block text-xs text-secondary mb-1">Consultation Type</label>
                 <input
                   type="text"
                   value={cfg.consultationType ?? ''}
                   onChange={e => setCfg('consultationType', e.target.value)}
-                  placeholder="e.g. Product demo, Skin consultation"
+                  placeholder="e.g. Skin consultation, Product demo"
                   className="w-full bg-surface border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-secondary/40"
                 />
               </div>
+
               <div>
-                <label className="block text-xs text-secondary mb-1">Call-to-action text</label>
+                <label className="block text-xs text-secondary mb-1">Call-to-action text <span className="text-secondary/50">(optional)</span></label>
                 <input
                   type="text"
                   value={cfg.cta ?? ''}
@@ -248,6 +252,36 @@ function EditorModal({ initial, onSave, onClose, saving, mode }: EditorModalProp
                   placeholder='e.g. "Reply SCHEDULE to book a free demo"'
                   className="w-full bg-surface border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-secondary/40"
                 />
+              </div>
+
+              <div className="border-t border-blue-800/30 pt-3 space-y-3">
+                <p className="text-xs text-blue-300/70 font-medium">Staff confirmation</p>
+                <p className="text-xs text-secondary/60">
+                  When a buyer books, this staff member receives a WhatsApp notification and must reply <span className="font-mono bg-slate-700 px-1 rounded">CONFIRM</span> to finalise the appointment.
+                </p>
+
+                <div>
+                  <label className="block text-xs text-secondary mb-1">Assigned Staff <span className="text-secondary/50">(required for confirmation flow)</span></label>
+                  <select
+                    value={cfg.assignedStaffId ?? ''}
+                    onChange={e => setCfg('assignedStaffId', e.target.value)}
+                    className="w-full bg-surface border border-border text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+                  >
+                    <option value="">— No staff assigned (auto-route to slot staff) —</option>
+                    {(staffList ?? []).filter(s => (s as any).isActive !== false).map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {cfg.assignedStaffId && (
+                  <div className="rounded-lg bg-blue-900/30 border border-blue-700/30 px-3 py-2 text-xs text-blue-300/80 space-y-1">
+                    <p>✓ All bookings from this playbook will notify <strong>{staffList?.find(s => s.id === cfg.assignedStaffId)?.name ?? 'selected staff'}</strong></p>
+                    <p>✓ Staff types <span className="font-mono bg-slate-700 px-1 rounded">CONFIRM</span> to approve, or any rejection word to decline</p>
+                    <p>✓ Buyer can request a new time — staff will be re-notified for approval</p>
+                    <p>✓ Rescheduling deletes the old appointment and creates a new one</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

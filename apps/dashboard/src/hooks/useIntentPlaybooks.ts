@@ -14,7 +14,7 @@ import { api } from '@/lib/api';
 
 export type IntentKey =
   | 'GREETING' | 'BROWSING' | 'PRODUCT_INQUIRY' | 'OBJECTION_HANDLING'
-  | 'CHECKOUT_INTENT' | 'OUT_OF_STOCK' | 'WANTS_CONSULTATION' | 'GENERAL_INQUIRY';
+  | 'CHECKOUT_INTENT' | 'OUT_OF_STOCK' | 'GENERAL_INQUIRY' | 'SCHEDULING';
 
 export type NextStepType =
   | 'continue_conversation' | 'checkout' | 'schedule_consultation'
@@ -45,8 +45,8 @@ export const INTENT_KEY_LABELS: Record<IntentKey, string> = {
   OBJECTION_HANDLING: 'Objection Handling',
   CHECKOUT_INTENT: 'Checkout Intent',
   OUT_OF_STOCK: 'Out of Stock',
-  WANTS_CONSULTATION: 'Wants Consultation',
   GENERAL_INQUIRY: 'General Inquiry',
+  SCHEDULING: 'Scheduling',
 };
 
 export const NEXT_STEP_LABELS: Record<NextStepType, string> = {
