@@ -319,19 +319,16 @@ async function executeEnvelope(
 
 /**
  * Parses an exit-action envelope from the LLM response.
- * Format: {"action":"exit","port":0|1,"message":"optional final message"}
+ * Format: {"action":"exit","message":"optional final message"}
  * Returns null if the response is not an exit action.
  */
-function parseExitAction(text: string): { port: number; message?: string } | null {
+function parseExitAction(text: string): { message?: string } | null {
   try {
     const match = text.match(/\{[\s\S]*?"action"\s*:\s*"exit"[\s\S]*?\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]);
-    if (parsed.action === 'exit' && (parsed.port === 0 || parsed.port === 1)) {
-      return {
-        port: parsed.port as number,
-        message: typeof parsed.message === 'string' ? parsed.message : undefined,
-      };
+    if (parsed.action === 'exit') {
+      return { message: typeof parsed.message === 'string' ? parsed.message : undefined };
     }
   } catch { /* ignore */ }
   return null;
@@ -385,7 +382,7 @@ export async function agentProcessor(
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung. 🙏', isWithin24hrWindow: true }).catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'no_active_services' });
-    return { nextNodeId: 'action_1' };
+    return { parallelNextNodeIds: ['action_0', 'action_1'] };
   }
 
   // Resolve configurable exit actions (fall back to sensible defaults)
@@ -393,11 +390,13 @@ export async function agentProcessor(
   const action1 = config.actions?.[1] ?? { label: 'Action 2', instructions: 'Trigger when there is an error or the conversation should end differently.' };
 
   const serviceList = activeServices.map(s => `- ${s.name}`).join('\n');
-  const actionSection = `\n\nEXIT ACTIONS — when you decide to trigger one, respond with ONLY the JSON shown (no other text). You may include an optional "message" field for a final message to send the buyer before exiting.
-- **${action0.label}**: ${action0.instructions}
-  Trigger: {"action":"exit","port":0,"message":"<optional final message>"}
-- **${action1.label}**: ${action1.instructions}
-  Trigger: {"action":"exit","port":1,"message":"<optional final message>"}`;
+  const configuredActions = [action0, action1].filter(Boolean);
+  const actionLines = configuredActions.map(a => `- **${a.label}**: ${a.instructions}`).join('\n');
+  const actionSection = `\n\nEXIT — when your task is complete, respond with ONLY this JSON (no other text):
+{"action":"exit","message":"<optional final message to buyer>"}
+
+When you exit, both of the following actions execute simultaneously:
+${actionLines}`;
 
   const systemPrompt = [
     SCHEDULING_SYSTEM_PROMPT,
@@ -421,10 +420,10 @@ export async function agentProcessor(
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.', isWithin24hrWindow: true }).catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'llm_failed' });
-    return { nextNodeId: 'action_1' };
+    return { parallelNextNodeIds: ['action_0', 'action_1'] };
   }
 
-  // 1. Check for exit action first (agent decided to route to an output port)
+  // 1. Check for exit action first (agent decided it is done — fire all configured actions in parallel)
   const exitAction = parseExitAction(responseText);
   if (exitAction !== null) {
     const meta = await deps.getMetaClient(ctx.tenantId);
@@ -433,11 +432,14 @@ export async function agentProcessor(
       history.push({ role: 'assistant', content: exitAction.message });
       if (config.memoryEnabled) ctx.variables[memoryKey] = history;
     }
+    const actionPorts = config.actions
+      ? config.actions.map((_, i) => `action_${i}`)
+      : ['action_0', 'action_1'];
     ctx.executionLog.push({
       nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'ok',
-      meta: { action: 'exit', port: exitAction.port },
+      meta: { action: 'exit', ports: actionPorts },
     });
-    return { nextNodeId: `action_${exitAction.port}` };
+    return { parallelNextNodeIds: actionPorts };
   }
 
   // 2. Check for scheduling envelope (check_availability, confirm_booking, reschedule_booking)
@@ -462,7 +464,7 @@ export async function agentProcessor(
   } catch (err) {
     console.error('[agentProcessor] Failed to send reply to buyer:', err);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'send_failed' });
-    return { nextNodeId: 'action_1' };
+    return { parallelNextNodeIds: ['action_0', 'action_1'] };
   }
 
   // Update history
@@ -477,8 +479,12 @@ export async function agentProcessor(
     meta: { action: envelope?.action ?? 'text', exit: shouldExit },
   });
 
-  // Scheduling envelope exits route to action_0 (primary "task complete" action)
-  return shouldExit
-    ? { nextNodeId: 'action_0' }
-    : { status: 'waiting_reply' };
+  // Scheduling envelope exits fire all configured actions in parallel
+  if (shouldExit) {
+    const actionPorts = config.actions
+      ? config.actions.map((_, i) => `action_${i}`)
+      : ['action_0', 'action_1'];
+    return { parallelNextNodeIds: actionPorts };
+  }
+  return { status: 'waiting_reply' };
 }
