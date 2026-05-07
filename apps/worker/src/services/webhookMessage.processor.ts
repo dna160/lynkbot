@@ -153,6 +153,12 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
   if (!buyer) throw new Error('Failed to create or load buyer');
   if (buyer.doNotContact) return;
 
+  // Ensure active conversation exists BEFORE any flow trigger fires, so that
+  // saveOutboundMessage() can attach template/text messages to the conversation.
+  // Without this, flow-triggered messages send successfully on WhatsApp but never
+  // appear in the dashboard conversation thread.
+  await ensureActiveConversation(tenantId, buyer.id);
+
   // Flow button trigger
   const interactiveButtonId =
     normalized.messageType === 'interactive'
@@ -210,6 +216,26 @@ async function resolveTenantByPhoneNumberId(phoneNumberId: string): Promise<stri
     where: (t, { eq }) => eq(t.metaPhoneNumberId, phoneNumberId),
   });
   return anyMatch?.id ?? null;
+}
+
+async function ensureActiveConversation(tenantId: string, buyerId: string): Promise<void> {
+  const existing = await db.query.conversations.findFirst({
+    where: and(eq(conversations.tenantId, tenantId), eq(conversations.buyerId, buyerId), eq(conversations.isActive, true)),
+    columns: { id: true },
+  });
+  if (existing) return;
+
+  await db.insert(conversations).values({
+    tenantId,
+    buyerId,
+    productId: null,
+    state: 'INIT',
+    language: 'id',
+    messageCount: 0,
+    isActive: true,
+    startedAt: new Date(),
+    lastMessageAt: new Date(),
+  }).onConflictDoNothing();
 }
 
 // ── Simplified conversation handler (core logic from ConversationService) ─────
