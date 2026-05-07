@@ -5,7 +5,7 @@
 > Synthesized from PRD v2.1, all 6 phase handoffs, checkpoint audit, and verified source files.
 >
 > **Branch:** `main`
-> **Last completed phase:** Phase 6 + post-launch fixes (scheduling intent, RAG, inline PDF, buyer deletion, dashboard i18n)
+> **Last completed phase:** Commercial Release PRD v1.0 — async webhook durability, pgvector RAG, S3 PDF migration, tenant quotas, admin/compliance dashboard, feature gates, consent audit, subscriptions schema
 > **Working directory:** `/Users/storytellers/Documents/Claude Home/Lynkbot`
 
 ---
@@ -470,6 +470,13 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | GET | `/internal/waba-pool` | `apps/api/src/routes/internal/wabaPool.ts` |
 | POST | `/internal/waba-pool` | `apps/api/src/routes/internal/wabaPool.ts` |
 | POST | `/internal/flows/seed-cron` | `apps/api/src/routes/internal/cron.ts` |
+| GET | `/internal/admin/tenants` | `apps/api/src/routes/internal/admin.ts` — tenant list with stats |
+| GET | `/internal/admin/tenants/:id` | `apps/api/src/routes/internal/admin.ts` — single tenant detail |
+| PUT | `/internal/admin/tenants/:id/quota` | `apps/api/src/routes/internal/admin.ts` — update quota limits |
+| GET | `/internal/compliance/consent-audit` | `apps/api/src/routes/internal/compliance.ts` — opt-in/opt-out logs |
+| GET | `/internal/compliance/privacy-configs` | `apps/api/src/routes/internal/compliance.ts` — tenant privacy settings |
+| GET | `/internal/dlq` | `apps/api/src/routes/internal/dlq.ts` — dead letter queue inspection |
+| POST | `/internal/dlq/:jobId/retry` | `apps/api/src/routes/internal/dlq.ts` — retry failed job |
 
 ---
 
@@ -487,7 +494,7 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | `buyers` | `buyers.ts` | `id, tenantId, waPhone, displayName, preferredLanguage, totalOrders, totalSpendIdr, lastOrderAt, tags (JSONB), doNotContact, activeFlowCount` |
 | `conversations` | `conversations.ts` | `id, tenantId, buyerId (nullable → SET NULL on buyer delete), state (state machine), messageCount, lastMessageAt` |
 | `messages` | `messages.ts` | `id, conversationId, direction (inbound\|outbound), body, createdAt` |
-| `products` | `products.ts` | Standard product catalog + `pdfBytes bytea` (nullable, stores PDF when S3 not configured) + `knowledgeError text` |
+| `products` | `products.ts` | Standard product catalog + `pdfUploadedAt timestamp` (S3 upload timestamp; `pdfBytes` was dropped in migration 0021) + `knowledgeError text` |
 | `inventory` | `inventory.ts` | Stock levels |
 | `orders` | `orders.ts` | Order lifecycle; `buyerId` is nullable → SET NULL on buyer delete (order history preserved) |
 | `shipments` | `shipments.ts` | Shipping tracking |
@@ -507,15 +514,34 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | `tenant_risk_scores` | `tenantRiskScores.ts` | `id, tenantId (UNIQUE), score, breakdown (JSONB), computedAt` |
 | `waba_pool` | `wabaPool.ts` | `id, phoneNumberId, displayPhone, wabaId, accessTokenEnc (AES-256-GCM encrypted), status (available\|assigned), assignedTo (tenantId FK), assignedAt` |
 
-### Scheduling Tables (Migration 0012)
+### Scheduling Tables (Migration 0012 + 0015)
 
 | Table | Schema File | Key Columns |
 |-------|-------------|-------------|
-| `staff` | `scheduling.ts` | `id, tenantId, name, phoneNumber (UNIQUE per tenant), role, isActive, availability (JSONB weekly slots)` |
-| `services` | `scheduling.ts` | `id, tenantId, name, durationMinutes, isActive, staffIds (JSONB)` |
-| `appointments` | `scheduling.ts` | `id, tenantId, buyerId (CASCADE), staffId (CASCADE), serviceId (CASCADE), startTime, endTime, status (negotiating\|pending_doctor\|confirmed\|cancelled), notes, bullmqJobId` |
+| `staff` | `scheduling.ts` | `id, tenantId, name, phoneNumber (UNIQUE per tenant), role, isActive` |
+| `services` | `scheduling.ts` | `id, tenantId, name, durationMinutes, isActive, confirmationStaffId (nullable FK → staff)` |
+| `service_staff` | `scheduling.ts` | `serviceId, staffId` (many-to-many join, composite PK) |
+| `staff_availability` | `scheduling.ts` | `staffId, dayOfWeek (0–6), startTime, endTime ('HH:MM')` |
+| `appointments` | `scheduling.ts` | `id, tenantId, buyerId, staffId, serviceId, startTime, endTime, status (negotiating\|pending_doctor\|confirmed\|cancelled\|rescheduling_requested), previousAppointmentId (self-join), bullmqJobId` |
 
 **Unique constraint on staff:** `staff_tenant_phone_unique (tenant_id, phone_number)` — duplicate creates 409, not 500.
+
+**`confirmationStaffId` on services:** designates which staff member receives WhatsApp appointment confirmation request. If null, auto-confirm after buyer selection.
+
+**`previousAppointmentId` on appointments:** self-referential FK tracking the pre-reschedule appointment for audit and rollback. `status=rescheduling_requested` means awaiting staff approval.
+
+### New Tables — Commercial Release (Migrations 0016–0024)
+
+| Table | Schema File | Purpose |
+|-------|-------------|---------|
+| `webhook_ingest_log` | `webhookIngestLog.ts` | Durable webhook queue; `status`: pending→processing→completed\|failed; idempotency via `meta_message_id` UNIQUE |
+| `consent_audit` | `consentAudit.ts` | PDP Law opt-in/opt-out audit trail; logged on buyer creation (opt_in) and STOP keyword (opt_out) |
+| `product_embeddings` | `productEmbeddings.ts` | 768-dim pgvector embeddings per product (replaces per-chunk 1536-dim `product_chunks.embedding`) |
+| `subscriptions` | *(migration 0023)* | Xendit subscription plan tracking (billing foundation) |
+
+**`tenants` additions (migration 0024):** `privacyNoticeText`, `contactInfo`, `optOutKeyword`, `retentionDays` — privacy config for compliance dashboard.
+
+**`products` changes:** `pdfBytes` column dropped (migration 0021); `pdfUploadedAt` added (migration 0016) — PDFs now stored in S3 only.
 
 ### Migration File Index
 
@@ -527,7 +553,17 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | `0007_*.sql` … `0011_*.sql` | post-launch fixes | Various schema additions (see file names) |
 | `0012_scheduling.sql` | Scheduling module | `staff`, `services`, `appointments` tables; adds scheduling states to conversation_state enum |
 | `0013_add_pdf_bytes.sql` | Inline PDF storage | `ALTER TABLE products ADD COLUMN pdf_bytes bytea` — stores PDF when S3 not configured |
-| `0014_buyer_soft_delete_fks.sql` | Buyer deletion fix | `conversations.buyer_id` + `orders.buyer_id`: DROP NOT NULL, FK changed from RESTRICT/CASCADE → SET NULL — lets buyers be deleted while preserving conversation and order history |
+| `0014_buyer_soft_delete_fks.sql` | Buyer deletion fix | `conversations.buyer_id` + `orders.buyer_id`: DROP NOT NULL, FK changed from RESTRICT/CASCADE → SET NULL |
+| `0015_add_service_confirmation_staff.sql` | Staff-gated scheduling | `confirmationStaffId` on `services`, `previousAppointmentId` self-join on `appointments`, `rescheduling_requested` enum value |
+| `0016_migrate_pdf_to_s3.sql` | S3 PDF migration | Adds `pdf_uploaded_at` to `products` |
+| `0017_add_pgvector.sql` | Vector RAG | `CREATE EXTENSION IF NOT EXISTS vector` |
+| `0018_webhook_ingest_log.sql` | Async webhook durability | `webhook_ingest_log` table with idempotency key |
+| `0019_consent_audit.sql` | PDP compliance | `consent_audit` table for opt-in/opt-out logging |
+| `0020_product_embeddings.sql` | Vector RAG | `product_embeddings` table with IVFFlat index on 768-dim vectors |
+| `0021_drop_pdf_bytes.sql` | S3 migration cleanup | `ALTER TABLE products DROP COLUMN pdf_bytes` |
+| `0022_deprecate_chunk_embeddings.sql` | Vector RAG cleanup | `ALTER TABLE product_chunks DROP COLUMN embedding` |
+| `0023_subscriptions.sql` | Billing | `subscriptions` table for Xendit plans |
+| `0024_privacy_config.sql` | Privacy compliance | Adds `privacy_notice_text`, `contact_info`, `opt_out_keyword`, `retention_days` to `tenants` |
 
 ---
 
@@ -545,6 +581,13 @@ All routes are prefixed `/api` when registered. Full paths shown below.
 | `QUEUES.FLOW_EXECUTION` | `lynkbot-flow-execution` | `flowExecution.processor.ts` | 20 (lockDuration=60s) | Flow node execution + delays |
 | `QUEUES.TEMPLATE_SYNC` | `lynkbot-template-sync` | `templateSync.processor.ts` | 5 | Template status polling + quality sync |
 | `QUEUES.RISK_SCORE` | `lynkbot-risk-score` | `riskScore.processor.ts` | 3 | Tenant risk score computation |
+| `QUEUES.REMINDERS` | `lynkbot-reminders` | `reminder.processor.ts` | 5 | Appointment reminder dispatch |
+| `QUEUES.WEBHOOK_PROCESS` | `lynkbot-webhook-process` | `webhook.processor.ts` | 5 | Async inbound WhatsApp message processing (durability + idempotency via `webhook_ingest_log`) |
+| `QUEUES.BROADCAST_BATCH` | `lynkbot-broadcast-batch` | `broadcastBatch.processor.ts` | 3 | Batched broadcast template sends |
+
+**Async webhook architecture (v1.0):** The `POST /webhooks/meta` endpoint immediately persists the raw payload to `webhook_ingest_log` (status=`pending`) and enqueues a job referencing its `logId`. The `webhook.processor.ts` picks it up, marks it `processing`, runs `processWebhookPayload()`, then marks `completed`. Failed jobs are marked `failed` with `errorMessage` and retried by BullMQ. Idempotency: `metaMessageId` UNIQUE constraint prevents double-processing.
+
+**Staff scheduling intercept in worker:** `apps/worker/src/services/webhookMessage.processor.ts` handles `appt:<id>:confirm|decline`, `appt_reschedule_approve:<id>`, and `appt_reschedule_reject:<id>` button payloads, plus keyword replies (konfirmasi/tolak), calling inline handlers that mirror `SchedulingService` methods without importing from `apps/api`.
 
 **Queue constants location:** `packages/shared/src/constants/queues.ts`
 
@@ -996,6 +1039,8 @@ All features are currently enabled for all authenticated tenants. Feature flags 
 | `/dashboard/templates/new` | TemplateEditorPage | `pages/Templates/TemplateEditorPage.tsx` |
 | `/dashboard/templates/:id/edit` | TemplateEditorPage | `pages/Templates/TemplateEditorPage.tsx` |
 | `/dashboard/intent-playbooks` | IntentPlaybooksPage | `pages/IntentPlaybooks/IntentPlaybooksPage.tsx` |
+| `/dashboard/admin` | AdminPage | `pages/Admin/AdminPage.tsx` — internal: tenant list, quota management, stats |
+| `/dashboard/compliance` | CompliancePage | `pages/Compliance/CompliancePage.tsx` — consent audit logs, privacy settings |
 | `/dashboard/settings` | SettingsPage | `pages/Settings/SettingsPage.tsx` |
 
 **Dashboard language:** All dashboard UI is in English. Buyer-facing bot messages remain Indonesian.
@@ -1324,7 +1369,7 @@ These are explicitly deferred items — not bugs, but incomplete features:
 |------|------|--------|
 | `SEND_MEDIA` node | `packages/flow-engine/src/nodeProcessors/sendMedia.ts` | STUB — logs and returns `{nextNodeId:'default'}` |
 | `sendInteractive` native button/list | `packages/flow-engine/src/nodeProcessors/sendInteractive.ts` | Falls back to `sendText`; MetaClient needs `sendInteractive` method |
-| `featureGate` real tier checks | `apps/api/src/middleware/featureGate.ts` | STUB — all authenticated tenants pass; business rules not finalized |
+| `featureGate` real tier checks | `apps/api/src/middleware/featureGate.ts` | Now checks `tenants.subscriptionTier` against feature flag map; `tenantQuota.ts` enforces per-resource limits |
 | Risk score hourly cron seeding | `apps/api/src/routes/internal/cron.ts` | Not seeded by `/internal/flows/seed-cron`; can add `risk.compute` as repeatable job |
 | `riskScoreEstimate` in broadcast route | `apps/api/src/routes/v1/broadcasts.ts` | Not wired to actual risk score |
 | WABA pool seed data | `infra/scripts/seed-waba-pool.ts` | TODOs need real Meta Cloud API credentials before running |

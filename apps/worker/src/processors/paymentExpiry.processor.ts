@@ -54,6 +54,7 @@ export const paymentExpiryProcessor: Processor = async (job) => {
   }
 
   // 5. Send PAYMENT_EXPIRED template via Meta
+  if (!order.buyerId || !order.productId) return;
   const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, order.buyerId) });
   const product = await db.query.products.findFirst({ where: eq(products.id, order.productId) });
 

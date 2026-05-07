@@ -17,14 +17,6 @@ declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
-  interface FastifyRequest {
-    user: {
-      tenantId: string;
-      lynkUserId: string;
-      iat?: number;
-      exp?: number;
-    };
-  }
 }
 
 const authPluginImpl: FastifyPluginAsync = async (fastify) => {
@@ -40,6 +32,7 @@ const authPluginImpl: FastifyPluginAsync = async (fastify) => {
         const payload = request.user as {
           tenantId?: string;
           lynkUserId?: string;
+          role?: string;
         };
         if (!payload.tenantId) {
           return reply.status(401).send({ error: 'Invalid token: missing tenantId claim' });

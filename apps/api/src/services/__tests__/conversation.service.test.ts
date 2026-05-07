@@ -71,6 +71,7 @@ vi.mock('@lynkbot/db', () => ({
   inventory: {},
   waitlist: {},
   buyerGenomes: {},
+  consentAudit: {},
 }));
 
 vi.mock('@lynkbot/ai', () => ({
@@ -86,6 +87,7 @@ vi.mock('@lynkbot/ai', () => ({
   })),
   buildSystemPrompt: vi.fn().mockReturnValue('system prompt'),
   query: vi.fn().mockResolvedValue({ chunks: [] }),
+  classifyMessageIntent: vi.fn().mockResolvedValue('BROWSING'),
 }));
 
 vi.mock('@lynkbot/pantheon', () => ({

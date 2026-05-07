@@ -69,6 +69,17 @@ const envSchema = z.object({
   FEATURE_TEMPLATE_STUDIO: z.string().default('true'),
   FEATURE_FLOW_REENGAGEMENT: z.string().default('true'),
   FEATURE_AI_FLOW_GENERATOR: z.string().default('true'),
+  // ── LLM Fallback ────────────────────────────────────────────────────────────
+  OPENAI_API_KEY: z.string().default(''),
+  ANTHROPIC_API_KEY: z.string().default(''),
+  LLM_PRIMARY_PROVIDER: z.string().default('xai'),
+  LLM_FALLBACK_ENABLED: z.string().default('true'),
+  // ── Worker health ───────────────────────────────────────────────────────────
+  WORKER_HEALTH_PORT: z.string().default('3001'),
+  // ── Limits ──────────────────────────────────────────────────────────────────
+  MAX_FLOW_DEPTH: z.string().default('1000'),
+  BROADCAST_BATCH_SIZE: z.string().default('500'),
+  WEBHOOK_PROCESS_CONCURRENCY: z.string().default('10'),
 });
 
 const parsed = envSchema.safeParse(process.env);

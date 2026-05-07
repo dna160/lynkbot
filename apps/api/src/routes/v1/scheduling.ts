@@ -17,6 +17,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { SchedulingService } from '../../services/scheduling.service';
 import { requireFeature } from '../../middleware/featureGate';
+import { checkQuota } from '../../middleware/tenantQuota';
 
 const svc = new SchedulingService();
 
@@ -41,7 +42,7 @@ export const schedulingRoutes: FastifyPluginAsync = async (fastify) => {
   /** POST /v1/scheduling/staff — create new staff member */
   fastify.post<{ Body: Record<string, unknown> }>(
     '/v1/scheduling/staff',
-    { preHandler: authAndFeature(fastify) },
+    { preHandler: [...authAndFeature(fastify), async (req: any, rep: any) => checkQuota(req.user.tenantId, 'staff')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { name, phoneNumber, role, isActive } = request.body;

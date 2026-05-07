@@ -10,6 +10,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db, flowDefinitions, flowExecutions, eq, and, desc, sql, count } from '@lynkbot/db';
 import { requireFeature } from '../../middleware/featureGate';
+import { checkQuota } from '../../middleware/tenantQuota';
 import { RiskScoreService } from '../../services/riskScore.service';
 
 const riskScoreService = new RiskScoreService();
@@ -113,7 +114,7 @@ export const flowRoutes: FastifyPluginAsync = async (fastify) => {
     };
   }>(
     '/v1/flows',
-    { preHandler: authAndFeature(fastify) },
+    { preHandler: [...authAndFeature(fastify), async (req: any, rep: any) => checkQuota(req.user.tenantId, 'flows')] },
     async (request, reply) => {
       const { tenantId } = request.user;
       const { name, description, triggerType, triggerConfig = {}, definition } = request.body;

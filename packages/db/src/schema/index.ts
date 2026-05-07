@@ -30,3 +30,6 @@ export * from './buyerBroadcastLog';
 export * from './tenantRiskScores';
 export * from './intentPlaybooks';
 export * from './scheduling';
+export * from './webhookIngestLog';
+export * from './consentAudit';
+export * from './productEmbeddings';

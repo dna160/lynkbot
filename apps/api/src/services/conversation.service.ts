@@ -12,7 +12,7 @@
  * Tests   : src/services/__tests__/conversation.service.test.ts
  */
 import { eq, and, gt } from '@lynkbot/db';
-import { db, conversations, messages, buyers, tenants, products, waitlist, buyerGenomes } from '@lynkbot/db';
+import { db, conversations, messages, buyers, tenants, products, waitlist, buyerGenomes, consentAudit } from '@lynkbot/db';
 import {
   BUY_INTENT_KEYWORDS,
   OBJECTION_KEYWORDS,
@@ -161,6 +161,15 @@ export class ConversationService {
         updatedAt: new Date(),
       }).returning();
       buyer = created;
+
+      // Consent audit: log first inbound message as opt-in
+      await db.insert(consentAudit).values({
+        buyerId: buyer.id,
+        tenantId,
+        action: 'opt_in',
+        channel: 'whatsapp',
+        createdAt: new Date(),
+      });
     } else {
       await db.update(buyers)
         .set({ updatedAt: new Date() })
@@ -283,6 +292,15 @@ export class ConversationService {
 
     // STOP detection
     if (containsAny(text, STOP_KEYWORDS)) {
+      // Consent audit: log opt-out BEFORE setting doNotContact
+      await db.insert(consentAudit).values({
+        buyerId: buyer.id,
+        tenantId: conv.tenantId,
+        action: 'opt_out',
+        channel: 'whatsapp',
+        createdAt: new Date(),
+      });
+
       await db.update(buyers)
         .set({ doNotContact: true, updatedAt: new Date() })
         .where(eq(buyers.id, buyer.id));

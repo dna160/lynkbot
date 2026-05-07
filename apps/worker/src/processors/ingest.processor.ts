@@ -28,7 +28,6 @@ const s3 = new S3Client({
 export interface IngestJobData {
   productId: string;
   tenantId: string;
-  pdfBase64?: string; // set when no S3 — API passes raw bytes to avoid cross-container disk access
 }
 
 /** Rejects after ms milliseconds with a clear timeout error. */
@@ -67,33 +66,23 @@ export const ingestProcessor: Processor = async (job) => {
     // ── PDF source ────────────────────────────────────────────────────────────
     let pdfBuffer: Buffer;
 
-    if (jobData.pdfBase64) {
-      // Inline mode: API passed raw bytes in job payload (no S3, no shared disk)
-      job.log(`[2/6] Reading PDF from job payload (inline mode)`);
-      pdfBuffer = Buffer.from(jobData.pdfBase64, 'base64');
-    } else if (product.pdfS3Key?.startsWith('local://')) {
-      const localPath = product.pdfS3Key.replace('local://', '');
-      job.log(`[2/6] Reading PDF from local disk: ${localPath}`);
-      pdfBuffer = await withTimeout(readFile(localPath), 30_000, 'local file read');
-    } else if (product.pdfS3Key) {
-      if (!process.env.S3_BUCKET) {
-        throw new Error(
-          `Product ${productId} has pdfS3Key="${product.pdfS3Key}" but S3_BUCKET env var is not set. ` +
-          `Re-upload the PDF from the dashboard to refresh the stored bytes.`
-        );
-      }
-      job.log(`[2/6] Downloading PDF from S3 key=${product.pdfS3Key}`);
-      const s3Response = await withTimeout(
-        s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET, Key: product.pdfS3Key })),
-        60_000, 'S3 download'
-      );
-      if (!s3Response.Body) throw new Error('S3 returned empty body');
-      const chunks: Uint8Array[] = [];
-      for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
-      pdfBuffer = Buffer.concat(chunks);
-    } else {
-      throw new Error('No PDF available: no inline payload, no S3 key, no local path');
+    if (!product.pdfS3Key) {
+      throw new Error(`Product ${productId} has no PDF S3 key. Please re-upload the PDF.`);
     }
+
+    if (!process.env.S3_BUCKET) {
+      throw new Error(`S3_BUCKET env var is not set. Cannot download PDF for product ${productId}.`);
+    }
+
+    job.log(`[2/6] Downloading PDF from S3 key=${product.pdfS3Key}`);
+    const s3Response = await withTimeout(
+      s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET, Key: product.pdfS3Key })),
+      60_000, 'S3 download'
+    );
+    if (!s3Response.Body) throw new Error('S3 returned empty body');
+    const s3Chunks: Uint8Array[] = [];
+    for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) s3Chunks.push(chunk);
+    pdfBuffer = Buffer.concat(s3Chunks);
     job.log(`[2/6] PDF ready: ${pdfBuffer.byteLength} bytes`);
 
     // ── PDF text extraction ───────────────────────────────────────────────────
@@ -103,13 +92,13 @@ export const ingestProcessor: Processor = async (job) => {
 
     // ── Chunking ──────────────────────────────────────────────────────────────
     job.log(`[4/6] Chunking text...`);
-    const chunks = chunkText(pages, { maxTokens: 512, overlap: 50 });
-    if (chunks.length === 0) throw new Error('PDF produced no text chunks — may be image-only or encrypted');
-    job.log(`[4/6] Produced ${chunks.length} chunks`);
+    const textChunks = chunkText(pages, { maxTokens: 512, overlap: 50 });
+    if (textChunks.length === 0) throw new Error('PDF produced no text chunks — may be image-only or encrypted');
+    job.log(`[4/6] Produced ${textChunks.length} chunks`);
 
     // ── DB upsert (FTS mode — no embeddings required) ─────────────────────────
-    job.log(`[5/6] Upserting ${chunks.length} chunks to database...`);
-    const rows = chunks.map((c) => ({
+    job.log(`[5/6] Upserting ${textChunks.length} chunks to database...`);
+    const rows = textChunks.map((c) => ({
       productId,
       tenantId,
       chunkIndex: c.chunkIndex,
@@ -134,6 +123,20 @@ export const ingestProcessor: Processor = async (job) => {
     }
     job.log(`[5/6] All chunks stored`);
 
+    // ── Vector embeddings (semantic search) ────────────────────────────────────
+    job.log(`[5.5/6] Generating vector embeddings for ${textChunks.length} chunks...`);
+    try {
+      const { storeProductEmbeddings } = await import('@lynkbot/ai');
+      await withTimeout(
+        storeProductEmbeddings(tenantId, productId, textChunks.map(c => c.text)),
+        120_000,
+        'vector embedding generation'
+      );
+      job.log(`[5.5/6] Vector embeddings stored in pgvector`);
+    } catch (embedErr) {
+      job.log(`[5.5/6] Vector embedding failed (non-fatal): ${(embedErr as Error).message}`);
+    }
+
     // ── Mark ready FIRST — then attempt persona generation ───────────────────
     // Mark ready before the LLM call so a slow/failed persona never blocks the product.
     await db.update(products).set({
@@ -145,7 +148,7 @@ export const ingestProcessor: Processor = async (job) => {
 
     // ── Book persona (best-effort, 90s timeout) ───────────────────────────────
     try {
-      const sampleContent = chunks.slice(0, 10).map((c) => c.text).join('\n\n');
+      const sampleContent = textChunks.slice(0, 10).map((c) => c.text).join('\n\n');
       const llm = getLLMClient();
       const res = await withTimeout(
         llm.chat(
