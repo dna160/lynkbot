@@ -345,6 +345,8 @@ export async function agentProcessor(
 ): Promise<NodeResult> {
   const config = node.config as AgentConfig;
   const memoryKey = `agent_${node.id}_history`;
+  console.log(`[agentProcessor] node=${node.id} tenant=${ctx.tenantId} buyer=${ctx.buyerId} userMessage="${ctx.trigger.messageText?.slice(0, 60) ?? ''}"`);
+
 
   // Load conversation history from variables (if memory is on)
   const history: HistoryMessage[] = config.memoryEnabled && Array.isArray(ctx.variables[memoryKey])
@@ -406,21 +408,44 @@ ${actionLines}`;
     actionSection,
   ].join('');
 
-  // Call LLM
+  const conversationMessages = history.filter(m => m.role !== 'system');
+
+  // Guard: if there are no conversation messages at all, something is wrong —
+  // most LLM providers reject a call with zero messages.
+  if (conversationMessages.length === 0) {
+    console.warn(`[agentProcessor] node=${node.id} tenant=${ctx.tenantId}: no conversation messages to send to LLM (userMessage was empty and history is empty)`);
+    ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'empty_conversation' });
+    return { status: 'waiting_reply' };
+  }
+
+  // Call LLM — pass system prompt via opts.system so all providers receive it correctly
+  // (AnthropicClient strips role:'system' from messages and uses opts.system instead;
+  //  GrokClient prepends it from opts.system as well).
+  // Use a non-reasoning model override for this node so response time stays <5 s.
+  const agentModel = process.env.AGENT_LLM_MODEL ?? process.env.LLM_FALLBACK_MODEL;
   const llm = getLLMClient();
+  console.log(`[agentProcessor] node=${node.id} tenant=${ctx.tenantId} buyer=${ctx.buyerId} calling LLM model=${agentModel ?? 'default'} msgs=${conversationMessages.length}`);
+
   let responseText: string;
   try {
-    const llmResponse = await llm.chat([
-      { role: 'system', content: systemPrompt },
-      ...history.filter(m => m.role !== 'system'),
-    ]);
+    const llmResponse = await llm.chat(conversationMessages, {
+      system: systemPrompt,
+      maxTokens: 2048,
+      ...(agentModel ? { model: agentModel } : {}),
+    });
     responseText = llmResponse.content.trim();
+    console.log(`[agentProcessor] node=${node.id} tenant=${ctx.tenantId} LLM responded latency=${llmResponse.latencyMs}ms len=${responseText.length}`);
   } catch (err) {
     console.error('[agentProcessor] LLM call failed:', err);
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.', isWithin24hrWindow: true }).catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'llm_failed' });
     return { parallelNextNodeIds: ['action_0', 'action_1'] };
+  }
+
+  if (!responseText) {
+    console.warn(`[agentProcessor] node=${node.id} LLM returned empty response — staying in waiting_reply`);
+    return { status: 'waiting_reply' };
   }
 
   // 1. Check for exit action first (agent decided it is done — fire all configured actions in parallel)
