@@ -606,10 +606,16 @@ export class ConversationService {
       history.push({ role: 'user', content: text });
     }
 
-    // Fetch the SCHEDULING playbook config — may contain assignedStaffId for confirmation routing
-    const intentSvc = new IntentPlaybookService();
-    const schedulingPlaybook = await intentSvc.getPlaybookBlock(conv.tenantId, 'SCHEDULING').catch(() => ({ nextStepConfig: null }));
-    const assignedStaffId = (schedulingPlaybook.nextStepConfig as Record<string, string> | null)?.assignedStaffId ?? undefined;
+    // Resolve confirmation staff — priority: flow START_SCHEDULING node > AI Playbook config
+    // Flow sets playbookOverride = 'staff:<uuid>' when START_SCHEDULING has assignedStaffId
+    let assignedStaffId: string | undefined;
+    if (conv.playbookOverride?.startsWith('staff:')) {
+      assignedStaffId = conv.playbookOverride.slice('staff:'.length);
+    } else {
+      const intentSvc = new IntentPlaybookService();
+      const schedulingPlaybook = await intentSvc.getPlaybookBlock(conv.tenantId, 'SCHEDULING').catch(() => ({ nextStepConfig: null }));
+      assignedStaffId = (schedulingPlaybook.nextStepConfig as Record<string, string> | null)?.assignedStaffId ?? undefined;
+    }
 
     // Fetch active services so the LLM uses exact names instead of guessing
     const allServices = await this.schedulingService.listServices(conv.tenantId);
@@ -765,11 +771,13 @@ export class ConversationService {
       ? await db.query.products.findFirst({ where: eq(products.id, conv.productId) })
       : null;
 
-    // Load intent playbook — use LLM-classified intent when available so the right
-    // playbook fires even if conv.state hasn't transitioned yet (e.g. GENERAL_INQUIRY
-    // playbook loads while state is still BROWSING).
+    // Load intent playbook — priority: flow ACTIVATE_PLAYBOOK node > LLM-classified intent > conv state
     const intentSvc = new IntentPlaybookService();
-    const playbookLookupKey = intentOverride ?? conv.state;
+    // playbookOverride starting with 'staff:' is reserved for scheduling staff routing; skip it here
+    const flowPlaybookKey = conv.playbookOverride && !conv.playbookOverride.startsWith('staff:')
+      ? conv.playbookOverride
+      : undefined;
+    const playbookLookupKey = flowPlaybookKey ?? intentOverride ?? conv.state;
     const playbookResult = await intentSvc.getPlaybookBlock(conv.tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
 
     const systemPrompt = buildSystemPrompt({

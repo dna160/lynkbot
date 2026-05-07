@@ -27,7 +27,9 @@ export type NodeType =
   | 'SEND_WINDOW'
   | 'RATE_LIMIT'
   | 'SEGMENT_QUALITY_GATE'
-  | 'END_FLOW';
+  | 'END_FLOW'
+  | 'START_SCHEDULING'    // Hands off to the scheduling system; terminal
+  | 'ACTIVATE_PLAYBOOK';  // Activates a specific AI Playbook for subsequent AI responses; terminal
 
 // ── Trigger Types ─────────────────────────────────────────────────────────────
 
@@ -145,6 +147,20 @@ export interface EndFlowConfig {
   reason?: string;
 }
 
+export interface StartSchedulingConfig {
+  /** Optional intro message sent to buyer before handing off */
+  introMessage?: string;
+  /** Optional consultation type label (e.g. "Skin Consultation") */
+  consultationType?: string;
+  /** Staff UUID to receive the booking confirmation notification */
+  assignedStaffId?: string;
+}
+
+export interface ActivatePlaybookConfig {
+  /** The intent key of the playbook to activate (e.g. 'SCHEDULING', 'PRODUCT_INQUIRY') */
+  intentKey: string;
+}
+
 export type NodeConfig =
   | SendTemplateConfig
   | SendTextConfig
@@ -160,6 +176,8 @@ export type NodeConfig =
   | RateLimitConfig
   | SegmentQualityGateConfig
   | EndFlowConfig
+  | StartSchedulingConfig
+  | ActivatePlaybookConfig
   | Record<string, unknown>;
 
 // ── Graph Structures ──────────────────────────────────────────────────────────
