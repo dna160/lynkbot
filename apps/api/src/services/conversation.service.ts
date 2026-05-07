@@ -606,6 +606,11 @@ export class ConversationService {
       history.push({ role: 'user', content: text });
     }
 
+    // Fetch the SCHEDULING playbook config — may contain assignedStaffId for confirmation routing
+    const intentSvc = new IntentPlaybookService();
+    const schedulingPlaybook = await intentSvc.getPlaybookBlock(conv.tenantId, 'SCHEDULING').catch(() => ({ nextStepConfig: null }));
+    const assignedStaffId = (schedulingPlaybook.nextStepConfig as Record<string, string> | null)?.assignedStaffId ?? undefined;
+
     // Fetch active services so the LLM uses exact names instead of guessing
     const allServices = await this.schedulingService.listServices(conv.tenantId);
     const activeServices = allServices.filter(s => s.isActive);
@@ -636,6 +641,7 @@ export class ConversationService {
           { id: conv.id, state: conv.state },
           { id: buyer.id, displayName: buyer.displayName, waPhone: buyer.waPhone },
           envelope,
+          assignedStaffId,
         );
 
         // Send the human-readable result to the buyer

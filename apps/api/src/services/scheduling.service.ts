@@ -469,6 +469,7 @@ export class SchedulingService {
     conv: { id: string; state: string },
     buyer: { id: string; displayName?: string | null; waPhone: string },
     envelope: { action: string; service_name?: string; requested_datetime?: string; staff_id?: string; service_id?: string; start_time?: string; previous_appointment_id?: string },
+    overrideConfirmationStaffId?: string,
   ): Promise<string> {
     if (envelope.action === 'check_availability') {
       const slots = await this.getAvailableSlots(
@@ -499,17 +500,22 @@ export class SchedulingService {
       );
       await this.updateAppointmentStatus(appt.id, tenantId, 'pending_doctor');
 
-      // Fetch staff + service for confirmation template
-      const staffRow = await db.query.staff.findFirst({ where: eq(staff.id, envelope.staff_id) });
+      // Fetch slot staff + service; optionally override which staff gets the confirmation
+      const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, envelope.staff_id) });
       const serviceRow = await db.query.services.findFirst({ where: eq(services.id, envelope.service_id) });
 
-      if (staffRow && serviceRow) {
+      // Playbook assignedStaffId overrides the slot staff for the confirmation notification
+      const notifyStaff = overrideConfirmationStaffId
+        ? (await db.query.staff.findFirst({ where: and(eq(staff.id, overrideConfirmationStaffId), eq(staff.tenantId, tenantId)) }) ?? slotStaff)
+        : slotStaff;
+
+      if (notifyStaff && serviceRow) {
         await this.sendStaffConfirmationTemplate(
-          appt, buyer.displayName ?? 'Pelanggan', staffRow.name, staffRow.phoneNumber, serviceRow.name, tenantId,
+          appt, buyer.displayName ?? 'Pelanggan', notifyStaff.name, notifyStaff.phoneNumber, serviceRow.name, tenantId,
         ).catch(err => console.error('[scheduling] Staff confirmation template failed:', err));
       }
 
-      return `Baik, permintaan appointment *${serviceRow?.name ?? ''}* sudah kami kirim ke ${staffRow?.name ?? 'dokter'}. Tunggu konfirmasinya ya, Kak 🙏\n\nKamu akan dapat notifikasi begitu dikonfirmasi.`;
+      return `Baik, permintaan appointment *${serviceRow?.name ?? ''}* sudah kami kirim ke ${notifyStaff?.name ?? 'dokter'}. Tunggu konfirmasinya ya, Kak 🙏\n\nKamu akan dapat notifikasi begitu dikonfirmasi.`;
     }
 
     if (envelope.action === 'reschedule_booking') {
