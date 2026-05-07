@@ -7,11 +7,12 @@
  *           so the worker does not need to import from apps/*.
  */
 import { createDecipheriv } from 'node:crypto';
-import { db, buyers, conversations, messages, tenants, flowExecutions, staff, appointments, eq, and, or, not, sql } from '@lynkbot/db';
+import { db, buyers, conversations, messages, tenants, flowExecutions, staff, appointments, products, intentPlaybooks, eq, and, or, not, sql } from '@lynkbot/db';
 import { MetaClient, extractFirstMessage, isStatusUpdate, extractText, extractMessageId } from '@lynkbot/meta';
 import { FlowEngine } from '@lynkbot/flow-engine';
-import { getLLMClient, query as ragQuery, formatWIBDatetime } from '@lynkbot/ai';
-import { STAFF_CONFIRMATION_KEYWORDS, STAFF_REJECTION_KEYWORDS } from '@lynkbot/shared';
+import { getLLMClient, query as ragQuery, formatWIBDatetime, classifyMessageIntent, buildSystemPrompt, STATE_PROMPTS } from '@lynkbot/ai';
+import type { MessageIntent } from '@lynkbot/ai';
+import { STAFF_CONFIRMATION_KEYWORDS, STAFF_REJECTION_KEYWORDS, BOOKING_INTENT_KEYWORDS } from '@lynkbot/shared';
 import Redis from 'ioredis';
 
 // ── AES-256-GCM decrypt (inline copy) ─────────────────────────────────────────
@@ -76,6 +77,78 @@ const AGENT_KEYWORDS = ['agent', 'human', 'orang', 'cs', 'customer service', 'ba
 
 function isWithin24HourWindow(lastMessageAt: Date): boolean {
   return Date.now() - lastMessageAt.getTime() < 24 * 60 * 60 * 1000;
+}
+
+function detectBookingIntent(text: string): boolean {
+  const allKeywords = [...BOOKING_INTENT_KEYWORDS.id, ...BOOKING_INTENT_KEYWORDS.en];
+  return containsAny(text, allKeywords);
+}
+
+type NextStepType = 'continue_conversation' | 'checkout' | 'schedule_consultation' | 'human_handoff' | 'collect_info';
+
+/**
+ * Inline replica of IntentPlaybookService.getPlaybookBlock().
+ * Looks up an active playbook for the given intent key and builds the prompt block.
+ */
+async function getPlaybookBlock(tenantId: string, conversationState: string): Promise<{
+  block: string;
+  nextStepType: NextStepType;
+  nextStepConfig: Record<string, unknown> | null;
+  fallbackMessage: string | null;
+}> {
+  const empty = { block: '', nextStepType: 'continue_conversation' as NextStepType, nextStepConfig: null, fallbackMessage: null };
+
+  try {
+    let playbook = await db.query.intentPlaybooks.findFirst({
+      where: and(
+        eq(intentPlaybooks.tenantId, tenantId),
+        eq(intentPlaybooks.intentKey, conversationState as any),
+        eq(intentPlaybooks.isActive, true),
+      ),
+      orderBy: (t, { desc }) => desc(t.priority),
+    });
+
+    if (!playbook) {
+      playbook = await db.query.intentPlaybooks.findFirst({
+        where: and(
+          eq(intentPlaybooks.tenantId, tenantId),
+          eq(intentPlaybooks.intentKey, 'GENERAL_INQUIRY'),
+          eq(intentPlaybooks.isActive, true),
+        ),
+        orderBy: (t, { desc }) => desc(t.priority),
+      });
+    }
+
+    if (!playbook || !playbook.systemPromptAddition) return empty;
+
+    const parts: string[] = [];
+    parts.push(`\n\nINTENT PLAYBOOK — ${playbook.label}:`);
+    parts.push(playbook.systemPromptAddition);
+    if (playbook.toneNote) parts.push(`Tone note: ${playbook.toneNote}`);
+    if (playbook.nextStepType !== 'continue_conversation') {
+      parts.push(`Next step direction: ${playbook.nextStepType.replace(/_/g, ' ').toUpperCase()}`);
+      if (playbook.nextStepType === 'schedule_consultation') {
+        const cfg = (playbook.nextStepConfig as Record<string, unknown>) ?? {};
+        parts.push(`Guide the buyer toward scheduling a consultation. ${cfg.consultationType ? `Consultation type: ${cfg.consultationType}.` : ''} ${cfg.cta ? `Use this call-to-action: "${cfg.cta}"` : 'Ask them to reply with SCHEDULE or their preferred time.'}`);
+      } else if (playbook.nextStepType === 'checkout') {
+        parts.push('Naturally guide toward purchase. If buyer shows intent, transition to checkout flow.');
+      } else if (playbook.nextStepType === 'human_handoff') {
+        parts.push('At the right moment, offer to connect the buyer with a human agent. They can type AGENT to escalate.');
+      } else if (playbook.nextStepType === 'collect_info') {
+        const cfg = (playbook.nextStepConfig as Record<string, unknown>) ?? {};
+        parts.push(`Collect the following from the buyer: ${cfg.infoToCollect ?? 'relevant information'}.`);
+      }
+    }
+
+    return {
+      block: parts.join('\n'),
+      nextStepType: playbook.nextStepType as NextStepType,
+      nextStepConfig: playbook.nextStepConfig as Record<string, unknown> | null,
+      fallbackMessage: playbook.fallbackMessage,
+    };
+  } catch {
+    return empty;
+  }
 }
 
 // ── Main processor ────────────────────────────────────────────────────────────
@@ -342,7 +415,8 @@ async function handleInboundConversation(
 
   if (opts.skipAI) return;
 
-  // Simple state routing (simplified from ConversationService)
+  // ── State routing with intent classification & playbook injection ───────────
+
   if (conv.state === 'INIT') {
     await db.update(conversations).set({ state: 'GREETING' }).where(eq(conversations.id, conv.id));
     conv = { ...conv, state: 'GREETING' };
@@ -354,8 +428,45 @@ async function handleInboundConversation(
     return;
   }
 
-  // Default: AI response for BROWSING / PRODUCT_INQUIRY / etc.
-  await sendAiResponse(tenantId, conv, buyer, text);
+  // For BROWSING and beyond: classify intent + RAG in parallel
+  const lastBotMsg = await db.query.messages.findFirst({
+    where: and(eq(messages.conversationId, conv.id), eq(messages.direction, 'outbound')),
+    orderBy: (m, { desc }) => desc(m.createdAt),
+  });
+  const lastBotMessage = lastBotMsg?.textContent ?? undefined;
+
+  const [ragContext, classifiedIntent] = await Promise.all([
+    ragQuery(tenantId, text).catch((): string => ''),
+    classifyMessageIntent(text, tenantId, lastBotMessage).catch((): MessageIntent => 'BROWSING'),
+  ]);
+
+  // Booking / scheduling intent detection
+  const isBookingKeyword = detectBookingIntent(text);
+  if (isBookingKeyword || classifiedIntent === 'SCHEDULING') {
+    const wasAlreadyScheduling = conv.state === 'SCHEDULING';
+    await db.update(conversations).set({ state: 'SCHEDULING', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+
+    // Playbook activates ONLY after buyer has already provided a time/date
+    // (i.e. conversation was already in SCHEDULING state). On the first
+    // scheduling message we collect the date/time without the playbook so
+    // staff confirmation later includes the actual slot.
+    const intentForPlaybook = wasAlreadyScheduling ? ('SCHEDULING' as MessageIntent) : undefined;
+    await sendAiResponse(tenantId, { ...conv, state: 'SCHEDULING' }, buyer, text, ragContext || undefined, intentForPlaybook);
+    return;
+  }
+
+  // State transitions based on classified intent
+  if (classifiedIntent === 'PRODUCT_INQUIRY') {
+    await db.update(conversations).set({ state: 'PRODUCT_INQUIRY', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+  } else if (classifiedIntent === 'CHECKOUT_INTENT') {
+    await db.update(conversations).set({ state: 'CHECKOUT_INTENT', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+  } else if (classifiedIntent === 'OBJECTION_HANDLING') {
+    await db.update(conversations).set({ state: 'OBJECTION_HANDLING', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+  } else if (classifiedIntent === 'GENERAL_INQUIRY' || classifiedIntent === 'BROWSING') {
+    await db.update(conversations).set({ state: 'BROWSING', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+  }
+
+  await sendAiResponse(tenantId, conv, buyer, text, ragContext || undefined, classifiedIntent);
 }
 
 // ── Staff scheduling handlers (mirrors SchedulingService, no apps/api import) ──
@@ -450,30 +561,55 @@ async function sendText(tenantId: string, to: string, message: string): Promise<
   }
 }
 
-async function sendAiResponse(tenantId: string, conv: any, buyer: any, userMessage: string): Promise<void> {
+async function sendAiResponse(
+  tenantId: string,
+  conv: any,
+  buyer: any,
+  userMessage: string,
+  additionalContext?: string,
+  intentOverride?: MessageIntent,
+): Promise<void> {
   if (!isWithin24HourWindow(conv.lastMessageAt)) return;
 
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   const product = conv.productId
-    ? await db.query.products.findFirst({ where: eq((db as any).schema.products.id, conv.productId) })
+    ? await db.query.products.findFirst({ where: eq(products.id, conv.productId) })
     : null;
 
-  let ragContext = '';
-  try {
-    ragContext = await ragQuery(tenantId, userMessage);
-  } catch {
-    // Ignore RAG failure
+  let ragContext = additionalContext ?? '';
+  if (!ragContext) {
+    try {
+      ragContext = await ragQuery(tenantId, userMessage);
+    } catch {
+      // Ignore RAG failure
+    }
   }
 
-  const systemPrompt = `Kamu adalah asisten penjualan WhatsApp untuk ${tenant?.storeName ?? 'LynkBot Store'}. Bahasa: ${conv.language ?? 'id'}.` +
-    (ragContext ? `\n\nKonteks produk:\n${ragContext}` : '');
+  // Load intent playbook — use LLM-classified intent when available so the right
+  // playbook fires even if conv.state hasn't transitioned yet.
+  const playbookLookupKey = intentOverride ?? conv.state;
+  const playbookResult = await getPlaybookBlock(tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
+
+  const systemPrompt = buildSystemPrompt({
+    storeName: tenant?.storeName ?? 'LynkBot Store',
+    productName: product?.name,
+    bookPersonaPrompt: product?.bookPersonaPrompt,
+    language: (conv.language as 'id' | 'en') ?? 'id',
+    playbookContext: playbookResult.block || undefined,
+  });
+
+  const stateOverlay = (STATE_PROMPTS as Record<string, string>)[conv.state] ?? '';
+  const contextBlock = ragContext
+    ? `\n\nPRODUCT KNOWLEDGE (retrieved from training material — use this to answer questions accurately; do NOT say you don't have information if the answer is in this context):\n${ragContext}`
+    : '';
+  const finalSystemPrompt = systemPrompt + stateOverlay + contextBlock;
 
   const llm = getLLMClient();
   const start = Date.now();
   let aiText = '';
 
   try {
-    const response = await llm.chat([{ role: 'user', content: userMessage }], { system: systemPrompt });
+    const response = await llm.chat([{ role: 'user', content: userMessage }], { system: finalSystemPrompt });
     aiText = response.content;
   } catch {
     aiText = conv.language === 'id'
