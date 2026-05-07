@@ -7,6 +7,7 @@
  *           Falls back to FTS if vector returns < 3 results.
  */
 import { db, productEmbeddings, products, eq, sql } from '@lynkbot/db';
+import { logger } from '@lynkbot/shared';
 
 // Lazy-load embedding model
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,7 +30,7 @@ async function getEmbedding(text: string): Promise<number[]> {
     });
     return res.data[0].embedding;
   } catch (err) {
-    console.error('[vectorPipeline] Embedding generation failed:', err);
+    logger.error('Embedding generation failed', { error: String(err), context: 'vectorPipeline' });
     throw err;
   }
 }
@@ -96,7 +97,7 @@ export async function vectorQuery(tenantId: string, question: string, limit = 5)
       .map((r: any) => `[Source: ${r.product_name}]\n${r.chunk_text}`)
       .join('\n\n---\n\n');
   } catch (err) {
-    console.error('[vectorPipeline] Vector query failed, falling back to FTS:', err);
+    logger.error('Vector query failed, falling back to FTS', { error: String(err), context: 'vectorPipeline' });
     return ftsQuery(tenantId, question);
   }
 }

@@ -40,7 +40,7 @@ vi.mock('../vectorPipeline', () => ({
 }));
 
 import { chunkText, extractPdfText } from '../chunker';
-import { query } from '../pipeline';
+import { vectorQuery as query } from '../vectorPipeline';
 import { embed } from '../embeddings';
 
 describe('chunker', () => {

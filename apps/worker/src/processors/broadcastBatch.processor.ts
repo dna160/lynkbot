@@ -9,7 +9,7 @@
 import type { Job } from 'bullmq';
 import { Queue } from 'bullmq';
 import { db, buyers, flowExecutions, buyerBroadcastLog, eq, and, or, not, gte } from '@lynkbot/db';
-import { QUEUES } from '@lynkbot/shared';
+import { QUEUES, logger } from '@lynkbot/shared';
 
 interface BroadcastBatchData {
   tenantId: string;
@@ -107,13 +107,14 @@ export async function broadcastBatchProcessor(job: Job<BroadcastBatchData>): Pro
   }
 
   if (skipped24h.length > 0) {
-    console.log(`[broadcastBatchProcessor] Skipped ${skipped24h.length} buyers (outside 24h window)`);
+    logger.info(`Skipped ${skipped24h.length} buyers (outside 24h window)`, { context: 'broadcastBatchProcessor' });
   }
   if (skippedCooldown.length > 0) {
-    console.log(`[broadcastBatchProcessor] Skipped ${skippedCooldown.length} buyers (template cooldown)`);
+    logger.info(`Skipped ${skippedCooldown.length} buyers (template cooldown)`, { context: 'broadcastBatchProcessor' });
   }
 
-  console.log(
-    `[broadcastBatchProcessor] Enqueued ${enqueued.length}/${buyerIds.length} individual flow jobs for flow=${flowId} tenant=${tenantId}`,
+  logger.info(
+    `Enqueued ${enqueued.length}/${buyerIds.length} individual flow jobs for flow=${flowId} tenant=${tenantId}`,
+    { context: 'broadcastBatchProcessor', flowId, tenantId },
   );
 }
