@@ -679,7 +679,7 @@ export class FlowEngine {
       try {
         const triggerCfg = (flow.triggerConfig ?? {}) as TriggerConfig;
         const segmentFilter = triggerCfg.segmentFilter ?? {};
-        await this.broadcastToSegment(flow.tenantId, flow.id, segmentFilter);
+        await this.broadcastToSegment(flow.tenantId, flow.id, segmentFilter, undefined);
       } catch (err) {
         console.error(
           `[FlowEngine] evaluateTimeTriggers failed for flow=${flow.id}:`,
@@ -703,6 +703,7 @@ export class FlowEngine {
     tenantId: string,
     flowId: string,
     segmentFilter: SegmentFilter | Record<string, unknown>,
+    templateName?: string,
   ): Promise<void> {
     const sf = segmentFilter as SegmentFilter;
     const BATCH_SIZE = Number(process.env.BROADCAST_BATCH_SIZE ?? 500);
@@ -811,6 +812,7 @@ export class FlowEngine {
           tenantId,
           flowId,
           buyerIds: batch.map(b => b.id),
+          templateName,
           executionContext: { segmentFilter: sf },
         },
         {

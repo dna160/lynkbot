@@ -123,6 +123,20 @@ export const ingestProcessor: Processor = async (job) => {
     }
     job.log(`[5/6] All chunks stored`);
 
+    // ── Vector embeddings (semantic search) ────────────────────────────────────
+    job.log(`[5.5/6] Generating vector embeddings for ${textChunks.length} chunks...`);
+    try {
+      const { storeProductEmbeddings } = await import('@lynkbot/ai');
+      await withTimeout(
+        storeProductEmbeddings(tenantId, productId, textChunks.map(c => c.text)),
+        120_000,
+        'vector embedding generation'
+      );
+      job.log(`[5.5/6] Vector embeddings stored in pgvector`);
+    } catch (embedErr) {
+      job.log(`[5.5/6] Vector embedding failed (non-fatal): ${(embedErr as Error).message}`);
+    }
+
     // ── Mark ready FIRST — then attempt persona generation ───────────────────
     // Mark ready before the LLM call so a slow/failed persona never blocks the product.
     await db.update(products).set({
