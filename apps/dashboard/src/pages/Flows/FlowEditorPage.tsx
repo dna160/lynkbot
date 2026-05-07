@@ -20,7 +20,8 @@ import { useToast } from '@/components/ToastProvider';
 type NodeType =
   | 'TRIGGER' | 'SEND_TEMPLATE' | 'SEND_TEXT' | 'SEND_INTERACTIVE'
   | 'DELAY' | 'WAIT_FOR_REPLY' | 'IF_CONDITION' | 'KEYWORD_ROUTER'
-  | 'TAG_BUYER' | 'UPDATE_BUYER' | 'SEGMENT_QUALITY_GATE' | 'END_FLOW';
+  | 'TAG_BUYER' | 'UPDATE_BUYER' | 'SEGMENT_QUALITY_GATE' | 'END_FLOW'
+  | 'AGENT';
 
 interface FlowNode {
   id: string;
@@ -74,6 +75,7 @@ const PALETTE_NODES: NodePaletteEntry[] = [
   { type: 'UPDATE_BUYER',         label: 'Update Buyer',    icon: '✏️', color: '#EC4899', description: 'Update buyer profile field',  category: 'action'   },
   { type: 'SEGMENT_QUALITY_GATE', label: 'Quality Gate',    icon: '🛡',  color: '#EF4444', description: 'Filter low-quality contacts', category: 'logic'    },
   { type: 'END_FLOW',             label: 'End Flow',        icon: '🔚', color: '#64748B', description: 'Terminate the flow',          category: 'control'  },
+  { type: 'AGENT',               label: 'Agent',           icon: '🤖', color: '#6366F1', description: 'AI agent with booking tools',  category: 'action'   },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -88,7 +90,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function nodeOutputCount(type: NodeType): number {
   if (type === 'END_FLOW') return 0;
-  if (type === 'IF_CONDITION' || type === 'KEYWORD_ROUTER') return 2;
+  if (type === 'IF_CONDITION' || type === 'KEYWORD_ROUTER' || type === 'AGENT') return 2;
   return 1;
 }
 
@@ -139,6 +141,10 @@ function nodePreview(type: NodeType, config: Record<string, unknown>): string {
       return 'Filters contacts by quality';
     case 'END_FLOW':
       return config.reason ? `Reason: ${config.reason}` : 'End conversation';
+    case 'AGENT': {
+      const instr = String(config.instructions ?? '');
+      return instr ? `"${instr.slice(0, 40)}${instr.length > 40 ? '…' : ''}"` : 'Configure instructions →';
+    }
     default:
       return '';
   }
@@ -164,6 +170,12 @@ function buildNodeHtml(type: NodeType, config: Record<string, unknown>, nodeId: 
       <div class="df-branch-row">
         <span class="df-branch-yes">Match</span>
         <span class="df-branch-no">Other</span>
+      </div>`;
+  } else if (type === 'AGENT') {
+    branchLabels = `
+      <div class="df-branch-row">
+        <span class="df-branch-yes">↩ Customer Reply</span>
+        <span class="df-branch-no">✓ Exit</span>
       </div>`;
   }
 
@@ -202,6 +214,7 @@ function drawflowOutputToPort(nodeType: string, outKey: string): string | undefi
   const idx = parseInt(outKey.replace('output_', ''), 10) - 1; // 0-based
   if (nodeType === 'IF_CONDITION') return idx === 0 ? 'true' : 'false';
   if (nodeType === 'KEYWORD_ROUTER') return String(idx);
+  if (nodeType === 'AGENT') return idx === 0 ? 'customer_reply' : 'exit';
   return idx === 0 ? undefined : String(idx); // undefined = default port
 }
 
@@ -221,6 +234,11 @@ function portToDrawflowOutput(nodeType: string, sourcePort: string | undefined):
     if (sourcePort !== undefined && !isNaN(Number(sourcePort))) return `output_${Number(sourcePort) + 1}`;
     // Already Drawflow-style from older saves
     if (sourcePort?.startsWith('output_')) return sourcePort;
+    return 'output_1';
+  }
+  if (nodeType === 'AGENT') {
+    if (sourcePort === 'customer_reply' || sourcePort === 'output_1') return 'output_1';
+    if (sourcePort === 'exit' || sourcePort === 'output_2') return 'output_2';
     return 'output_1';
   }
   // Default node: undefined/'default' → output_1
@@ -865,6 +883,106 @@ function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, on
           </label>
         )}
 
+        {node.type === 'AGENT' && (
+          <div className="space-y-4">
+            {/* Two exits info */}
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-secondary mb-2">Exit Ports</div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-indigo-900/10 border border-indigo-800/30">
+                <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                <span className="text-xs text-indigo-400 font-medium">Output 1 — Customer Reply (agent waits)</span>
+              </div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-green-900/10 border border-green-800/30">
+                <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                <span className="text-xs text-green-400 font-medium">Output 2 — Exit (booking done / error)</span>
+              </div>
+            </div>
+
+            {/* Instructions */}
+            <div>
+              <label className="block">
+                <span className="text-xs font-medium text-secondary">Agent Instructions</span>
+                <textarea
+                  rows={5}
+                  className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono leading-relaxed"
+                  placeholder={"Help the buyer schedule a consultation. Check availability, confirm the booking, and notify the assigned staff."}
+                  value={String(node.config.instructions ?? '')}
+                  onChange={e => update({ instructions: e.target.value })}
+                />
+                <span className="text-[10px] text-secondary/50 mt-1 block">
+                  Multi-step instructions for what the agent should accomplish. The agent has built-in scheduling tools.
+                </span>
+              </label>
+            </div>
+
+            {/* Memory toggle */}
+            <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+              <input
+                type="checkbox"
+                checked={Boolean(node.config.memoryEnabled)}
+                onChange={e => update({ memoryEnabled: e.target.checked })}
+                className="w-4 h-4 rounded border-border text-accent"
+              />
+              <div>
+                <span className="text-sm text-secondary">Enable memory</span>
+                <span className="text-[10px] text-secondary/40 block">Agent remembers the full conversation across turns</span>
+              </div>
+            </label>
+
+            {/* Intro message */}
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Intro Message <span className="text-secondary/40">(optional)</span></span>
+              <textarea
+                rows={3}
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none"
+                placeholder={"Halo! Saya akan membantu kamu booking jadwal. Layanan apa yang kamu butuhkan? 😊"}
+                value={String(node.config.introMessage ?? '')}
+                onChange={e => update({ introMessage: e.target.value })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">Sent on first entry before the agent loop begins.</span>
+            </label>
+
+            {/* Consultation type */}
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Consultation Type <span className="text-secondary/40">(optional)</span></span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                placeholder="Skin Consultation"
+                value={String(node.config.consultationType ?? '')}
+                onChange={e => update({ consultationType: e.target.value })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">Hint to the LLM about the default service type.</span>
+            </label>
+
+            {/* Assigned staff ID */}
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Assigned Staff ID <span className="text-secondary/40">(optional)</span></span>
+              <input
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent font-mono text-xs"
+                placeholder="uuid of the staff member to notify"
+                value={String(node.config.assignedStaffId ?? '')}
+                onChange={e => update({ assignedStaffId: e.target.value.trim() || undefined })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">Overrides the slot staff for booking confirmation notification.</span>
+            </label>
+
+            {/* Staff message */}
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Staff Notification Message <span className="text-secondary/40">(optional)</span></span>
+              <textarea
+                rows={4}
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono text-xs leading-relaxed"
+                placeholder={"📅 New booking!\n\nPatient: {{buyerName}}\nService: {{serviceName}}\nTime: {{time}}\n\nReply Konfirmasi to confirm."}
+                value={String(node.config.staffMessage ?? '')}
+                onChange={e => update({ staffMessage: e.target.value || undefined })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">
+                Supports <code className="font-mono">{'{{buyerName}}'}</code>, <code className="font-mono">{'{{serviceName}}'}</code>, <code className="font-mono">{'{{time}}'}</code>. Leave blank for default message.
+              </span>
+            </label>
+          </div>
+        )}
+
         {(node.validationErrors?.length ?? 0) > 0 && (
           <div className="p-3 bg-red-900/20 border border-red-800/40 rounded-lg">
             <div className="text-xs font-semibold text-red-400 mb-1">⚠ Validation errors</div>
@@ -1077,6 +1195,7 @@ export function FlowEditorPage() {
       : newType === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : newType === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : newType === 'SEND_TEXT' ? { message: '' }
+      : newType === 'AGENT' ? { instructions: '', memoryEnabled: true }
       : {};
 
     const inCount = nodeInputCount(newType);
@@ -1168,6 +1287,7 @@ export function FlowEditorPage() {
       : type === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : type === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : type === 'SEND_TEXT' ? { message: '' }
+      : type === 'AGENT' ? { instructions: '', memoryEnabled: true }
       : {};
 
     editorRef.current.addNode(
@@ -1190,6 +1310,7 @@ export function FlowEditorPage() {
       : type === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : type === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : type === 'SEND_TEXT' ? { message: '' }
+      : type === 'AGENT' ? { instructions: '', memoryEnabled: true }
       : {};
     // Place new nodes in a cascading position
     const exported = editorRef.current.export() as any;

@@ -27,7 +27,10 @@ export type NodeType =
   | 'SEND_WINDOW'
   | 'RATE_LIMIT'
   | 'SEGMENT_QUALITY_GATE'
-  | 'END_FLOW';
+  | 'END_FLOW'
+  | 'START_SCHEDULING'    // Hands off to the scheduling system; terminal
+  | 'ACTIVATE_PLAYBOOK'  // Activates a specific AI Playbook for subsequent AI responses; terminal
+  | 'AGENT';             // Embedded conversational agent with scheduling tools; 2 exits: customer_reply / exit
 
 // ── Trigger Types ─────────────────────────────────────────────────────────────
 
@@ -145,6 +148,31 @@ export interface EndFlowConfig {
   reason?: string;
 }
 
+export interface StartSchedulingConfig {
+  introMessage?: string;
+  consultationType?: string;
+  assignedStaffId?: string;
+}
+
+export interface ActivatePlaybookConfig {
+  intentKey: string;
+}
+
+export interface AgentStaffNotification {
+  staffId: string;
+  message: string;
+}
+
+export interface AgentConfig {
+  instructions: string;
+  memoryEnabled: boolean;
+  introMessage?: string;
+  consultationType?: string;
+  assignedStaffId?: string;
+  staffMessage?: string;
+  additionalStaffNotifications?: AgentStaffNotification[];
+}
+
 export type NodeConfig =
   | SendTemplateConfig
   | SendTextConfig
@@ -160,6 +188,9 @@ export type NodeConfig =
   | RateLimitConfig
   | SegmentQualityGateConfig
   | EndFlowConfig
+  | StartSchedulingConfig
+  | ActivatePlaybookConfig
+  | AgentConfig
   | Record<string, unknown>;
 
 // ── Graph Structures ──────────────────────────────────────────────────────────
