@@ -46,7 +46,11 @@ export async function checkQuota(tenantId: string, resource: QuotaResource): Pro
     current = row?.count ?? 0;
   }
 
-  return { ok: current < limit, limit, current };
+  if (current >= limit) {
+    throw new Error(`quota_exceeded: ${resource} limit (${limit}) reached. Current: ${current}`);
+  }
+
+  return { ok: true, limit, current };
 }
 
 export function requireQuota(resource: QuotaResource) {

@@ -1,5 +1,23 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { api } from '../../lib/api';
+
+declare global {
+  interface Window { __LYNKBOT_API_URL__?: string; }
+}
+
+const BASE_URL = window.__LYNKBOT_API_URL__ || import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+const internalApi = axios.create({
+  baseURL: BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+internalApi.interceptors.request.use((config) => {
+  const token = localStorage.getItem('lynkbot_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
 interface Tenant {
   id: string;
@@ -46,20 +64,10 @@ export function AdminPage() {
       return;
     }
 
-    const internalApi = axios.create({
-      baseURL: `${BASE_URL}/internal`,
-      headers: { 'Content-Type': 'application/json', 'x-api-key': '' },
-    });
-    internalApi.interceptors.request.use((config) => {
-      const token = localStorage.getItem('lynkbot_token');
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    });
-
     Promise.all([
-      internalApi.get('/admin/tenants'),
-      internalApi.get('/dlq/stats'),
-      internalApi.get('/admin/metrics'),
+      internalApi.get('/internal/admin/tenants'),
+      internalApi.get('/internal/dlq/stats'),
+      internalApi.get('/internal/admin/metrics'),
     ])
       .then(([tRes, dRes, mRes]) => {
         setTenants(tRes.data.tenants ?? []);
@@ -84,7 +92,7 @@ export function AdminPage() {
 
   const impersonate = async (id: string) => {
     try {
-      const res = await api.get(`/admin/tenants/${id}/impersonate`);
+      const res = await internalApi.get(`/internal/admin/tenants/${id}/impersonate`);
       window.open(`/login?token=${encodeURIComponent(res.data.token)}`, '_blank');
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed');
@@ -217,5 +225,3 @@ function tierBadge(tier: string) {
   }
 }
 
-import axios from 'axios';
-const BASE_URL = window.__LYNKBOT_API_URL__ || import.meta.env.VITE_API_URL || 'http://localhost:3000';

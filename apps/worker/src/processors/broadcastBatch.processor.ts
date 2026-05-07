@@ -8,13 +8,14 @@
  */
 import type { Job } from 'bullmq';
 import { Queue } from 'bullmq';
-import { db, buyers, flowExecutions, eq, and, or, not } from '@lynkbot/db';
+import { db, buyers, flowExecutions, buyerBroadcastLog, eq, and, or, not, gte } from '@lynkbot/db';
 import { QUEUES } from '@lynkbot/shared';
 
 interface BroadcastBatchData {
   tenantId: string;
   flowId: string;
   buyerIds: string[];
+  templateName?: string;
   executionContext?: Record<string, unknown>;
 }
 
@@ -37,7 +38,7 @@ const redisConnection = (() => {
 const flowQueue = new Queue(QUEUES.FLOW_EXECUTION, { connection: redisConnection });
 
 export async function broadcastBatchProcessor(job: Job<BroadcastBatchData>): Promise<void> {
-  const { tenantId, flowId, buyerIds } = job.data;
+  const { tenantId, flowId, buyerIds, templateName } = job.data;
 
   // Load buyer details for compliance checks
   const buyerRows = await db.query.buyers.findMany({
@@ -60,12 +61,37 @@ export async function broadcastBatchProcessor(job: Job<BroadcastBatchData>): Pro
   const runningBuyerIds = new Set(runningExecutions.map(e => e.buyerId));
 
   const enqueued: string[] = [];
+  const skipped24h: string[] = [];
+  const skippedCooldown: string[] = [];
 
   for (const buyerId of buyerIds) {
     const buyer = buyerMap.get(buyerId);
     if (!buyer) continue;
     if (buyer.doNotContact) continue;
     if (runningBuyerIds.has(buyerId)) continue;
+
+    // 24h session window check (using updatedAt as proxy for last activity)
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if (buyer.updatedAt && buyer.updatedAt < twentyFourHoursAgo) {
+      skipped24h.push(buyerId);
+      continue;
+    }
+
+    // Template cooldown check (7 days same template to same buyer)
+    if (templateName) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const recentBroadcast = await db.query.buyerBroadcastLog.findFirst({
+        where: and(
+          eq(buyerBroadcastLog.buyerId, buyerId),
+          eq(buyerBroadcastLog.templateName, templateName),
+          gte(buyerBroadcastLog.sentAt, sevenDaysAgo),
+        ),
+      });
+      if (recentBroadcast) {
+        skippedCooldown.push(buyerId);
+        continue;
+      }
+    }
 
     await flowQueue.add(
       'flow.start_execution',
@@ -78,6 +104,13 @@ export async function broadcastBatchProcessor(job: Job<BroadcastBatchData>): Pro
       { removeOnComplete: 100, removeOnFail: false },
     );
     enqueued.push(buyerId);
+  }
+
+  if (skipped24h.length > 0) {
+    console.log(`[broadcastBatchProcessor] Skipped ${skipped24h.length} buyers (outside 24h window)`);
+  }
+  if (skippedCooldown.length > 0) {
+    console.log(`[broadcastBatchProcessor] Skipped ${skippedCooldown.length} buyers (template cooldown)`);
   }
 
   console.log(

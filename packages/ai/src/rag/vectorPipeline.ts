@@ -66,17 +66,21 @@ export async function storeProductEmbeddings(
 export async function vectorQuery(tenantId: string, question: string, limit = 5): Promise<string> {
   try {
     const embedding = await getEmbedding(question);
-    const embeddingStr = `[${embedding.join(',')}]`;
+    // Validate embedding is a numeric array before parameterizing
+    if (!Array.isArray(embedding) || !embedding.every(n => typeof n === 'number' && Number.isFinite(n))) {
+      throw new Error('Invalid embedding: expected finite numeric array');
+    }
+    const embeddingLiteral = sql.raw(JSON.stringify(embedding));
 
     const results = await db.execute(sql`
       SELECT pe.chunk_text, pe.product_id, p.name as product_name,
-             1 - (pe.embedding <=> ${embeddingStr}::vector) as similarity
+             1 - (pe.embedding <=> ${embeddingLiteral}::vector) as similarity
       FROM product_embeddings pe
       JOIN products p ON p.id = pe.product_id
       WHERE pe.tenant_id = ${tenantId}
         AND p.knowledge_status = 'ready'
         AND p.is_active = true
-      ORDER BY pe.embedding <=> ${embeddingStr}::vector
+      ORDER BY pe.embedding <=> ${embeddingLiteral}::vector
       LIMIT ${limit}
     `);
 
