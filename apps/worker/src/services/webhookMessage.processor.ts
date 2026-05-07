@@ -248,6 +248,9 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
 
   // Flow resume
   let resumedByFlowEngine = false;
+  let activatedPlaybookKey: string | null = null;
+  let postFlowConvId: string | null = null;
+
   try {
     const activeExecution = await db.query.flowExecutions.findFirst({
       where: and(
@@ -262,8 +265,6 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
       await flowEngine.resumeExecution(activeExecution.id, inboundText);
       resumedByFlowEngine = true;
 
-      // ACTIVATE_PLAYBOOK sets playbookOverride — send an immediate AI response
-      // using that playbook for the buyer's message that just resumed the flow.
       const postFlowConv = await db.query.conversations.findFirst({
         where: and(
           eq(conversations.tenantId, tenantId),
@@ -272,19 +273,35 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
         ),
       });
 
+      console.log(`[webhookProcessor] post-resume conv=${postFlowConv?.id} playbookOverride=${postFlowConv?.playbookOverride ?? 'none'}`);
+
       if (postFlowConv?.playbookOverride && !postFlowConv.playbookOverride.startsWith('staff:')) {
-        const activatedKey = postFlowConv.playbookOverride as MessageIntent;
-        // Transition conv state to the activated intent so subsequent messages route correctly
-        await db.update(conversations)
-          .set({ state: activatedKey as any, playbookOverride: null })
-          .where(eq(conversations.id, postFlowConv.id));
-        await sendAiResponse(tenantId, { ...postFlowConv, state: activatedKey as any, playbookOverride: null }, buyer, inboundText, undefined, activatedKey)
-          .catch(err => console.error('[webhookProcessor] ACTIVATE_PLAYBOOK AI response failed:', err));
-        return;
+        activatedPlaybookKey = postFlowConv.playbookOverride;
+        postFlowConvId = postFlowConv.id;
       }
     }
-  } catch {
-    // Fall through
+  } catch (err) {
+    console.error('[webhookProcessor] Flow resume error:', err);
+  }
+
+  // ACTIVATE_PLAYBOOK ran — send AI response outside the swallowed try/catch
+  if (activatedPlaybookKey && postFlowConvId) {
+    console.log(`[webhookProcessor] ACTIVATE_PLAYBOOK detected key=${activatedPlaybookKey} — sending AI response`);
+    try {
+      await db.update(conversations)
+        .set({ state: activatedPlaybookKey as any, playbookOverride: null })
+        .where(eq(conversations.id, postFlowConvId));
+    } catch (err) {
+      console.error('[webhookProcessor] Failed to update conv state after ACTIVATE_PLAYBOOK:', err);
+    }
+    const freshConv = await db.query.conversations.findFirst({
+      where: eq(conversations.id, postFlowConvId),
+    });
+    if (freshConv) {
+      await sendAiResponse(tenantId, freshConv, buyer, inboundText, undefined, activatedPlaybookKey as MessageIntent)
+        .catch(err => console.error('[webhookProcessor] ACTIVATE_PLAYBOOK sendAiResponse failed:', err));
+    }
+    return;
   }
 
   // Keyword trigger — pass conversationId so flow node processors can update the conversation
