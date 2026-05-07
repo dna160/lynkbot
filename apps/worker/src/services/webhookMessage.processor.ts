@@ -276,8 +276,11 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
     }
   }
 
+  const skipAI = keywordTriggered || resumedByFlowEngine;
+  console.log(`[webhookProcessor] buyer=${buyer.id} keywordTriggered=${keywordTriggered} resumedByFlow=${resumedByFlowEngine} skipAI=${skipAI}`);
+
   // Core conversation handling
-  await handleInboundConversation(tenantId, normalized, buyer, { skipAI: keywordTriggered || resumedByFlowEngine });
+  await handleInboundConversation(tenantId, normalized, buyer, { skipAI });
 }
 
 async function resolveTenantByPhoneNumberId(phoneNumberId: string): Promise<string | null> {
@@ -440,6 +443,8 @@ async function handleInboundConversation(
     classifyMessageIntent(text, tenantId, lastBotMessage).catch((): MessageIntent => 'BROWSING'),
   ]);
 
+  console.log(`[webhookProcessor] buyer=${buyer.id} conv=${conv.id} state=${conv.state} intent=${classifiedIntent} ragLen=${ragContext.length}`);
+
   // Booking / scheduling intent detection
   const isBookingKeyword = detectBookingIntent(text);
   if (isBookingKeyword || classifiedIntent === 'SCHEDULING') {
@@ -451,6 +456,7 @@ async function handleInboundConversation(
     // scheduling message we collect the date/time without the playbook so
     // staff confirmation later includes the actual slot.
     const intentForPlaybook = wasAlreadyScheduling ? ('SCHEDULING' as MessageIntent) : undefined;
+    console.log(`[webhookProcessor] buyer=${buyer.id} scheduling detected wasAlreadyScheduling=${wasAlreadyScheduling} intentForPlaybook=${intentForPlaybook ?? 'none'}`);
     await sendAiResponse(tenantId, { ...conv, state: 'SCHEDULING' }, buyer, text, ragContext || undefined, intentForPlaybook);
     return;
   }
@@ -589,6 +595,7 @@ async function sendAiResponse(
   // playbook fires even if conv.state hasn't transitioned yet.
   const playbookLookupKey = intentOverride ?? conv.state;
   const playbookResult = await getPlaybookBlock(tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
+  console.log(`[webhookProcessor] buyer=${buyer.id} playbookLookup=${playbookLookupKey} blockLen=${playbookResult.block.length} nextStep=${playbookResult.nextStepType}`);
 
   const systemPrompt = buildSystemPrompt({
     storeName: tenant?.storeName ?? 'LynkBot Store',
