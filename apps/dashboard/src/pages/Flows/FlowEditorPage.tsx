@@ -12,7 +12,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Drawflow from 'drawflow';
 import 'drawflow/dist/drawflow.min.css';
-import { flowsApi, aiApi } from '@/lib/api';
+import { flowsApi, aiApi, api } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -172,10 +172,12 @@ function buildNodeHtml(type: NodeType, config: Record<string, unknown>, nodeId: 
         <span class="df-branch-no">Other</span>
       </div>`;
   } else if (type === 'AGENT') {
+    const a0 = (config.actions as any)?.[0]?.label ?? 'Action 1';
+    const a1 = (config.actions as any)?.[1]?.label ?? 'Action 2';
     branchLabels = `
       <div class="df-branch-row">
-        <span class="df-branch-yes">↩ Customer Reply</span>
-        <span class="df-branch-no">✓ Exit</span>
+        <span class="df-branch-yes">${a0}</span>
+        <span class="df-branch-no">${a1}</span>
       </div>`;
   }
 
@@ -214,7 +216,7 @@ function drawflowOutputToPort(nodeType: string, outKey: string): string | undefi
   const idx = parseInt(outKey.replace('output_', ''), 10) - 1; // 0-based
   if (nodeType === 'IF_CONDITION') return idx === 0 ? 'true' : 'false';
   if (nodeType === 'KEYWORD_ROUTER') return String(idx);
-  if (nodeType === 'AGENT') return idx === 0 ? 'customer_reply' : 'exit';
+  if (nodeType === 'AGENT') return idx === 0 ? 'action_0' : 'action_1';
   return idx === 0 ? undefined : String(idx); // undefined = default port
 }
 
@@ -237,8 +239,8 @@ function portToDrawflowOutput(nodeType: string, sourcePort: string | undefined):
     return 'output_1';
   }
   if (nodeType === 'AGENT') {
-    if (sourcePort === 'customer_reply' || sourcePort === 'output_1') return 'output_1';
-    if (sourcePort === 'exit' || sourcePort === 'output_2') return 'output_2';
+    if (sourcePort === 'action_0' || sourcePort === 'customer_reply' || sourcePort === 'output_1') return 'output_1';
+    if (sourcePort === 'action_1' || sourcePort === 'exit' || sourcePort === 'output_2') return 'output_2';
     return 'output_1';
   }
   // Default node: undefined/'default' → output_1
@@ -517,6 +519,156 @@ function MessageEditor({
         {hint && <span className="text-[10px] text-secondary/50 mt-1 block">{hint}</span>}
       </label>
       <VariablePicker onInsert={handleInsert} />
+    </div>
+  );
+}
+
+// ── Agent Config Panel ────────────────────────────────────────────────────────
+
+interface StaffOption { id: string; name: string; phoneNumber: string; }
+
+function AgentConfigPanel({
+  node,
+  update,
+}: {
+  node: FlowNode;
+  update: (patch: Partial<Record<string, unknown>>) => void;
+}) {
+  const [staffList, setStaffList] = useState<StaffOption[]>([]);
+  const actions = (node.config.actions as Array<{ label: string; instructions: string }> | undefined)
+    ?? [{ label: 'Action 1', instructions: '' }, { label: 'Action 2', instructions: '' }];
+
+  useEffect(() => {
+    api.get<StaffOption[]>('/scheduling/staff')
+      .then(res => setStaffList(res.data))
+      .catch(() => setStaffList([]));
+  }, []);
+
+  const updateAction = (idx: 0 | 1, patch: Partial<{ label: string; instructions: string }>) => {
+    const next = [...actions] as [{ label: string; instructions: string }, { label: string; instructions: string }];
+    next[idx] = { ...next[idx], ...patch };
+    update({ actions: next });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Instructions */}
+      <label className="block">
+        <span className="text-xs font-medium text-secondary">Agent Instructions</span>
+        <textarea
+          rows={5}
+          className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono leading-relaxed"
+          placeholder="Help the buyer schedule a consultation. Check availability, confirm the booking, and notify the assigned staff."
+          value={String(node.config.instructions ?? '')}
+          onChange={e => update({ instructions: e.target.value })}
+        />
+        <span className="text-[10px] text-secondary/50 mt-1 block">
+          Multi-step instructions for what the agent should accomplish. The agent has built-in scheduling tools.
+        </span>
+      </label>
+
+      {/* Memory toggle */}
+      <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+        <input
+          type="checkbox"
+          checked={Boolean(node.config.memoryEnabled)}
+          onChange={e => update({ memoryEnabled: e.target.checked })}
+          className="w-4 h-4 rounded border-border text-accent"
+        />
+        <div>
+          <span className="text-sm text-secondary">Enable memory</span>
+          <span className="text-[10px] text-secondary/40 block">Agent remembers the full conversation across turns</span>
+        </div>
+      </label>
+
+      {/* Actions */}
+      <div className="space-y-3">
+        <div className="text-xs font-medium text-secondary">Output Actions</div>
+        <span className="text-[10px] text-secondary/40 block -mt-2">
+          Give each output a label and tell the agent when to trigger it. The agent routes the conversation to the connected node.
+        </span>
+        {([0, 1] as const).map(idx => (
+          <div key={idx} className={`rounded-lg border p-3 space-y-2 ${idx === 0 ? 'border-indigo-800/40 bg-indigo-900/10' : 'border-slate-700/40 bg-slate-800/20'}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${idx === 0 ? 'bg-indigo-400' : 'bg-slate-400'}`} />
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${idx === 0 ? 'text-indigo-400' : 'text-slate-400'}`}>
+                Output {idx + 1}
+              </span>
+            </div>
+            <input
+              className="w-full bg-[#0F172A] border border-border rounded-md px-2.5 py-1.5 text-sm text-primary focus:outline-none focus:border-accent font-medium"
+              placeholder={`Action ${idx + 1} label`}
+              value={actions[idx]?.label ?? ''}
+              onChange={e => updateAction(idx, { label: e.target.value })}
+            />
+            <textarea
+              rows={2}
+              className="w-full bg-[#0F172A] border border-border rounded-md px-2.5 py-1.5 text-xs text-primary focus:outline-none focus:border-accent resize-none text-secondary/80"
+              placeholder={idx === 0 ? 'When to trigger this (e.g. booking confirmed, task complete)' : 'When to trigger this (e.g. user declined, error occurred)'}
+              value={actions[idx]?.instructions ?? ''}
+              onChange={e => updateAction(idx, { instructions: e.target.value })}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Intro message */}
+      <label className="block">
+        <span className="text-xs font-medium text-secondary">Intro Message <span className="text-secondary/40">(optional)</span></span>
+        <textarea
+          rows={3}
+          className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none"
+          placeholder="Halo! Saya akan membantu kamu booking jadwal. Layanan apa yang kamu butuhkan? 😊"
+          value={String(node.config.introMessage ?? '')}
+          onChange={e => update({ introMessage: e.target.value || undefined })}
+        />
+        <span className="text-[10px] text-secondary/50 mt-1 block">Sent on first entry before the agent loop begins.</span>
+      </label>
+
+      {/* Consultation type */}
+      <label className="block">
+        <span className="text-xs font-medium text-secondary">Consultation Type <span className="text-secondary/40">(optional)</span></span>
+        <input
+          className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+          placeholder="Skin Consultation"
+          value={String(node.config.consultationType ?? '')}
+          onChange={e => update({ consultationType: e.target.value || undefined })}
+        />
+        <span className="text-[10px] text-secondary/50 mt-1 block">Hint to the LLM about the default service type.</span>
+      </label>
+
+      {/* Assigned staff — dropdown */}
+      <label className="block">
+        <span className="text-xs font-medium text-secondary">Notification Staff <span className="text-secondary/40">(optional)</span></span>
+        <select
+          className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+          value={String(node.config.assignedStaffId ?? '')}
+          onChange={e => update({ assignedStaffId: e.target.value || undefined })}
+        >
+          <option value="">— None (use slot staff) —</option>
+          {staffList.map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        <span className="text-[10px] text-secondary/50 mt-1 block">
+          Overrides the slot-assigned staff for booking confirmation notification.
+        </span>
+      </label>
+
+      {/* Staff message */}
+      <label className="block">
+        <span className="text-xs font-medium text-secondary">Staff Notification Message <span className="text-secondary/40">(optional)</span></span>
+        <textarea
+          rows={4}
+          className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono text-xs leading-relaxed"
+          placeholder={'📅 New booking!\n\nPatient: {{buyerName}}\nService: {{serviceName}}\nTime: {{time}}\n\nReply Konfirmasi to confirm.'}
+          value={String(node.config.staffMessage ?? '')}
+          onChange={e => update({ staffMessage: e.target.value || undefined })}
+        />
+        <span className="text-[10px] text-secondary/50 mt-1 block">
+          Supports <code className="font-mono">{'{{buyerName}}'}</code>, <code className="font-mono">{'{{serviceName}}'}</code>, <code className="font-mono">{'{{time}}'}</code>.
+        </span>
+      </label>
     </div>
   );
 }
@@ -884,103 +1036,7 @@ function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, on
         )}
 
         {node.type === 'AGENT' && (
-          <div className="space-y-4">
-            {/* Two exits info */}
-            <div className="space-y-1">
-              <div className="text-xs font-medium text-secondary mb-2">Exit Ports</div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-indigo-900/10 border border-indigo-800/30">
-                <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
-                <span className="text-xs text-indigo-400 font-medium">Output 1 — Customer Reply (agent waits)</span>
-              </div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-green-900/10 border border-green-800/30">
-                <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
-                <span className="text-xs text-green-400 font-medium">Output 2 — Exit (booking done / error)</span>
-              </div>
-            </div>
-
-            {/* Instructions */}
-            <div>
-              <label className="block">
-                <span className="text-xs font-medium text-secondary">Agent Instructions</span>
-                <textarea
-                  rows={5}
-                  className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono leading-relaxed"
-                  placeholder={"Help the buyer schedule a consultation. Check availability, confirm the booking, and notify the assigned staff."}
-                  value={String(node.config.instructions ?? '')}
-                  onChange={e => update({ instructions: e.target.value })}
-                />
-                <span className="text-[10px] text-secondary/50 mt-1 block">
-                  Multi-step instructions for what the agent should accomplish. The agent has built-in scheduling tools.
-                </span>
-              </label>
-            </div>
-
-            {/* Memory toggle */}
-            <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
-              <input
-                type="checkbox"
-                checked={Boolean(node.config.memoryEnabled)}
-                onChange={e => update({ memoryEnabled: e.target.checked })}
-                className="w-4 h-4 rounded border-border text-accent"
-              />
-              <div>
-                <span className="text-sm text-secondary">Enable memory</span>
-                <span className="text-[10px] text-secondary/40 block">Agent remembers the full conversation across turns</span>
-              </div>
-            </label>
-
-            {/* Intro message */}
-            <label className="block">
-              <span className="text-xs font-medium text-secondary">Intro Message <span className="text-secondary/40">(optional)</span></span>
-              <textarea
-                rows={3}
-                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none"
-                placeholder={"Halo! Saya akan membantu kamu booking jadwal. Layanan apa yang kamu butuhkan? 😊"}
-                value={String(node.config.introMessage ?? '')}
-                onChange={e => update({ introMessage: e.target.value })}
-              />
-              <span className="text-[10px] text-secondary/50 mt-1 block">Sent on first entry before the agent loop begins.</span>
-            </label>
-
-            {/* Consultation type */}
-            <label className="block">
-              <span className="text-xs font-medium text-secondary">Consultation Type <span className="text-secondary/40">(optional)</span></span>
-              <input
-                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
-                placeholder="Skin Consultation"
-                value={String(node.config.consultationType ?? '')}
-                onChange={e => update({ consultationType: e.target.value })}
-              />
-              <span className="text-[10px] text-secondary/50 mt-1 block">Hint to the LLM about the default service type.</span>
-            </label>
-
-            {/* Assigned staff ID */}
-            <label className="block">
-              <span className="text-xs font-medium text-secondary">Assigned Staff ID <span className="text-secondary/40">(optional)</span></span>
-              <input
-                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent font-mono text-xs"
-                placeholder="uuid of the staff member to notify"
-                value={String(node.config.assignedStaffId ?? '')}
-                onChange={e => update({ assignedStaffId: e.target.value.trim() || undefined })}
-              />
-              <span className="text-[10px] text-secondary/50 mt-1 block">Overrides the slot staff for booking confirmation notification.</span>
-            </label>
-
-            {/* Staff message */}
-            <label className="block">
-              <span className="text-xs font-medium text-secondary">Staff Notification Message <span className="text-secondary/40">(optional)</span></span>
-              <textarea
-                rows={4}
-                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono text-xs leading-relaxed"
-                placeholder={"📅 New booking!\n\nPatient: {{buyerName}}\nService: {{serviceName}}\nTime: {{time}}\n\nReply Konfirmasi to confirm."}
-                value={String(node.config.staffMessage ?? '')}
-                onChange={e => update({ staffMessage: e.target.value || undefined })}
-              />
-              <span className="text-[10px] text-secondary/50 mt-1 block">
-                Supports <code className="font-mono">{'{{buyerName}}'}</code>, <code className="font-mono">{'{{serviceName}}'}</code>, <code className="font-mono">{'{{time}}'}</code>. Leave blank for default message.
-              </span>
-            </label>
-          </div>
+          <AgentConfigPanel node={node} update={update} />
         )}
 
         {(node.validationErrors?.length ?? 0) > 0 && (
@@ -1195,7 +1251,7 @@ export function FlowEditorPage() {
       : newType === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : newType === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : newType === 'SEND_TEXT' ? { message: '' }
-      : newType === 'AGENT' ? { instructions: '', memoryEnabled: true }
+      : newType === 'AGENT' ? { instructions: '', memoryEnabled: true, actions: [{ label: 'Action 1', instructions: '' }, { label: 'Action 2', instructions: '' }] }
       : {};
 
     const inCount = nodeInputCount(newType);

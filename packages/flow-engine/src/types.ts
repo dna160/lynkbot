@@ -163,7 +163,15 @@ export interface AgentStaffNotification {
   message: string;
 }
 
+export interface AgentAction {
+  /** Label shown on the output port in the flow editor */
+  label: string;
+  /** Tells the agent when to trigger this action (sent to the LLM as context) */
+  instructions: string;
+}
+
 export interface AgentConfig {
+  /** Main multi-step instructions for what the agent should accomplish */
   instructions: string;
   memoryEnabled: boolean;
   introMessage?: string;
@@ -171,6 +179,8 @@ export interface AgentConfig {
   assignedStaffId?: string;
   staffMessage?: string;
   additionalStaffNotifications?: AgentStaffNotification[];
+  /** Two configurable exit actions — agent decides which to trigger based on conversation */
+  actions?: [AgentAction, AgentAction];
 }
 
 export type NodeConfig =
