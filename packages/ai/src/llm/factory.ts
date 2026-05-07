@@ -9,6 +9,7 @@
  * DO NOT  : Instantiate clients directly in apps/ — always use this factory.
  */
 import type { ILLMClient } from './ILLMClient';
+import { logger } from '@lynkbot/shared';
 import { GrokClient } from './GrokClient';
 import { OpenAIClient } from './OpenAIClient';
 import { AnthropicClient } from './AnthropicClient';
@@ -28,7 +29,7 @@ function initProviders(): ProviderEntry[] {
     try {
       list.push({ name: 'xai', client: new GrokClient() });
     } catch (err) {
-      console.warn('[LLMFactory] Failed to initialize GrokClient:', err);
+      logger.warn('Failed to initialize GrokClient', { error: String(err), context: 'LLMFactory' });
     }
   }
 
@@ -36,7 +37,7 @@ function initProviders(): ProviderEntry[] {
     try {
       list.push({ name: 'openai', client: new OpenAIClient() });
     } catch (err) {
-      console.warn('[LLMFactory] Failed to initialize OpenAIClient:', err);
+      logger.warn('Failed to initialize OpenAIClient', { error: String(err), context: 'LLMFactory' });
     }
   }
 
@@ -44,7 +45,7 @@ function initProviders(): ProviderEntry[] {
     try {
       list.push({ name: 'anthropic', client: new AnthropicClient() });
     } catch (err) {
-      console.warn('[LLMFactory] Failed to initialize AnthropicClient:', err);
+      logger.warn('Failed to initialize AnthropicClient', { error: String(err), context: 'LLMFactory' });
     }
   }
 
@@ -85,13 +86,13 @@ export function getLLMClient(preferred?: string): ILLMClient {
   // Fallback: return first healthy provider
   for (const p of providers) {
     if (p.client.isHealthy()) {
-      console.warn(`[LLMFactory] Primary provider ${primaryProvider} unhealthy — falling back to ${p.name}`);
+      logger.warn(`Primary provider ${primaryProvider} unhealthy — falling back to ${p.name}`, { context: 'LLMFactory' });
       return p.client;
     }
   }
 
   // All providers unhealthy — return primary anyway (let it fail and retry)
-  console.error('[LLMFactory] All LLM providers unhealthy — returning primary and hoping for the best');
+  logger.error('All LLM providers unhealthy — returning primary and hoping for the best', { context: 'LLMFactory' });
   return primary?.client ?? providers[0].client;
 }
 

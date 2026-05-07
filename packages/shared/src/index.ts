@@ -20,3 +20,4 @@ export * from './schemas/payment.schema';
 export * from './constants/states';
 export * from './constants/queues';
 export * from './constants/couriers';
+export { logger } from './logger';
