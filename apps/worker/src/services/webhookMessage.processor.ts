@@ -261,6 +261,27 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
     if (activeExecution) {
       await flowEngine.resumeExecution(activeExecution.id, inboundText);
       resumedByFlowEngine = true;
+
+      // ACTIVATE_PLAYBOOK sets playbookOverride — send an immediate AI response
+      // using that playbook for the buyer's message that just resumed the flow.
+      const postFlowConv = await db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.tenantId, tenantId),
+          eq(conversations.buyerId, buyer.id),
+          eq(conversations.isActive, true),
+        ),
+      });
+
+      if (postFlowConv?.playbookOverride && !postFlowConv.playbookOverride.startsWith('staff:')) {
+        const activatedKey = postFlowConv.playbookOverride as MessageIntent;
+        // Transition conv state to the activated intent so subsequent messages route correctly
+        await db.update(conversations)
+          .set({ state: activatedKey as any, playbookOverride: null })
+          .where(eq(conversations.id, postFlowConv.id));
+        await sendAiResponse(tenantId, { ...postFlowConv, state: activatedKey as any, playbookOverride: null }, buyer, inboundText, undefined, activatedKey)
+          .catch(err => console.error('[webhookProcessor] ACTIVATE_PLAYBOOK AI response failed:', err));
+        return;
+      }
     }
   } catch {
     // Fall through
@@ -593,7 +614,9 @@ async function sendAiResponse(
 
   // Load intent playbook — use LLM-classified intent when available so the right
   // playbook fires even if conv.state hasn't transitioned yet.
-  const playbookLookupKey = intentOverride ?? conv.state;
+  const flowPlaybookKey = conv.playbookOverride && !conv.playbookOverride.startsWith('staff:')
+    ? conv.playbookOverride as MessageIntent : undefined;
+  const playbookLookupKey = flowPlaybookKey ?? intentOverride ?? conv.state;
   const playbookResult = await getPlaybookBlock(tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
   console.log(`[webhookProcessor] buyer=${buyer.id} playbookLookup=${playbookLookupKey} blockLen=${playbookResult.block.length} nextStep=${playbookResult.nextStepType}`);
 
