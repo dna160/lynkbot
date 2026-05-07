@@ -28,7 +28,8 @@ export type MessageIntent =
   | 'GENERAL_INQUIRY'     // question about the brand/store/company itself
   | 'OBJECTION_HANDLING'  // price concern, hesitation, "nanti", "mahal", "pikir dulu"
   | 'CHECKOUT_INTENT'     // explicit purchase signal missed by keyword scan
-  | 'SCHEDULING'          // date/time reply OR explicit request to book/schedule a meeting
+  | 'WANTS_CONSULTATION'  // explicitly asking to book/meet/consult but no date given yet
+  | 'SCHEDULING'          // confirming or proposing a specific date/time for an appointment
   | 'BROWSING';           // greeting, casual, unclear, or unrelated
 
 const VALID_INTENTS = new Set<MessageIntent>([
@@ -36,6 +37,7 @@ const VALID_INTENTS = new Set<MessageIntent>([
   'GENERAL_INQUIRY',
   'OBJECTION_HANDLING',
   'CHECKOUT_INTENT',
+  'WANTS_CONSULTATION',
   'SCHEDULING',
   'BROWSING',
 ]);
@@ -90,11 +92,14 @@ export async function classifyMessageIntent(
     `GENERAL_INQUIRY    — asking about the brand, store, or company itself (not the product)`,
     `OBJECTION_HANDLING — expressing price concern, hesitation, doubt, or reluctance to buy`,
     `CHECKOUT_INTENT    — explicitly wanting to purchase or order`,
-    `SCHEDULING         — confirming or proposing a date/time, OR explicitly requesting to book/schedule a meeting or consultation`,
+    `WANTS_CONSULTATION — explicitly asking to meet, consult, book, or schedule, but has NOT yet given a specific date or time`,
+    `SCHEDULING         — providing or confirming a specific date, time, or day for an appointment (e.g. "Selasa jam 14:00", "besok pagi", "Jumat sore")`,
     `BROWSING           — greeting, casual small talk, unclear intent, or anything else`,
     ``,
-    `IMPORTANT: If the bot's previous message offered a consultation or asked when the buyer is available,`,
-    `and the buyer replies with a day, time, or date (e.g. "Selasa", "jam 2", "besok pagi"), classify as SCHEDULING.`,
+    `IMPORTANT DISTINCTION:`,
+    `- "Saya ingin konsultasi" / "bisa meeting?" / "mau jadwalkan" → WANTS_CONSULTATION (desire to book, no date yet)`,
+    `- "Selasa jam 2" / "besok pagi" / "Jumat jam 15:00" → SCHEDULING (specific date/time given)`,
+    `- If the bot's previous message asked when the buyer is available and the buyer replies with a day or time → SCHEDULING`,
     ``,
     `Reply with ONLY the label. No explanation, no punctuation.`,
   ].filter(Boolean).join('\n');

@@ -33,6 +33,7 @@ const INTENT_KEYS: IntentKey[] = [
   'CHECKOUT_INTENT',
   'OUT_OF_STOCK',
   'WANTS_CONSULTATION',
+  'SCHEDULING',
   'GENERAL_INQUIRY',
 ];
 
@@ -60,6 +61,7 @@ const INTENT_BADGE_COLOR: Record<IntentKey, string> = {
   CHECKOUT_INTENT: 'bg-green-900/30 text-green-400 border-green-800/40',
   OUT_OF_STOCK: 'bg-yellow-900/30 text-yellow-400 border-yellow-800/40',
   WANTS_CONSULTATION: 'bg-blue-900/30 text-blue-400 border-blue-800/40',
+  SCHEDULING: 'bg-cyan-900/30 text-cyan-400 border-cyan-800/40',
   GENERAL_INQUIRY: 'bg-slate-700/50 text-slate-300 border-slate-600/40',
 };
 
