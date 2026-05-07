@@ -58,6 +58,10 @@ function semanticPortToDrawflow(nodeType: string, port: string): string | undefi
     const idx = parseInt(port, 10);
     if (!isNaN(idx)) return `output_${idx + 1}`;
   }
+  if (nodeType === 'AGENT') {
+    if (port === 'customer_reply') return 'output_1';
+    if (port === 'exit') return 'output_2';
+  }
   if (port === 'default') return 'output_1';
   return undefined;
 }
@@ -604,6 +608,16 @@ export class FlowEngine {
     }
 
     const definition = flow.definition as unknown as FlowDefinition;
+
+    // AGENT nodes own their conversation loop — re-execute the same node so
+    // the processor can process the new buyer message and decide whether to
+    // continue waiting or exit via the 'exit' port.
+    const currentNode = definition.nodes.find(n => n.id === currentNodeId);
+    if (currentNode?.type === 'AGENT') {
+      await this.executeNode(executionId, currentNodeId, ctx);
+      return;
+    }
+
     await this._followEdge(ctx, definition, currentNodeId, 'default');
   }
 
