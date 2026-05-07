@@ -563,11 +563,20 @@ export class FlowEngine {
       }
 
       // Follow edges to next nodes
-      const port = result.nextNodeId ?? 'default';
-      const edges = this._getOutgoingEdges(definition, nodeId, port);
-      // Push in reverse so first edge is processed first (LIFO)
-      for (let i = edges.length - 1; i >= 0; i--) {
-        stack.push({ nodeId: edges[i].target });
+      if (result.parallelNextNodeIds) {
+        // Fire all specified output ports simultaneously (e.g. AGENT node)
+        const allEdges = result.parallelNextNodeIds
+          .flatMap(port => this._getOutgoingEdges(definition, nodeId, port));
+        for (let i = allEdges.length - 1; i >= 0; i--) {
+          stack.push({ nodeId: allEdges[i].target });
+        }
+      } else {
+        const port = result.nextNodeId ?? 'default';
+        const edges = this._getOutgoingEdges(definition, nodeId, port);
+        // Push in reverse so first edge is processed first (LIFO)
+        for (let i = edges.length - 1; i >= 0; i--) {
+          stack.push({ nodeId: edges[i].target });
+        }
       }
     }
 
