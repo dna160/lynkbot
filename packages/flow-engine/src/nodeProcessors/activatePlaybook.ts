@@ -8,7 +8,7 @@
  *           uses the configured playbook's system prompt instead of auto-detecting intent.
  * Exports : activatePlaybookProcessor
  */
-import { db, conversations, eq } from '@lynkbot/db';
+import { db, conversations, eq, and } from '@lynkbot/db';
 import type { FlowNode, ExecutionContext, ActivatePlaybookConfig } from '../types';
 import type { NodeResult, ProcessorDeps } from './types';
 
@@ -18,7 +18,27 @@ export async function activatePlaybookProcessor(
   _deps: ProcessorDeps,
 ): Promise<NodeResult> {
   const config = node.config as ActivatePlaybookConfig;
-  const conversationId = ctx.trigger.conversationId;
+
+  // Prefer conversationId from trigger context; fall back to querying by tenantId+buyerId.
+  // The trigger context may not carry conversationId when a keyword flow fires without
+  // an explicit conversation reference.
+  let conversationId = ctx.trigger.conversationId;
+
+  if (!conversationId) {
+    try {
+      const conv = await db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.buyerId, ctx.buyerId),
+          eq(conversations.isActive, true),
+        ),
+        columns: { id: true },
+      });
+      conversationId = conv?.id;
+    } catch (err) {
+      console.warn('[activatePlaybook] Failed to resolve conversationId:', err);
+    }
+  }
 
   if (conversationId && config.intentKey) {
     try {

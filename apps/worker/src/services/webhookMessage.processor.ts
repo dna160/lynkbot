@@ -287,11 +287,19 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
     // Fall through
   }
 
-  // Keyword trigger
+  // Keyword trigger — pass conversationId so flow node processors can update the conversation
   let keywordTriggered = false;
   if (inboundText && !resumedByFlowEngine) {
     try {
-      keywordTriggered = await flowEngine.handleKeywordTrigger(tenantId, buyer.id, inboundText);
+      const activeConvForFlow = await db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.tenantId, tenantId),
+          eq(conversations.buyerId, buyer.id),
+          eq(conversations.isActive, true),
+        ),
+        columns: { id: true },
+      });
+      keywordTriggered = await flowEngine.handleKeywordTrigger(tenantId, buyer.id, inboundText, activeConvForFlow?.id);
     } catch {
       // Fall through
     }

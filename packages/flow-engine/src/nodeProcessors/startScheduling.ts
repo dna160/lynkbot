@@ -11,7 +11,7 @@
  *           4. Returns status: 'completed' — flow execution ends here.
  * Exports : startSchedulingProcessor
  */
-import { db, conversations, eq } from '@lynkbot/db';
+import { db, conversations, eq, and } from '@lynkbot/db';
 import type { FlowNode, ExecutionContext, StartSchedulingConfig } from '../types';
 import type { NodeResult, ProcessorDeps } from './types';
 
@@ -21,7 +21,6 @@ export async function startSchedulingProcessor(
   deps: ProcessorDeps,
 ): Promise<NodeResult> {
   const config = node.config as StartSchedulingConfig;
-  const conversationId = ctx.trigger.conversationId;
 
   // Send optional intro message before handing off
   if (config.introMessage?.trim() && ctx.buyer.waPhone) {
@@ -33,11 +32,29 @@ export async function startSchedulingProcessor(
     }
   }
 
+  // Prefer conversationId from trigger context; fall back to querying by tenantId+buyerId.
+  let conversationId = ctx.trigger.conversationId;
+
+  if (!conversationId) {
+    try {
+      const conv = await db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.buyerId, ctx.buyerId),
+          eq(conversations.isActive, true),
+        ),
+        columns: { id: true },
+      });
+      conversationId = conv?.id;
+    } catch (err) {
+      console.warn('[startScheduling] Failed to resolve conversationId:', err);
+    }
+  }
+
   // Transition conversation state → SCHEDULING and store the assigned staff
   if (conversationId) {
     try {
       const patch: Record<string, unknown> = { state: 'SCHEDULING' };
-      // Store assignedStaffId so conversation.service passes it to handleLLMEnvelope
       if (config.assignedStaffId) {
         patch.playbookOverride = `staff:${config.assignedStaffId}`;
       }
