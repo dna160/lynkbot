@@ -539,8 +539,8 @@ function AgentConfigPanel({
     ?? [{ label: 'Action 1', instructions: '' }, { label: 'Action 2', instructions: '' }];
 
   useEffect(() => {
-    api.get<StaffOption[]>('/scheduling/staff')
-      .then(res => setStaffList(res.data))
+    api.get<{ staff: StaffOption[] }>('/scheduling/staff')
+      .then(res => setStaffList(Array.isArray(res.data) ? res.data : (res.data?.staff ?? [])))
       .catch(() => setStaffList([]));
   }, []);
 
