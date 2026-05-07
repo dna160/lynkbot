@@ -315,6 +315,28 @@ async function executeEnvelope(
   return { reply: 'Maaf, terjadi kesalahan. Coba lagi ya.', exit: false };
 }
 
+// ── Exit action envelope ──────────────────────────────────────────────────────
+
+/**
+ * Parses an exit-action envelope from the LLM response.
+ * Format: {"action":"exit","port":0|1,"message":"optional final message"}
+ * Returns null if the response is not an exit action.
+ */
+function parseExitAction(text: string): { port: number; message?: string } | null {
+  try {
+    const match = text.match(/\{[\s\S]*?"action"\s*:\s*"exit"[\s\S]*?\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    if (parsed.action === 'exit' && (parsed.port === 0 || parsed.port === 1)) {
+      return {
+        port: parsed.port as number,
+        message: typeof parsed.message === 'string' ? parsed.message : undefined,
+      };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 // ── Main processor ────────────────────────────────────────────────────────────
 
 type HistoryMessage = { role: 'user' | 'assistant' | 'system'; content: string };
@@ -363,15 +385,26 @@ export async function agentProcessor(
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung. 🙏', isWithin24hrWindow: true }).catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'no_active_services' });
-    return { nextNodeId: 'exit' };
+    return { nextNodeId: 'action_1' };
   }
 
+  // Resolve configurable exit actions (fall back to sensible defaults)
+  const action0 = config.actions?.[0] ?? { label: 'Action 1', instructions: 'Trigger when the main task is complete (e.g. booking confirmed).' };
+  const action1 = config.actions?.[1] ?? { label: 'Action 2', instructions: 'Trigger when there is an error or the conversation should end differently.' };
+
   const serviceList = activeServices.map(s => `- ${s.name}`).join('\n');
+  const actionSection = `\n\nEXIT ACTIONS — when you decide to trigger one, respond with ONLY the JSON shown (no other text). You may include an optional "message" field for a final message to send the buyer before exiting.
+- **${action0.label}**: ${action0.instructions}
+  Trigger: {"action":"exit","port":0,"message":"<optional final message>"}
+- **${action1.label}**: ${action1.instructions}
+  Trigger: {"action":"exit","port":1,"message":"<optional final message>"}`;
+
   const systemPrompt = [
     SCHEDULING_SYSTEM_PROMPT,
     `\nLAYANAN TERSEDIA (gunakan nama persis ini di service_name):\n${serviceList}`,
     config.instructions ? `\nINSTRUKSI AGENT:\n${config.instructions}` : '',
     config.consultationType ? `\nTipe konsultasi default: ${config.consultationType}` : '',
+    actionSection,
   ].join('');
 
   // Call LLM
@@ -388,10 +421,26 @@ export async function agentProcessor(
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.', isWithin24hrWindow: true }).catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'llm_failed' });
-    return { nextNodeId: 'exit' };
+    return { nextNodeId: 'action_1' };
   }
 
-  // Try parsing as scheduling envelope
+  // 1. Check for exit action first (agent decided to route to an output port)
+  const exitAction = parseExitAction(responseText);
+  if (exitAction !== null) {
+    const meta = await deps.getMetaClient(ctx.tenantId);
+    if (exitAction.message) {
+      await meta.sendText({ to: ctx.buyer.waPhone, message: exitAction.message, isWithin24hrWindow: true }).catch(() => null);
+      history.push({ role: 'assistant', content: exitAction.message });
+      if (config.memoryEnabled) ctx.variables[memoryKey] = history;
+    }
+    ctx.executionLog.push({
+      nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'ok',
+      meta: { action: 'exit', port: exitAction.port },
+    });
+    return { nextNodeId: `action_${exitAction.port}` };
+  }
+
+  // 2. Check for scheduling envelope (check_availability, confirm_booking, reschedule_booking)
   const envelope = parseSchedulingEnvelope(responseText);
   let replyText: string;
   let shouldExit = false;
@@ -402,7 +451,6 @@ export async function agentProcessor(
     replyText = result.reply;
     shouldExit = result.exit;
   } else {
-    // Plain text — send to buyer and wait for reply
     replyText = responseText;
     shouldExit = false;
   }
@@ -414,7 +462,7 @@ export async function agentProcessor(
   } catch (err) {
     console.error('[agentProcessor] Failed to send reply to buyer:', err);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'send_failed' });
-    return { nextNodeId: 'exit' };
+    return { nextNodeId: 'action_1' };
   }
 
   // Update history
@@ -429,7 +477,8 @@ export async function agentProcessor(
     meta: { action: envelope?.action ?? 'text', exit: shouldExit },
   });
 
+  // Scheduling envelope exits route to action_0 (primary "task complete" action)
   return shouldExit
-    ? { nextNodeId: 'exit' }
+    ? { nextNodeId: 'action_0' }
     : { status: 'waiting_reply' };
 }

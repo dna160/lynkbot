@@ -60,8 +60,8 @@ function semanticPortToDrawflow(nodeType: string, port: string): string | undefi
     if (!isNaN(idx)) return `output_${idx + 1}`;
   }
   if (nodeType === 'AGENT') {
-    if (port === 'customer_reply') return 'output_1';
-    if (port === 'exit') return 'output_2';
+    if (port === 'action_0' || port === 'customer_reply') return 'output_1';
+    if (port === 'action_1' || port === 'exit') return 'output_2';
   }
   if (port === 'default') return 'output_1';
   return undefined;
