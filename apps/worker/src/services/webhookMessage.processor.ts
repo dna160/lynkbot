@@ -153,11 +153,12 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
   if (!buyer) throw new Error('Failed to create or load buyer');
   if (buyer.doNotContact) return;
 
-  // Ensure active conversation exists BEFORE any flow trigger fires, so that
-  // saveOutboundMessage() can attach template/text messages to the conversation.
-  // Without this, flow-triggered messages send successfully on WhatsApp but never
-  // appear in the dashboard conversation thread.
+  // Ensure active conversation exists and save the inbound message BEFORE any flow
+  // trigger fires. This gives the inbound row a timestamp that predates the bot's
+  // outbound response, so the dashboard shows the correct chronological order.
+  const messageId = extractMessageId(normalized);
   await ensureActiveConversation(tenantId, buyer.id);
+  await saveInboundMessage(tenantId, buyer.id, messageId, normalized);
 
   // Flow button trigger
   const interactiveButtonId =
@@ -218,6 +219,34 @@ async function resolveTenantByPhoneNumberId(phoneNumberId: string): Promise<stri
   return anyMatch?.id ?? null;
 }
 
+async function saveInboundMessage(tenantId: string, buyerId: string, messageId: string | undefined, payload: any): Promise<void> {
+  if (!messageId) return;
+  try {
+    const conv = await db.query.conversations.findFirst({
+      where: and(eq(conversations.tenantId, tenantId), eq(conversations.buyerId, buyerId), eq(conversations.isActive, true)),
+      columns: { id: true },
+    });
+    if (!conv) return;
+
+    await db.insert(messages).values({
+      conversationId: conv.id,
+      tenantId,
+      watiMessageId: messageId,
+      direction: 'inbound',
+      messageType: payload.messageType ?? 'text',
+      textContent: extractText(payload) || null,
+      locationLat: payload.location?.latitude?.toString() ?? null,
+      locationLng: payload.location?.longitude?.toString() ?? null,
+      rawPayload: payload as unknown as Record<string, unknown>,
+      createdAt: new Date(),
+    }).onConflictDoNothing();
+
+    await db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
+  } catch (err) {
+    console.warn('[webhookProcessor] Failed to save inbound message early:', err);
+  }
+}
+
 async function ensureActiveConversation(tenantId: string, buyerId: string): Promise<void> {
   const existing = await db.query.conversations.findFirst({
     where: and(eq(conversations.tenantId, tenantId), eq(conversations.buyerId, buyerId), eq(conversations.isActive, true)),
@@ -249,12 +278,6 @@ async function handleInboundConversation(
   const messageId = extractMessageId(payload);
   const waId = payload.waId;
   if (!waId) return;
-
-  // Idempotency check
-  if (messageId) {
-    const existing = await db.query.messages.findFirst({ where: eq(messages.watiMessageId, messageId) });
-    if (existing) return;
-  }
 
   // Get or create active conversation
   let conv = await db.query.conversations.findFirst({
