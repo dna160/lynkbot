@@ -23,6 +23,7 @@ interface ServiceFormState {
   name: string;
   durationMinutes: number;
   staffIds: string[];
+  confirmationStaffId?: string | null;
   isActive: boolean;
 }
 
@@ -111,6 +112,23 @@ function ServiceModal({
             )}
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Confirmation Staff (Optional)</label>
+            <p className="text-xs text-slate-500 mb-2">Staff member who approves appointment requests for this service</p>
+            <select
+              value={form.confirmationStaffId || ''}
+              onChange={e => setForm(p => ({ ...p, confirmationStaffId: e.target.value || null }))}
+              className="w-full bg-[#0F172A] border border-[#334155] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+              <option value="">Not Assigned</option>
+              {staffList.filter(s => s.isActive).map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.role ? ` · ${s.role}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -143,10 +161,10 @@ function ServiceModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM: ServiceFormState = { name: '', durationMinutes: 60, staffIds: [], isActive: true };
+const EMPTY_FORM: ServiceFormState = { name: '', durationMinutes: 60, staffIds: [], confirmationStaffId: null, isActive: true };
 
 export function ServicesPage() {
-  const { toast } = useToast();
+  const { addToast } = useToast();
   const { data: services = [], isLoading } = useServices();
   const createService = useCreateService();
   const updateService = useUpdateService();
@@ -156,22 +174,29 @@ export function ServicesPage() {
 
   async function handleCreate(data: ServiceFormState) {
     try {
-      await createService.mutateAsync(data);
-      toast({ type: 'success', message: 'Service created' });
+      await createService.mutateAsync({
+        ...data,
+        confirmationStaffId: data.confirmationStaffId || undefined,
+      });
+      addToast('Service created', 'success');
       setShowCreate(false);
     } catch {
-      toast({ type: 'error', message: 'Failed to create service' });
+      addToast('Failed to create service', 'error');
     }
   }
 
   async function handleUpdate(data: ServiceFormState) {
     if (!editTarget) return;
     try {
-      await updateService.mutateAsync({ id: editTarget.id, ...data });
-      toast({ type: 'success', message: 'Service updated' });
+      await updateService.mutateAsync({
+        id: editTarget.id,
+        ...data,
+        confirmationStaffId: data.confirmationStaffId || null,
+      });
+      addToast('Service updated', 'success');
       setEditTarget(null);
     } catch {
-      toast({ type: 'error', message: 'Failed to update service' });
+      addToast('Failed to update service', 'error');
     }
   }
 
@@ -249,6 +274,15 @@ export function ServicesPage() {
                 </div>
               )}
 
+              {svc.confirmationStaffId && (
+                <div className="pt-2 border-t border-[#334155]">
+                  <p className="text-xs text-slate-500 mb-1">Confirms appointments:</p>
+                  <span className="px-2 py-0.5 bg-amber-600/10 text-amber-400 rounded-full text-xs border border-amber-600/20 inline-block">
+                    {svc.staff?.find(s => s.id === svc.confirmationStaffId)?.name || 'Unknown'}
+                  </span>
+                </div>
+              )}
+
               <button
                 onClick={() => setEditTarget(svc)}
                 className="w-full px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-xs font-medium transition-colors border border-white/10 mt-1"
@@ -277,6 +311,7 @@ export function ServicesPage() {
             name: editTarget.name,
             durationMinutes: editTarget.durationMinutes,
             staffIds: editTarget.staff?.map(s => s.id) ?? [],
+            confirmationStaffId: editTarget.confirmationStaffId ?? null,
             isActive: editTarget.isActive,
           }}
           onSubmit={handleUpdate}

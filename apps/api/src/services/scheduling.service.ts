@@ -70,16 +70,32 @@ export class SchedulingService {
     requestedDatetime?: string,
     count = 3,
   ): Promise<AvailableSlot[]> {
-    // 1. Resolve service (case-insensitive)
-    const service = await db.query.services.findFirst({
+    // 1. Resolve service — exact match first, then partial/fuzzy fallback
+    let service = await db.query.services.findFirst({
       where: and(
         eq(services.tenantId, tenantId),
         sql`lower(${services.name}) = lower(${serviceName})`,
         eq(services.isActive, true),
       ),
     });
+
     if (!service) {
-      throw new Error(`Service "${serviceName}" not found. Available services may have different names.`);
+      // Fuzzy fallback: either the DB name contains the requested term or vice versa
+      service = await db.query.services.findFirst({
+        where: and(
+          eq(services.tenantId, tenantId),
+          sql`lower(${services.name}) like lower(${'%' + serviceName + '%'}) or lower(${serviceName}) like lower(${'%' + services.name + '%'})`,
+          eq(services.isActive, true),
+        ),
+      });
+    }
+
+    if (!service) {
+      const available = await db.query.services.findMany({
+        where: and(eq(services.tenantId, tenantId), eq(services.isActive, true)),
+      });
+      const names = available.map(s => `"${s.name}"`).join(', ');
+      throw new Error(`Service "${serviceName}" not found. Available: ${names || 'none'}.`);
     }
 
     // 2. Get all active staff for this service via join
@@ -452,7 +468,7 @@ export class SchedulingService {
     tenantId: string,
     conv: { id: string; state: string },
     buyer: { id: string; displayName?: string | null; waPhone: string },
-    envelope: { action: string; service_name?: string; requested_datetime?: string; staff_id?: string; service_id?: string; start_time?: string },
+    envelope: { action: string; service_name?: string; requested_datetime?: string; staff_id?: string; service_id?: string; start_time?: string; previous_appointment_id?: string },
   ): Promise<string> {
     if (envelope.action === 'check_availability') {
       const slots = await this.getAvailableSlots(
@@ -496,6 +512,20 @@ export class SchedulingService {
       return `Baik, permintaan appointment *${serviceRow?.name ?? ''}* sudah kami kirim ke ${staffRow?.name ?? 'dokter'}. Tunggu konfirmasinya ya, Kak 🙏\n\nKamu akan dapat notifikasi begitu dikonfirmasi.`;
     }
 
+    if (envelope.action === 'reschedule_booking') {
+      if (!envelope.previous_appointment_id || !envelope.requested_datetime) {
+        return 'Terjadi kesalahan saat memproses perubahan jadwal. Coba ulangi ya.';
+      }
+
+      const newStartTime = new Date(envelope.requested_datetime);
+      return this.handleRescheduleRequest(
+        envelope.previous_appointment_id,
+        tenantId,
+        newStartTime,
+        buyer.displayName ?? 'Pelanggan',
+      );
+    }
+
     return 'Maaf, terjadi kesalahan. Coba lagi ya.';
   }
 
@@ -515,6 +545,25 @@ export class SchedulingService {
   }
 
   async createStaff(tenantId: string, data: { name: string; phoneNumber: string; role?: string; isActive?: boolean }) {
+    // If a staff record with this phone already exists for the tenant, reactivate it
+    // rather than hitting the unique constraint. Only block if they're already active.
+    const existing = await db.query.staff.findFirst({
+      where: and(eq(staff.tenantId, tenantId), eq(staff.phoneNumber, data.phoneNumber)),
+    });
+
+    if (existing) {
+      if (existing.isActive) {
+        const err = Object.assign(new Error('Duplicate phone number'), { code: '23505' });
+        throw err;
+      }
+      const [row] = await db
+        .update(staff)
+        .set({ name: data.name, role: data.role ?? existing.role, isActive: true })
+        .where(eq(staff.id, existing.id))
+        .returning();
+      return row;
+    }
+
     const [row] = await db.insert(staff).values({ tenantId, ...data, createdAt: new Date() }).returning();
     return row;
   }
@@ -548,10 +597,11 @@ export class SchedulingService {
     });
   }
 
-  async createService(tenantId: string, data: { name: string; durationMinutes?: number; staffIds?: string[]; isActive?: boolean }) {
+  async createService(tenantId: string, data: { name: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string; isActive?: boolean }) {
     const [svc] = await db.insert(services).values({
       tenantId, name: data.name,
       durationMinutes: data.durationMinutes ?? 60,
+      confirmationStaffId: data.confirmationStaffId || null,
       isActive: data.isActive ?? true,
       createdAt: new Date(),
     }).returning();
@@ -562,7 +612,7 @@ export class SchedulingService {
     return svc;
   }
 
-  async updateService(id: string, tenantId: string, data: { name?: string; durationMinutes?: number; staffIds?: string[]; isActive?: boolean }) {
+  async updateService(id: string, tenantId: string, data: { name?: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string | null; isActive?: boolean }) {
     const { staffIds, ...fields } = data;
     const [svc] = await db.update(services).set(fields).where(and(eq(services.id, id), eq(services.tenantId, tenantId))).returning();
     if (!svc) throw new Error('Service not found');
@@ -581,5 +631,165 @@ export class SchedulingService {
     if (!svc) return null;
     const links = await db.select({ staffId: serviceStaff.staffId }).from(serviceStaff).where(eq(serviceStaff.serviceId, id));
     return { ...svc, staffIds: links.map(l => l.staffId) };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Rescheduling support
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getConfirmationStaff(serviceId: string, tenantId: string) {
+    const svc = await db.query.services.findFirst({
+      where: and(eq(services.id, serviceId), eq(services.tenantId, tenantId)),
+    });
+    if (!svc || !svc.confirmationStaffId) return null;
+    return db.query.staff.findFirst({
+      where: and(eq(staff.id, svc.confirmationStaffId), eq(staff.tenantId, tenantId)),
+    });
+  }
+
+  async sendStaffRescheduleTemplate(
+    newAppt: typeof appointments.$inferSelect,
+    oldAppt: typeof appointments.$inferSelect,
+    buyerName: string,
+    staffName: string,
+    staffPhone: string,
+    tenantId: string,
+  ) {
+    const meta = await getTenantMetaClient(tenantId);
+    const oldTimeDisplay = formatWIBDatetime(oldAppt.startTime, oldAppt.endTime);
+    const newTimeDisplay = formatWIBDatetime(newAppt.startTime, newAppt.endTime);
+
+    await meta.sendTemplate({
+      to: staffPhone,
+      templateName: 'aria_reschedule_request',
+      languageCode: 'id',
+      components: [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: staffName },
+            { type: 'text', text: buyerName },
+            { type: 'text', text: oldTimeDisplay },
+            { type: 'text', text: newTimeDisplay },
+          ],
+        },
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: 0,
+          parameters: [{ type: 'payload', payload: `appt_reschedule_approve:${newAppt.id}` }],
+        },
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: 1,
+          parameters: [{ type: 'payload', payload: `appt_reschedule_reject:${newAppt.id}` }],
+        },
+      ],
+    });
+    console.log(`[scheduling] Reschedule template sent to ${staffPhone} for appointment ${newAppt.id}`);
+  }
+
+  async handleRescheduleRequest(
+    appointmentId: string,
+    tenantId: string,
+    newStartTime: Date,
+    buyerName: string,
+  ): Promise<string> {
+    const oldAppt = await this.getAppointment(appointmentId, tenantId);
+    if (!oldAppt) {
+      return 'Appointment tidak ditemukan. Coba hubungi kami langsung.';
+    }
+
+    if (!['pending_doctor', 'confirmed'].includes(oldAppt.status)) {
+      return 'Appointment ini tidak bisa direscheduling. Hubungi kami langsung untuk bantuan.';
+    }
+
+    const service = await db.query.services.findFirst({ where: eq(services.id, oldAppt.serviceId) });
+    const durationMs = (service?.durationMinutes ?? 60) * 60 * 1000;
+    const newEndTime = new Date(newStartTime.getTime() + durationMs);
+
+    const newAppt = await db.insert(appointments).values({
+      tenantId,
+      buyerId: oldAppt.buyerId,
+      staffId: oldAppt.staffId,
+      serviceId: oldAppt.serviceId,
+      startTime: newStartTime,
+      endTime: newEndTime,
+      status: 'rescheduling_requested',
+      previousAppointmentId: oldAppt.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning().then(rows => rows[0]);
+
+    const confirmationStaff = await this.getConfirmationStaff(oldAppt.serviceId, tenantId);
+    const staffToNotify = confirmationStaff || (await this.getStaff(oldAppt.staffId, tenantId));
+
+    if (staffToNotify) {
+      await this.sendStaffRescheduleTemplate(
+        newAppt,
+        oldAppt,
+        buyerName || 'Pelanggan',
+        staffToNotify.name,
+        staffToNotify.phoneNumber,
+        tenantId,
+      ).catch(err => console.error('[scheduling] Failed to send reschedule template:', err));
+    }
+
+    return `Baik, permintaan perubahan jadwal sudah dikirim ke ${staffToNotify?.name ?? 'staf'}. Tunggu persetujuannya ya! 🙏`;
+  }
+
+  async handleStaffRescheduleApproval(
+    newAppointmentId: string,
+    tenantId: string,
+    isApprove: boolean,
+    log: FastifyBaseLogger,
+  ) {
+    const newAppt = await this.getAppointment(newAppointmentId, tenantId);
+    if (!newAppt) {
+      log.warn({ appointmentId: newAppointmentId }, '[scheduling] Reschedule approval: appointment not found');
+      return;
+    }
+
+    if (newAppt.status !== 'rescheduling_requested') {
+      log.warn(
+        { appointmentId: newAppointmentId, status: newAppt.status },
+        '[scheduling] Reschedule approval: appointment not in rescheduling_requested state'
+      );
+      return;
+    }
+
+    if (!newAppt.previousAppointmentId) {
+      log.warn({ appointmentId: newAppointmentId }, '[scheduling] Reschedule approval: no previous appointment found');
+      return;
+    }
+
+    const oldAppt = await this.getAppointment(newAppt.previousAppointmentId, tenantId);
+    const buyer = await db.query.buyers.findFirst({ where: eq(buyers.id, newAppt.buyerId) });
+
+    if (!buyer) return;
+
+    const meta = await getTenantMetaClient(tenantId);
+
+    if (isApprove) {
+      await db.update(appointments).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(appointments.id, newAppt.previousAppointmentId));
+      await this.updateAppointmentStatus(newAppointmentId, tenantId, 'pending_doctor');
+
+      const newTimeDisplay = formatWIBDatetime(newAppt.startTime, newAppt.endTime);
+      const approveMsg = `✅ Permintaan reschedule kamu *disetujui*!\n\n📅 Jadwal baru: ${newTimeDisplay}\n\nTunggu konfirmasi dari staf ya! 🙏`;
+
+      await meta.sendText({ to: buyer.waPhone, message: approveMsg, isWithin24hrWindow: true }).catch(() =>
+        meta.sendTemplate({ to: buyer.waPhone, templateName: 'aria_reschedule_approved', languageCode: 'id', components: [] }).catch(() => null)
+      );
+
+      log.info({ appointmentId: newAppointmentId }, '[scheduling] Reschedule approved by staff');
+    } else {
+      await db.update(appointments).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(appointments.id, newAppointmentId));
+
+      const rejectMsg = `😔 Maaf, perubahan jadwal tidak bisa disetujui. Jadwal awal kamu tetap berlaku: ${oldAppt ? formatWIBDatetime(oldAppt.startTime, oldAppt.endTime) : 'N/A'}\n\nHubungi kami jika ada pertanyaan.`;
+      await meta.sendText({ to: buyer.waPhone, message: rejectMsg, isWithin24hrWindow: true }).catch(() => null);
+
+      log.info({ appointmentId: newAppointmentId }, '[scheduling] Reschedule rejected by staff');
+    }
   }
 }

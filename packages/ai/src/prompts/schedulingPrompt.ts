@@ -54,7 +54,8 @@ export function formatWIBDatetime(utcStart: Date, utcEnd?: Date): string {
 /** Type for parsed scheduling action envelopes */
 export type SchedulingEnvelope =
   | { action: 'check_availability'; service_name: string; requested_datetime?: string }
-  | { action: 'confirm_booking'; staff_id: string; service_id: string; start_time: string };
+  | { action: 'confirm_booking'; staff_id: string; service_id: string; start_time: string }
+  | { action: 'reschedule_booking'; previous_appointment_id: string; requested_datetime: string };
 
 /**
  * Try to parse an LLM response as a scheduling JSON envelope.
@@ -86,6 +87,17 @@ export function parseSchedulingEnvelope(text: string): SchedulingEnvelope | null
         start_time: obj.start_time,
       };
     }
+    if (
+      obj.action === 'reschedule_booking' &&
+      typeof obj.previous_appointment_id === 'string' &&
+      typeof obj.requested_datetime === 'string'
+    ) {
+      return {
+        action: 'reschedule_booking',
+        previous_appointment_id: obj.previous_appointment_id,
+        requested_datetime: obj.requested_datetime,
+      };
+    }
     return null;
   } catch {
     return null;
@@ -109,13 +121,16 @@ FORMAT WHATSAPP:
 - Emoji boleh secukupnya
 
 TOOL CALLS (JSON ENVELOPE):
-Ketika kamu perlu cek ketersediaan atau konfirmasi booking, BALAS HANYA dengan JSON berikut (tanpa teks lain):
+Ketika kamu perlu cek ketersediaan, konfirmasi booking, atau proses reschedule, BALAS HANYA dengan JSON berikut (tanpa teks lain):
 
 Untuk cek jadwal kosong:
 {"action":"check_availability","service_name":"<nama layanan>","requested_datetime":"<ISO8601 atau null>"}
 
 Untuk konfirmasi slot yang sudah disetujui pembeli:
 {"action":"confirm_booking","staff_id":"<uuid>","service_id":"<uuid>","start_time":"<UTC ISO8601>"}
+
+Untuk reschedule appointment (jika pembeli ingin ubah jadwal yang sudah pending):
+{"action":"reschedule_booking","previous_appointment_id":"<uuid>","requested_datetime":"<UTC ISO8601>"}
 
 ALUR PERCAKAPAN:
 1. Tanya layanan apa yang diinginkan (jika belum jelas)
@@ -124,10 +139,15 @@ ALUR PERCAKAPAN:
 4. Setelah pembeli setuju, gunakan confirm_booking untuk submit
 5. Informasikan bahwa permintaan sudah dikirim ke staf untuk dikonfirmasi
 
+DETEKSI RESCHEDULE:
+Jika pembeli sudah punya appointment pending dan ingin ubah jadwal (misalnya: "Bisa jadwal lain?", "Saya mau reschedule", "Ubah ke hari X jam Y"), GUNAKAN reschedule_booking dengan appointment ID yang lama.
+
 BATASAN:
 - Maksimal 3 putaran negosiasi. Jika tidak ada slot yang cocok, sarankan pembeli menghubungi langsung.
+- Hanya 1 reschedule request per appointment. Jika pembeli ingin ubah lagi setelah staff menolak, suruh hubungi support.
 - Selalu tampilkan waktu dalam format WIB (Asia/Jakarta)
 - Jangan konfirmasi appointment tanpa JSON envelope confirm_booking
+- Jangan reschedule appointment yang sudah confirmed oleh staf — suruh pembeli hubungi langsung
 
 CONTOH SLOT DISPLAY:
 "Berikut jadwal yang tersedia:

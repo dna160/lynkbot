@@ -186,6 +186,15 @@ export const metaWebhookRoutes: FastifyPluginAsync = async (fastify) => {
                 .catch((err: unknown) =>
                   request.log.error({ err, appointmentId }, 'Staff button reply handling failed'),
                 );
+            } else if (buttonPayload?.startsWith('appt_reschedule_')) {
+              // Format: "appt_reschedule_approve:<appointmentId>" | "appt_reschedule_reject:<appointmentId>"
+              const isApprove = buttonPayload.startsWith('appt_reschedule_approve:');
+              const appointmentId = buttonPayload.split(':')[1];
+              schedulingService
+                .handleStaffRescheduleApproval(appointmentId, tenantId, isApprove, request.log)
+                .catch((err: unknown) =>
+                  request.log.error({ err, appointmentId }, 'Staff reschedule approval handling failed'),
+                );
             } else if (inboundText) {
               // Path B: keyword reply (konfirmasi / tolak / etc.)
               schedulingService
