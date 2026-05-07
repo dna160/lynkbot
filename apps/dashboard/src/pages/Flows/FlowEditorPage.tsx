@@ -23,7 +23,7 @@ type NodeType =
   | 'TRIGGER' | 'SEND_TEMPLATE' | 'SEND_TEXT' | 'SEND_INTERACTIVE'
   | 'DELAY' | 'WAIT_FOR_REPLY' | 'IF_CONDITION' | 'KEYWORD_ROUTER'
   | 'TAG_BUYER' | 'UPDATE_BUYER' | 'SEGMENT_QUALITY_GATE' | 'END_FLOW'
-  | 'START_SCHEDULING' | 'ACTIVATE_PLAYBOOK' | 'AGENT';
+  | 'START_SCHEDULING' | 'ACTIVATE_PLAYBOOK' | 'NOTIFY_STAFF' | 'AGENT';
 
 interface FlowNode {
   id: string;
@@ -79,7 +79,8 @@ const PALETTE_NODES: NodePaletteEntry[] = [
   { type: 'END_FLOW',             label: 'End Flow',         icon: '🔚', color: '#64748B', description: 'Terminate the flow',                 category: 'control'  },
   { type: 'START_SCHEDULING',     label: 'Start Scheduling', icon: '📅', color: '#0EA5E9', description: 'Hand off to the scheduling system',  category: 'handoff'  },
   { type: 'ACTIVATE_PLAYBOOK',    label: 'Activate Playbook',icon: '🤖', color: '#A855F7', description: 'Use a specific AI Playbook next',    category: 'handoff'  },
-  { type: 'AGENT',                label: 'Agent',            icon: '🤖', color: '#6366F1', description: 'AI agent with booking tools',        category: 'action'   },
+  { type: 'NOTIFY_STAFF',         label: 'Notify Staff',     icon: '📣', color: '#F97316', description: 'Send a WhatsApp message to staff',   category: 'action'   },
+  { type: 'AGENT',                label: 'Agent',            icon: '🤖', color: '#6366F1', description: 'AI agent — runs 2 actions in parallel on finish', category: 'action'   },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -150,6 +151,10 @@ function nodePreview(type: NodeType, config: Record<string, unknown>): string {
       return config.consultationType ? `📅 ${config.consultationType}` : 'Hand off to scheduling →';
     case 'ACTIVATE_PLAYBOOK':
       return config.intentKey ? `🤖 ${INTENT_KEY_LABELS[config.intentKey as IntentKey] ?? config.intentKey}` : 'Select a playbook →';
+    case 'NOTIFY_STAFF': {
+      const msg = String(config.message ?? '');
+      return msg ? `"${msg.slice(0, 40)}${msg.length > 40 ? '…' : ''}"` : 'Configure message →';
+    }
     case 'AGENT': {
       const instr = String(config.instructions ?? '');
       return instr ? `"${instr.slice(0, 40)}${instr.length > 40 ? '…' : ''}"` : 'Configure instructions →';
@@ -594,14 +599,14 @@ function AgentConfigPanel({
       <div className="space-y-3">
         <div className="text-xs font-medium text-secondary">Output Actions</div>
         <span className="text-[10px] text-secondary/40 block -mt-2">
-          Give each output a label and tell the agent when to trigger it. The agent routes the conversation to the connected node.
+          Both actions run simultaneously when the agent finishes — this is not an if/else. Connect each output to a different next step (e.g. one sends a summary, another tags the buyer). Leave an output unconnected to skip it.
         </span>
         {([0, 1] as const).map(idx => (
           <div key={idx} className={`rounded-lg border p-3 space-y-2 ${idx === 0 ? 'border-indigo-800/40 bg-indigo-900/10' : 'border-slate-700/40 bg-slate-800/20'}`}>
             <div className="flex items-center gap-2 mb-1">
               <span className={`w-2 h-2 rounded-full shrink-0 ${idx === 0 ? 'bg-indigo-400' : 'bg-slate-400'}`} />
               <span className={`text-[10px] font-bold uppercase tracking-wider ${idx === 0 ? 'text-indigo-400' : 'text-slate-400'}`}>
-                Output {idx + 1}
+                Action {idx + 1}
               </span>
             </div>
             <input
@@ -613,7 +618,7 @@ function AgentConfigPanel({
             <textarea
               rows={2}
               className="w-full bg-[#0F172A] border border-border rounded-md px-2.5 py-1.5 text-xs text-primary focus:outline-none focus:border-accent resize-none text-secondary/80"
-              placeholder={idx === 0 ? 'When to trigger this (e.g. booking confirmed, task complete)' : 'When to trigger this (e.g. user declined, error occurred)'}
+              placeholder={idx === 0 ? 'What to connect here (e.g. send booking confirmation, tag buyer)' : 'What to connect here (e.g. notify admin, add follow-up tag)'}
               value={actions[idx]?.instructions ?? ''}
               onChange={e => updateAction(idx, { instructions: e.target.value })}
             />
@@ -1126,6 +1131,42 @@ function NodeConfigEditor({ node, onChange, triggerType, onTriggerTypeChange, on
           </label>
         )}
 
+        {node.type === 'NOTIFY_STAFF' && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-orange-900/20 border border-orange-700/30 px-3 py-2 text-xs text-orange-300/80">
+              Sends a WhatsApp message directly to a staff member. The flow continues to the next node after sending.
+            </div>
+
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Staff member</span>
+              <select
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                value={String(node.config.staffId ?? '')}
+                onChange={e => update({ staffId: e.target.value })}
+              >
+                <option value="">— Select staff —</option>
+                {(staffList ?? []).filter((s: any) => s.isActive !== false).map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Message</span>
+              <textarea
+                rows={4}
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent resize-none font-mono"
+                placeholder="Hi {{buyer.name}} just placed an order. Phone: {{buyer.phone}}"
+                value={String(node.config.message ?? '')}
+                onChange={e => update({ message: e.target.value })}
+              />
+              <span className="text-[10px] text-secondary/50 mt-1 block">
+                Variables: {'{{buyer.name}}'}, {'{{buyer.phone}}'}, {'{{buyer.totalOrders}}'}
+              </span>
+            </label>
+          </div>
+        )}
+
         {node.type === 'AGENT' && (
           <AgentConfigPanel node={node} update={update} />
         )}
@@ -1342,6 +1383,7 @@ export function FlowEditorPage() {
       : newType === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : newType === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : newType === 'SEND_TEXT' ? { message: '' }
+      : newType === 'NOTIFY_STAFF' ? { staffId: '', message: '' }
       : newType === 'AGENT' ? { instructions: '', memoryEnabled: true, actions: [{ label: 'Action 1', instructions: '' }, { label: 'Action 2', instructions: '' }] }
       : {};
 
@@ -1434,6 +1476,7 @@ export function FlowEditorPage() {
       : type === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : type === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : type === 'SEND_TEXT' ? { message: '' }
+      : type === 'NOTIFY_STAFF' ? { staffId: '', message: '' }
       : type === 'AGENT' ? { instructions: '', memoryEnabled: true }
       : {};
 
@@ -1457,6 +1500,7 @@ export function FlowEditorPage() {
       : type === 'TAG_BUYER' ? { action: 'add', tag: '' }
       : type === 'SEND_TEMPLATE' ? { templateName: '', languageCode: 'id' }
       : type === 'SEND_TEXT' ? { message: '' }
+      : type === 'NOTIFY_STAFF' ? { staffId: '', message: '' }
       : type === 'AGENT' ? { instructions: '', memoryEnabled: true }
       : {};
     // Place new nodes in a cascading position
