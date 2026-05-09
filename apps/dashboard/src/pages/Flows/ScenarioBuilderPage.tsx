@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { TEMPLATES } from '@/data/templates';
 import { useScenarioBuilder } from '@/hooks/useScenarioBuilder';
 import { useToast } from '@/components/ToastProvider';
@@ -18,10 +18,18 @@ import { ScenarioForm } from './components/ScenarioForm';
 export function ScenarioBuilderPage() {
   const { templateId } = useParams<{ templateId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { addToast } = useToast();
   const [flowName, setFlowName] = useState('');
+
+  const routerState = location.state as { qualifyingQuestions?: string[] } | null;
+  const initialData = routerState?.qualifyingQuestions?.length
+    ? { qualifyingQuestions: routerState.qualifyingQuestions }
+    : undefined;
+
   const { formData, updateField, saveFlow, isLoading, error } = useScenarioBuilder(
     templateId || 'S1',
+    initialData,
   );
 
   if (!templateId || !TEMPLATES[templateId]) {

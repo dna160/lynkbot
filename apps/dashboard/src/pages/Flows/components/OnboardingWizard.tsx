@@ -15,10 +15,11 @@ interface OnboardingWizardProps {
 export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
   const navigate = useNavigate();
   const { markComplete } = useOnboarding();
-  const [screen, setScreen] = useState<'q1' | 'q2' | 'q3' | 'templates'>('q1');
+  const [screen, setScreen] = useState<'q1' | 'q2' | 'q3' | 'q4' | 'templates'>('q1');
   const [businessType, setBusinessType] = useState<BusinessType | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
   const [staffApprovalNeeded, setStaffApprovalNeeded] = useState<boolean | null>(null);
+  const [qualifyingQuestions, setQualifyingQuestions] = useState<string[]>(["What's your name?"]);
 
   useEffect(() => {
     if (isOpen) {
@@ -26,6 +27,7 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
       setBusinessType(null);
       setGoal(null);
       setStaffApprovalNeeded(null);
+      setQualifyingQuestions(["What's your name?"]);
     }
   }, [isOpen]);
 
@@ -43,12 +45,18 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
 
   const handleQ3 = (needsApproval: boolean) => {
     setStaffApprovalNeeded(needsApproval);
+    setScreen('q4');
+  };
+
+  const handleQ4 = () => {
     setScreen('templates');
   };
 
   const handleTemplateSelect = (templateId: string) => {
     markComplete();
-    navigate(`/dashboard/automations/new/${templateId}`);
+    navigate(`/dashboard/automations/new/${templateId}`, {
+      state: { qualifyingQuestions: qualifyingQuestions.filter(Boolean) },
+    });
   };
 
   const handleSkip = () => {
@@ -69,9 +77,10 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
           <div>
             <h2 className="text-xl font-bold text-white">Let's set up your first automation</h2>
             <p className="text-sm text-slate-400 mt-1">
-              {screen === 'q1' && 'Question 1 of 3'}
-              {screen === 'q2' && 'Question 2 of 3'}
-              {screen === 'q3' && 'Question 3 of 3'}
+              {screen === 'q1' && 'Question 1 of 4'}
+              {screen === 'q2' && 'Question 2 of 4'}
+              {screen === 'q3' && 'Question 3 of 4'}
+              {screen === 'q4' && 'Question 4 of 4'}
               {screen === 'templates' && 'Pick a template to get started'}
             </p>
           </div>
@@ -170,7 +179,64 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
             </div>
           )}
 
-          {/* Screen 4: Template Suggestions */}
+          {/* Screen 4: Qualifying Questions */}
+          {screen === 'q4' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">What will you ask your leads?</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Add the qualifying questions your bot will ask buyers before routing them. You can edit these later.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {qualifyingQuestions.map((q, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <span className="text-xs text-slate-500 w-4 shrink-0">{i + 1}.</span>
+                    <input
+                      type="text"
+                      value={q}
+                      onChange={(e) => {
+                        const updated = [...qualifyingQuestions];
+                        updated[i] = e.target.value;
+                        setQualifyingQuestions(updated);
+                      }}
+                      placeholder={i === 0 ? "What's your name?" : 'Add a question…'}
+                      className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg focus:outline-none focus:border-accent"
+                    />
+                    {qualifyingQuestions.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setQualifyingQuestions(qualifyingQuestions.filter((_, idx) => idx !== i))}
+                        className="text-slate-500 hover:text-red-400 transition-colors"
+                        aria-label="Remove question"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {qualifyingQuestions.length < 8 && (
+                <button
+                  type="button"
+                  onClick={() => setQualifyingQuestions([...qualifyingQuestions, ''])}
+                  className="flex items-center gap-1.5 text-sm text-accent hover:text-accent/80 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add another question
+                </button>
+              )}
+              <p className="text-xs text-slate-500">
+                Each question is asked in sequence. The bot waits for a reply before moving on.
+              </p>
+            </div>
+          )}
+
+          {/* Screen 5: Template Suggestions */}
           {screen === 'templates' && (
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-white">Choose a template to get started</h3>
@@ -206,16 +272,10 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
           {screen !== 'q1' && (
             <button
               onClick={() => {
-                if (screen === 'q2') {
-                  setBusinessType(null);
-                  setScreen('q1');
-                } else if (screen === 'q3') {
-                  setGoal(null);
-                  setScreen('q2');
-                } else if (screen === 'templates') {
-                  setStaffApprovalNeeded(null);
-                  setScreen('q3');
-                }
+                if (screen === 'q2') { setBusinessType(null); setScreen('q1'); }
+                else if (screen === 'q3') { setGoal(null); setScreen('q2'); }
+                else if (screen === 'q4') { setStaffApprovalNeeded(null); setScreen('q3'); }
+                else if (screen === 'templates') { setScreen('q4'); }
               }}
               className="px-4 py-2 text-slate-300 hover:text-white transition-colors"
             >
@@ -227,6 +287,7 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
               onClick={() => {
                 if (screen === 'q1' && businessType) setScreen('q2');
                 else if (screen === 'q2' && goal) setScreen('q3');
+                else if (screen === 'q4') handleQ4();
               }}
               disabled={
                 (screen === 'q1' && !businessType) ||

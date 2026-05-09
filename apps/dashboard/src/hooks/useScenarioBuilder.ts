@@ -3,15 +3,15 @@ import { FlowDefinition, TriggerConfig } from '@/types/flow';
 import { buildScenarioFlow } from '@/lib/scenarioBuilders';
 
 export interface ScenarioFormState {
-  [key: string]: string | boolean | undefined;
+  [key: string]: string | boolean | string[] | undefined;
 }
 
-export function useScenarioBuilder(templateId: string) {
-  const [formData, setFormData] = useState<ScenarioFormState>({});
+export function useScenarioBuilder(templateId: string, initialData?: Partial<ScenarioFormState>) {
+  const [formData, setFormData] = useState<ScenarioFormState>(initialData ?? {});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const updateField = useCallback((key: string, value: string | boolean | undefined) => {
+  const updateField = useCallback((key: string, value: string | boolean | string[] | undefined) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
   }, []);
 

@@ -9,7 +9,7 @@ import { ScenarioFormState } from '@/hooks/useScenarioBuilder';
 interface ScenarioFormProps {
   templateId: string;
   formData: ScenarioFormState;
-  onFieldChange: (key: string, value: string | boolean | undefined) => void;
+  onFieldChange: (key: string, value: string | boolean | string[] | undefined) => void;
   isLoading?: boolean;
   error?: string | null;
 }
@@ -90,33 +90,76 @@ export function ScenarioForm({
         </div>
       )}
 
-      {templateId === 'S3' && (
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-primary">Collect a Lead</h3>
-          <div>
-            <label className="text-xs text-secondary">Lead Question</label>
-            <input
-              type="text"
-              value={getFieldValue('leadQuestion')}
-              onChange={(e) => onFieldChange('leadQuestion', e.target.value)}
-              placeholder="What's your name?"
-              disabled={isLoading}
-              className="w-full mt-1 px-3 py-2 bg-surface border border-border text-primary text-sm rounded-lg focus:outline-none focus:border-accent disabled:opacity-50"
-            />
+      {templateId === 'S3' && (() => {
+        const questions: string[] = Array.isArray(formData.qualifyingQuestions)
+          ? (formData.qualifyingQuestions as string[])
+          : ["What's your name?"];
+        const setQuestions = (qs: string[]) => onFieldChange('qualifyingQuestions', qs);
+        return (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-primary">Collect a Lead</h3>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-secondary">Qualifying Questions</label>
+                <button
+                  type="button"
+                  onClick={() => setQuestions([...questions, ''])}
+                  disabled={isLoading || questions.length >= 8}
+                  className="text-xs text-accent hover:text-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  + Add question
+                </button>
+              </div>
+              <div className="space-y-2">
+                {questions.map((q, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <span className="text-xs text-secondary/50 w-4 shrink-0">{i + 1}.</span>
+                    <input
+                      type="text"
+                      value={q}
+                      onChange={(e) => {
+                        const updated = [...questions];
+                        updated[i] = e.target.value;
+                        setQuestions(updated);
+                      }}
+                      placeholder="e.g. What's your name?"
+                      disabled={isLoading}
+                      className="flex-1 px-3 py-2 bg-surface border border-border text-primary text-sm rounded-lg focus:outline-none focus:border-accent disabled:opacity-50"
+                    />
+                    {questions.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setQuestions(questions.filter((_, idx) => idx !== i))}
+                        disabled={isLoading}
+                        className="text-secondary/40 hover:text-red-400 transition-colors disabled:opacity-40"
+                        aria-label="Remove question"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-secondary/50 mt-1">
+                Each question is asked in sequence. The bot waits for a reply before moving on.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-secondary">Follow-up Message</label>
+              <textarea
+                value={getFieldValue('followUpMessage')}
+                onChange={(e) => onFieldChange('followUpMessage', e.target.value)}
+                placeholder="Thanks for sharing!"
+                disabled={isLoading}
+                className="w-full mt-1 px-3 py-2 bg-surface border border-border text-primary text-sm rounded-lg focus:outline-none focus:border-accent disabled:opacity-50"
+                rows={2}
+              />
+            </div>
           </div>
-          <div>
-            <label className="text-xs text-secondary">Follow-up Message</label>
-            <textarea
-              value={getFieldValue('followUpMessage')}
-              onChange={(e) => onFieldChange('followUpMessage', e.target.value)}
-              placeholder="Thanks for sharing!"
-              disabled={isLoading}
-              className="w-full mt-1 px-3 py-2 bg-surface border border-border text-primary text-sm rounded-lg focus:outline-none focus:border-accent disabled:opacity-50"
-              rows={2}
-            />
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {templateId === 'S4' && (
         <div className="space-y-4">

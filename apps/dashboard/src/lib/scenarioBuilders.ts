@@ -78,31 +78,40 @@ export function buildS2Flow(data: S2FormData): FlowDefinition {
 // ── S3: Collect a Lead ──────────────────────────────────────────────────────────
 
 export interface S3FormData {
-  leadQuestion?: string;
+  qualifyingQuestions?: string[];
   followUpMessage?: string;
 }
 
 export function buildS3Flow(data: S3FormData): FlowDefinition {
+  const questions = (data.qualifyingQuestions ?? []).filter(Boolean);
+  if (questions.length === 0) questions.push("What's your name?");
+
   const nodes: FlowNode[] = [
     createNode('trigger', 'TRIGGER', { triggerType: 'inbound_keyword' }, 'Start'),
-    createNode('ask', 'SEND_TEXT', {
-      message: data.leadQuestion || "What's your name?",
-    }, 'Collect Name'),
-    createNode('capture', 'WAIT_FOR_REPLY', {}, 'Capture Reply'),
-    createNode('tagLead', 'TAG_BUYER', { action: 'add', tag: 'lead' }, 'Tag Lead'),
-    createNode('followUp', 'SEND_TEXT', {
-      message: data.followUpMessage || "Thanks! We'll be in touch soon.",
-    }, 'Follow Up'),
-    createNode('end', 'END_FLOW', { reason: 'Lead captured' }, 'End'),
   ];
+  const edges: FlowEdge[] = [];
+  let prevId = 'trigger';
+  let ei = 1;
 
-  const edges: FlowEdge[] = [
-    createEdge('e1', 'trigger', 'ask'),
-    createEdge('e2', 'ask', 'capture'),
-    createEdge('e3', 'capture', 'tagLead'),
-    createEdge('e4', 'tagLead', 'followUp'),
-    createEdge('e5', 'followUp', 'end'),
-  ];
+  questions.forEach((q, i) => {
+    const askId = `ask_${i}`;
+    const captureId = `capture_${i}`;
+    nodes.push(createNode(askId, 'SEND_TEXT', { message: q }, `Question ${i + 1}`));
+    nodes.push(createNode(captureId, 'WAIT_FOR_REPLY', {}, `Capture ${i + 1}`));
+    edges.push(createEdge(`e${ei++}`, prevId, askId));
+    edges.push(createEdge(`e${ei++}`, askId, captureId));
+    prevId = captureId;
+  });
+
+  nodes.push(createNode('tagLead', 'TAG_BUYER', { action: 'add', tag: 'lead' }, 'Tag Lead'));
+  nodes.push(createNode('followUp', 'SEND_TEXT', {
+    message: data.followUpMessage || "Thanks! We'll be in touch soon.",
+  }, 'Follow Up'));
+  nodes.push(createNode('end', 'END_FLOW', { reason: 'Lead captured' }, 'End'));
+
+  edges.push(createEdge(`e${ei++}`, prevId, 'tagLead'));
+  edges.push(createEdge(`e${ei++}`, 'tagLead', 'followUp'));
+  edges.push(createEdge(`e${ei++}`, 'followUp', 'end'));
 
   return { nodes, edges };
 }
