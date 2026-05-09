@@ -3,12 +3,15 @@
  * Package : apps/dashboard
  * File    : src/pages/Flows/FlowsListPage.tsx
  * Role    : Lists automation flows with status badges, risk score banner, and AI generation CTA (PRD §13.1).
+ *           Includes first-time onboarding wizard for new tenants (Phase 1 UX Rehaul).
  */
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { flowsApi } from '@/lib/api';
 import { RiskScoreGauge } from '@/components/RiskScoreGauge';
 import { useToast } from '@/components/ToastProvider';
+import { OnboardingWizard } from './components/OnboardingWizard';
+import { useOnboarding } from '@/hooks/useOnboarding';
 
 interface Flow {
   id: string;
@@ -43,12 +46,14 @@ const TRIGGER_LABEL: Record<string, string> = {
 export function FlowsListPage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const { isComplete } = useOnboarding();
   const [flows, setFlows] = useState<Flow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,6 +69,12 @@ export function FlowsListPage() {
   }, [statusFilter, page, addToast]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (isComplete === false && total === 0 && !loading) {
+      setShowOnboarding(true);
+    }
+  }, [isComplete, total, loading]);
 
   const handleActivate = async (id: string) => {
     setActionLoading(id);
@@ -121,6 +132,8 @@ export function FlowsListPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
+      <OnboardingWizard isOpen={showOnboarding} onClose={() => setShowOnboarding(false)} />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

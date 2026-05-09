@@ -148,6 +148,7 @@ export default function App() {
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="flows" element={<FlowsListPage />} />
+          <Route path="automations" element={<FlowsListPage />} />
           <Route path="playbooks" element={<IntentPlaybooksPage />} />
           <Route path="appointments" element={<AppointmentsPage />} />
           <Route path="appointments/calendar" element={<AppointmentsCalendarPage />} />
