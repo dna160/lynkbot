@@ -150,7 +150,7 @@ export default function App() {
           <Route path="templates" element={<TemplateListPage />} />
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
-          <Route path="flows" element={<FlowsListPage />} />
+          <Route path="flows" element={<Navigate to="/dashboard/automations" replace />} />
           <Route path="automations/new/:templateId" element={<ScenarioBuilderPage />} />
           <Route path="automations/new" element={<TemplateGalleryPage />} />
           <Route path="automations" element={<FlowsListPage />} />

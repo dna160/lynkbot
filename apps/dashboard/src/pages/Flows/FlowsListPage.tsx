@@ -137,12 +137,12 @@ export function FlowsListPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-primary">Flows</h1>
+          <h1 className="text-2xl font-bold text-primary">Automations</h1>
           <p className="text-sm text-secondary mt-0.5">{total} flow{total !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/dashboard/flows/new')}
+            onClick={() => navigate('/dashboard/automations/new')}
             className="flex items-center gap-2 px-4 py-2 bg-accent/20 text-accent border border-accent/40 rounded-lg text-sm font-medium hover:bg-accent/30 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -151,7 +151,7 @@ export function FlowsListPage() {
             Generate with AI
           </button>
           <button
-            onClick={() => navigate('/dashboard/flows/new')}
+            onClick={() => navigate('/dashboard/automations/new')}
             className="flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/80 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -193,7 +193,7 @@ export function FlowsListPage() {
             <p className="text-secondary font-medium">No flows yet</p>
             <p className="text-secondary/60 text-sm mt-1">Generate with AI or build manually</p>
             <button
-              onClick={() => navigate('/dashboard/flows/new')}
+              onClick={() => navigate('/dashboard/automations/new')}
               className="mt-4 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/80 transition-colors"
             >
               Create Flow
