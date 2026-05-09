@@ -1,5 +1,3 @@
-import { ReactNode } from 'react';
-
 interface TemplateCardProps {
   id: string;
   icon: string;
