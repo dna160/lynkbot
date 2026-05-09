@@ -26,6 +26,7 @@ export type NodeType =
   | 'END_FLOW'
   | 'START_SCHEDULING'
   | 'ACTIVATE_PLAYBOOK'
+  | 'NOTIFY_STAFF'
   | 'AGENT';
 
 // ── Trigger Types ─────────────────────────────────────────────────────────────

@@ -17,6 +17,8 @@ export interface NodeResult {
   status?: 'waiting_reply' | 'completed' | 'delayed';
   /** Set when compliance rule caused a skip (e.g. cooldown blocked) */
   skipReason?: string;
+  /** Fire multiple output ports simultaneously (e.g. AGENT node exits both actions at once) */
+  parallelNextNodeIds?: string[];
 }
 
 export interface ProcessorDeps {

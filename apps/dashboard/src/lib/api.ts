@@ -444,6 +444,7 @@ export const flowTemplatesApi = {
 export interface CreateFlowPayload {
   name: string;
   triggerType: string;
+  triggerConfig?: Record<string, any>;
   definition: { nodes: any[]; edges: any[] };
 }
 

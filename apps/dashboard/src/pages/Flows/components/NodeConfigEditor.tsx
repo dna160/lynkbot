@@ -480,6 +480,83 @@ export function NodeConfigEditor({
           </label>
         )}
 
+        {node.type === 'NOTIFY_STAFF' && (
+          <div className="space-y-4">
+            <label className="block">
+              <span className="text-xs font-medium text-secondary">Staff member</span>
+              <select
+                className="w-full mt-1 bg-[#0F172A] border border-border rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent"
+                value={String(node.config.staffId ?? '')}
+                onChange={(e) => update({ staffId: e.target.value || undefined })}
+              >
+                <option value="">— Select staff —</option>
+                {(staffList ?? [])
+                  .filter((s) => (s as { isActive?: boolean }).isActive !== false)
+                  .map((s) => {
+                    const staff = s as { id: string; name: string };
+                    return (
+                      <option key={staff.id} value={staff.id}>
+                        {staff.name}
+                      </option>
+                    );
+                  })}
+              </select>
+            </label>
+            <MessageEditor
+              label="Message"
+              value={String(node.config.message ?? '')}
+              onChange={(v) => update({ message: v })}
+              placeholder="New inquiry from {{buyer.name}} — please follow up."
+              rows={4}
+              hint="Sent as a WhatsApp message to the selected staff member."
+            />
+          </div>
+        )}
+
+        {node.type === 'AGENT' && (
+          <div className="space-y-4">
+            <MessageEditor
+              label="Instructions"
+              value={String(node.config.instructions ?? '')}
+              onChange={(v) => update({ instructions: v })}
+              placeholder="You are a helpful sales assistant. Answer questions about our products and help the buyer place an order."
+              rows={6}
+              hint="These instructions guide the AI agent's behaviour."
+            />
+            <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+              <input
+                type="checkbox"
+                checked={Boolean(node.config.memoryEnabled)}
+                onChange={(e) => update({ memoryEnabled: e.target.checked })}
+                className="w-4 h-4 rounded border-border text-accent"
+              />
+              <span className="text-sm text-secondary">Enable memory across sessions</span>
+            </label>
+            <MessageEditor
+              label="Intro message (optional)"
+              value={String(node.config.introMessage ?? '')}
+              onChange={(v) => update({ introMessage: v })}
+              placeholder="Hi {{buyer.name}}! How can I help you today?"
+              rows={3}
+              hint="Sent to the buyer when the agent takes over."
+            />
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-secondary mb-2">Action Exits</div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-indigo-900/10 border border-indigo-800/30">
+                <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                <span className="text-xs text-indigo-300 font-medium">Exit 1 — action_0</span>
+              </div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-indigo-900/10 border border-indigo-800/30">
+                <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                <span className="text-xs text-indigo-300 font-medium">Exit 2 — action_1</span>
+              </div>
+              <p className="text-[10px] text-secondary/50 pt-1">
+                Connect each exit to the next node in that action branch.
+              </p>
+            </div>
+          </div>
+        )}
+
         {(node.validationErrors?.length ?? 0) > 0 && (
           <div className="p-3 bg-red-900/20 border border-red-800/40 rounded-lg">
             <div className="text-xs font-semibold text-red-400 mb-1">Validation errors</div>

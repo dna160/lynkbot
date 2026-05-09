@@ -29,7 +29,9 @@ export type NodeType =
   | 'SEGMENT_QUALITY_GATE'
   | 'END_FLOW'
   | 'START_SCHEDULING'    // Hands off to the scheduling system; terminal
-  | 'ACTIVATE_PLAYBOOK';  // Activates a specific AI Playbook for subsequent AI responses; terminal
+  | 'ACTIVATE_PLAYBOOK'  // Activates a specific AI Playbook for subsequent AI responses; terminal
+  | 'NOTIFY_STAFF'       // Sends a WhatsApp text to a specific staff member; single exit
+  | 'AGENT';             // Embedded conversational agent with scheduling tools; fires all configured actions on completion
 
 // ── Trigger Types ─────────────────────────────────────────────────────────────
 
@@ -161,6 +163,39 @@ export interface ActivatePlaybookConfig {
   intentKey: string;
 }
 
+export interface NotifyStaffConfig {
+  /** UUID of the staff member to notify */
+  staffId: string;
+  /** Message body — supports {{buyer.name}}, {{buyer.phone}}, {{buyer.totalOrders}} */
+  message: string;
+}
+
+export interface AgentStaffNotification {
+  staffId: string;
+  message: string;
+}
+
+export interface AgentAction {
+  /** Label shown on the output port in the flow editor */
+  label: string;
+  /** Describes what this action does / what should be connected here */
+  instructions: string;
+}
+
+export interface AgentConfig {
+  /** Main multi-step instructions for what the agent should accomplish */
+  instructions: string;
+  memoryEnabled: boolean;
+  introMessage?: string;
+  consultationType?: string;
+  assignedStaffId?: string;
+  staffMessage?: string;
+  additionalStaffNotifications?: AgentStaffNotification[];
+  /** Configurable exit actions — all fire simultaneously when agent completes */
+  actions?: [AgentAction, AgentAction];
+}
+
+
 export type NodeConfig =
   | SendTemplateConfig
   | SendTextConfig
@@ -178,6 +213,8 @@ export type NodeConfig =
   | EndFlowConfig
   | StartSchedulingConfig
   | ActivatePlaybookConfig
+  | NotifyStaffConfig
+  | AgentConfig
   | Record<string, unknown>;
 
 // ── Graph Structures ──────────────────────────────────────────────────────────

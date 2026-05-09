@@ -24,6 +24,7 @@ import { ServicesPage } from './pages/Services/ServicesPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { AdminPage } from './pages/Admin/AdminPage';
 import { CompliancePage } from './pages/Compliance/CompliancePage';
+import { SchedulingSetupPage } from './pages/Scheduling/SchedulingSetupPage';
 import { getTenantIdFromToken } from './lib/api';
 
 interface EBState {
@@ -158,6 +159,7 @@ export default function App() {
           <Route path="appointments/calendar" element={<AppointmentsCalendarPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="services" element={<ServicesPage />} />
+          <Route path="scheduling/setup" element={<SchedulingSetupPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           <Route path="compliance" element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />

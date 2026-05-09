@@ -26,6 +26,8 @@ export const PALETTE_NODES: NodePaletteEntry[] = [
   { type: 'END_FLOW',              label: 'End Flow',         icon: '🔚', color: '#64748B', description: 'Terminate the flow',                 category: 'control'  },
   { type: 'START_SCHEDULING',      label: 'Start Scheduling', icon: '📅', color: '#0EA5E9', description: 'Hand off to the scheduling system',  category: 'handoff'  },
   { type: 'ACTIVATE_PLAYBOOK',     label: 'Activate Playbook',icon: '🤖', color: '#A855F7', description: 'Use a specific AI Playbook next',    category: 'handoff'  },
+  { type: 'NOTIFY_STAFF',          label: 'Notify Staff',     icon: '📣', color: '#F97316', description: 'Send a WhatsApp message to staff',   category: 'action'   },
+  { type: 'AGENT',                 label: 'Agent',            icon: '🧠', color: '#6366F1', description: 'AI agent — 2 parallel action exits', category: 'action'   },
 ];
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -41,6 +43,7 @@ export function nodeSourceHandles(type: NodeType): string[] {
   if (type === 'END_FLOW' || type === 'START_SCHEDULING' || type === 'ACTIVATE_PLAYBOOK') return [];
   if (type === 'IF_CONDITION') return ['true', 'false'];
   if (type === 'KEYWORD_ROUTER') return ['0', '1'];
+  if (type === 'AGENT') return ['action_0', 'action_1'];
   return ['output'];
 }
 
@@ -95,6 +98,14 @@ export function nodePreview(type: NodeType, config: Record<string, unknown>): st
       return config.intentKey
         ? `🤖 ${INTENT_KEY_LABELS[config.intentKey as IntentKey] ?? config.intentKey}`
         : 'Select a playbook →';
+    case 'NOTIFY_STAFF': {
+      const msg = String(config.message ?? '');
+      return msg ? `"${msg.slice(0, 40)}${msg.length > 40 ? '…' : ''}"` : 'Configure message →';
+    }
+    case 'AGENT': {
+      const instr = String(config.instructions ?? '');
+      return instr ? `"${instr.slice(0, 40)}${instr.length > 40 ? '…' : ''}"` : 'Configure instructions →';
+    }
     default:
       return '';
   }

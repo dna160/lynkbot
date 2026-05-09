@@ -292,6 +292,9 @@ importers:
 
   packages/flow-engine:
     dependencies:
+      '@lynkbot/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@lynkbot/db':
         specifier: workspace:*
         version: link:../db
