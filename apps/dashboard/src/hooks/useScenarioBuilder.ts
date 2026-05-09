@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { FlowDefinition } from '@/types/flow';
+import { FlowDefinition, TriggerConfig } from '@/types/flow';
 import { buildScenarioFlow } from '@/lib/scenarioBuilders';
 
 export interface ScenarioFormState {
@@ -33,11 +33,16 @@ export function useScenarioBuilder(templateId: string) {
         setError(null);
         const definition = buildFlow();
 
+        // Derive triggerType from the TRIGGER node config so S4 broadcasts correctly
+        const triggerNode = definition.nodes.find((n) => n.type === 'TRIGGER');
+        const triggerType =
+          (triggerNode?.config as TriggerConfig | undefined)?.triggerType ?? 'button_click';
+
         const { flowsApi } = await import('@/lib/api');
         const response = await flowsApi.create({
           name: flowName,
           definition,
-          triggerType: 'button_click',
+          triggerType,
         });
 
         const flowId = response.data?.id;

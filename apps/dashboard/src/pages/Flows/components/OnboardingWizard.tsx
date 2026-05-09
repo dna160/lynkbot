@@ -48,7 +48,9 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
   };
 
   const suggestedIds =
-    businessType && goal ? getTemplatesSuggested(businessType, goal) : ['S1', 'S2', 'S3'];
+    businessType && goal
+      ? getTemplatesSuggested(businessType, goal, staffApprovalNeeded ?? undefined)
+      : ['S1', 'S2', 'S3'];
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

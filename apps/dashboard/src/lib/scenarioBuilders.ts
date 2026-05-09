@@ -90,7 +90,7 @@ export function buildS3Flow(data: S3FormData): FlowDefinition {
     createNode('ask', 'SEND_TEXT', {
       message: data.leadQuestion || "What's your name?",
     }, 'Collect Name'),
-    createNode('capture', 'WAIT_FOR_REPLY', { timeoutMs: 0 }, 'Capture Reply'),
+    createNode('capture', 'WAIT_FOR_REPLY', {}, 'Capture Reply'),
     createNode('tagLead', 'TAG_BUYER', { action: 'add', tag: 'lead' }, 'Tag Lead'),
     createNode('followUp', 'SEND_TEXT', {
       message: data.followUpMessage || "Thanks! We'll be in touch soon.",
@@ -120,7 +120,7 @@ export function buildS4Flow(data: S4FormData): FlowDefinition {
   const nodes: FlowNode[] = [
     createNode('trigger', 'TRIGGER', { triggerType: 'broadcast' }, 'Start'),
     createNode('gate', 'SEGMENT_QUALITY_GATE', { requireOrders: false }, 'Quality Check'),
-    createNode('send', 'SEND_TEXT', { message: data.broadcastMessage }, 'Send Broadcast'),
+    createNode('send', 'SEND_TEXT', { message: data.broadcastMessage || 'Your announcement here.' }, 'Send Broadcast'),
     createNode('followUp', 'SEND_TEXT', {
       message: data.followUpMessage || 'Feel free to reach out if you have questions!',
     }, 'Follow Up'),

@@ -62,10 +62,21 @@ export function ScenarioBuilderPage() {
     }
   };
 
+  // Show the most relevant user-entered message field in the preview, with sensible defaults
+  const PREVIEW_DEFAULTS: Record<string, string> = {
+    S1: 'Hi! Let me help you book an appointment.',
+    S2: "Here's the information you need.",
+    S3: "Thanks! We'll be in touch soon.",
+    S4: 'Your announcement here...',
+    S5: 'Connecting you to our team...',
+  };
   const previewText =
     (typeof formData.broadcastMessage === 'string' && formData.broadcastMessage) ||
     (typeof formData.answerTemplate === 'string' && formData.answerTemplate) ||
-    template.previewEn[0] ||
+    (typeof formData.introMessage === 'string' && formData.introMessage) ||
+    (typeof formData.followUpMessage === 'string' && formData.followUpMessage) ||
+    (typeof formData.handoffMessage === 'string' && formData.handoffMessage) ||
+    PREVIEW_DEFAULTS[templateId] ||
     'Your automation message will appear here...';
 
   return (

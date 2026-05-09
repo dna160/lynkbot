@@ -51,7 +51,7 @@ export function TemplateGalleryPage() {
               id={id}
               icon={template.icon}
               title={language === 'en' ? template.labelEn : template.labelId}
-              subtitle={language === 'en' ? template.labelEn : template.labelId}
+              subtitle={language === 'en' ? template.labelId : template.labelEn}
               category={template.category}
               preview={language === 'en' ? template.previewEn : template.previewId}
               onSelect={handleTemplateSelect}

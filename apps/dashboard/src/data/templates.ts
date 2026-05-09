@@ -66,16 +66,40 @@ export const TEMPLATES: Record<string, TemplateConfig> = {
 export function getTemplatesSuggested(
   business: 'clinic' | 'salon' | 'retail' | 'restaurant' | 'other',
   goal: 'booking' | 'questions' | 'leads' | 'promotions',
+  staffApprovalNeeded?: boolean,
 ): string[] {
+  // Clinic
   if (business === 'clinic') {
-    if (goal === 'booking') return ['S1', 'S5'];
+    if (goal === 'booking') return staffApprovalNeeded ? ['S1', 'S5'] : ['S1'];
     if (goal === 'questions') return ['S2', 'S1'];
-  }
-  if (business === 'salon') {
-    if (goal === 'booking') return ['S1', 'S3'];
-  }
-  if (business === 'retail' || business === 'restaurant') {
+    if (goal === 'leads') return ['S3', 'S1'];
     if (goal === 'promotions') return ['S4', 'S2'];
   }
+  // Salon & Beauty
+  if (business === 'salon') {
+    if (goal === 'booking') return ['S1', 'S3'];
+    if (goal === 'questions') return ['S2', 'S1'];
+    if (goal === 'leads') return ['S3'];
+    if (goal === 'promotions') return ['S4', 'S3'];
+  }
+  // Retail & Fashion
+  if (business === 'retail') {
+    if (goal === 'booking') return ['S1', 'S5'];
+    if (goal === 'questions') return ['S2'];
+    if (goal === 'leads') return ['S3', 'S2'];
+    if (goal === 'promotions') return ['S4', 'S2'];
+  }
+  // F&B / Restaurant
+  if (business === 'restaurant') {
+    if (goal === 'booking') return ['S1'];
+    if (goal === 'questions') return ['S2'];
+    if (goal === 'leads') return ['S3'];
+    if (goal === 'promotions') return ['S4', 'S2'];
+  }
+  // Other: return relevant templates per goal
+  if (goal === 'booking') return ['S1', 'S5'];
+  if (goal === 'questions') return ['S2'];
+  if (goal === 'leads') return ['S3'];
+  if (goal === 'promotions') return ['S4'];
   return ['S1', 'S2', 'S3'];
 }
