@@ -14,6 +14,8 @@ import { TemplateListPage } from './pages/Templates/TemplateListPage';
 import { TemplateEditorPage } from './pages/Templates/TemplateEditorPage';
 import { FlowsListPage } from './pages/Flows/FlowsListPage';
 import { FlowEditorPage } from './pages/Flows/FlowEditorPage';
+import { TemplateGalleryPage } from './pages/Flows/TemplateGalleryPage';
+import { ScenarioBuilderPage } from './pages/Flows/ScenarioBuilderPage';
 import { IntentPlaybooksPage } from './pages/IntentPlaybooks/IntentPlaybooksPage';
 import { AppointmentsPage } from './pages/Appointments/AppointmentsPage';
 import { AppointmentsCalendarPage } from './pages/Appointments/AppointmentsCalendarPage';
@@ -148,6 +150,9 @@ export default function App() {
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="flows" element={<FlowsListPage />} />
+          <Route path="automations/new/:templateId" element={<ScenarioBuilderPage />} />
+          <Route path="automations/new" element={<TemplateGalleryPage />} />
+          <Route path="automations" element={<FlowsListPage />} />
           <Route path="playbooks" element={<IntentPlaybooksPage />} />
           <Route path="appointments" element={<AppointmentsPage />} />
           <Route path="appointments/calendar" element={<AppointmentsCalendarPage />} />
