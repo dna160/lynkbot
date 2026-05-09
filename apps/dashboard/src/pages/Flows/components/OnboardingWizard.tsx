@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { TEMPLATES, getTemplatesSuggested } from '@/data/templates';
@@ -19,6 +19,15 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
   const [businessType, setBusinessType] = useState<BusinessType | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
   const [staffApprovalNeeded, setStaffApprovalNeeded] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setScreen('q1');
+      setBusinessType(null);
+      setGoal(null);
+      setStaffApprovalNeeded(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
