@@ -171,8 +171,9 @@ export interface FlowNode {
   id: string;
   type: NodeType;
   label?: string;
-  config: NodeConfig;
+  config: Record<string, unknown>;
   position?: { x: number; y: number };
+  validationErrors?: string[];
 }
 
 export interface FlowEdge {

@@ -38,7 +38,7 @@ export function useELKLayout() {
 
     return nodes.map((n) => {
       const laid = layout.children?.find((c) => c.id === n.id);
-      if (!laid?.x || !laid?.y) return n;
+      if (laid?.x == null || laid?.y == null) return n;
       return { ...n, position: { x: laid.x, y: laid.y } };
     });
   }, []);

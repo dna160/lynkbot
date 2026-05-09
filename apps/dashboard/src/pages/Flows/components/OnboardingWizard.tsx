@@ -216,8 +216,8 @@ export function OnboardingWizard({ isOpen, onClose }: OnboardingWizardProps) {
           {screen !== 'templates' && (
             <button
               onClick={() => {
-                if (screen === 'q1' && businessType) handleQ2(goal || 'booking');
-                if (screen === 'q2' && goal) handleQ3(staffApprovalNeeded ?? false);
+                if (screen === 'q1' && businessType) setScreen('q2');
+                else if (screen === 'q2' && goal) setScreen('q3');
               }}
               disabled={
                 (screen === 'q1' && !businessType) ||

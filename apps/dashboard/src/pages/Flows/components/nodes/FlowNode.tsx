@@ -29,8 +29,6 @@ export function FlowNode({ id, data, selected, onAddStep }: FlowNodeProps) {
     [id, getNode, onAddStep],
   );
 
-  const borderColor = selected ? palette.color : 'transparent';
-
   return (
     <div
       className="relative bg-[#1E293B] rounded-xl shadow-lg transition-all"

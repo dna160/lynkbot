@@ -1,11 +1,17 @@
-import { useCallback, useMemo } from 'react';
-import ReactFlow, {
+import { useMemo } from 'react';
+import {
+  ReactFlow,
   Background,
   Controls,
   MiniMap,
   BackgroundVariant,
   type NodeTypes,
   type EdgeTypes,
+  type OnNodesChange,
+  type OnEdgesChange,
+  type OnConnect,
+  type NodeMouseHandler,
+  type Node,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { RFNode, RFEdge } from '@/lib/flowConvert';
@@ -16,11 +22,11 @@ import { CustomEdge } from './CustomEdge';
 interface FlowCanvasProps {
   nodes: RFNode[];
   edges: RFEdge[];
-  onNodesChange: Parameters<typeof ReactFlow>[0]['onNodesChange'];
-  onEdgesChange: Parameters<typeof ReactFlow>[0]['onEdgesChange'];
-  onConnect: Parameters<typeof ReactFlow>[0]['onConnect'];
-  onNodeClick: Parameters<typeof ReactFlow>[0]['onNodeClick'];
-  onPaneClick: Parameters<typeof ReactFlow>[0]['onPaneClick'];
+  onNodesChange: OnNodesChange<RFNode>;
+  onEdgesChange: OnEdgesChange<RFEdge>;
+  onConnect: OnConnect;
+  onNodeClick: NodeMouseHandler<RFNode>;
+  onPaneClick: () => void;
   onAddStep: (sourceNodeId: string, screenX: number, screenY: number) => void;
 }
 
@@ -55,10 +61,10 @@ export function FlowCanvas({
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
+        onNodesChange={onNodesChange as OnNodesChange<Node>}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={onNodeClick}
+        onNodeClick={onNodeClick as NodeMouseHandler<Node>}
         onPaneClick={onPaneClick}
         deleteKeyCode="Delete"
         fitView

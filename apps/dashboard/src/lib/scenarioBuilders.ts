@@ -37,13 +37,11 @@ export function buildS1Flow(data: S1FormData): FlowDefinition {
       introMessage: `Okay, let's schedule your ${data.serviceName || 'appointment'}.`,
       consultationType: data.consultationType || 'Consultation',
     }, 'Schedule'),
-    createNode('end', 'END_FLOW', { reason: 'Appointment booked' }, 'End'),
   ];
 
   const edges: FlowEdge[] = [
     createEdge('e1', 'trigger', 'intro'),
     createEdge('e2', 'intro', 'schedule'),
-    createEdge('e3', 'schedule', 'end'),
   ];
 
   return { nodes, edges };
@@ -129,7 +127,7 @@ export function buildS4Flow(data: S4FormData): FlowDefinition {
 
   const edges: FlowEdge[] = [
     createEdge('e1', 'trigger', 'gate'),
-    createEdge('e2', 'gate', 'send', 'default'),
+    createEdge('e2', 'gate', 'send'),
     createEdge('e3', 'send', 'followUp'),
     createEdge('e4', 'followUp', 'end'),
   ];
@@ -154,13 +152,11 @@ export function buildS5Flow(data: S5FormData): FlowDefinition {
       introMessage: 'A team member will be with you shortly.',
       consultationType: data.consultationType || 'Support',
     }, 'Handoff to Staff'),
-    createNode('end', 'END_FLOW', { reason: 'Handed off to staff' }, 'End'),
   ];
 
   const edges: FlowEdge[] = [
     createEdge('e1', 'trigger', 'notify'),
     createEdge('e2', 'notify', 'handoff'),
-    createEdge('e3', 'handoff', 'end'),
   ];
 
   return { nodes, edges };

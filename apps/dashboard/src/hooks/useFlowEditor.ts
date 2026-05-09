@@ -5,6 +5,7 @@ import type { FlowNode, FlowDefinition } from '@/types/flow';
 import type { NodeType } from '@/types/flow';
 import type { RFNode, RFEdge } from '@/lib/flowConvert';
 import { fromFlowDefinition, toFlowDefinition } from '@/lib/flowConvert';
+import { nodeSourceHandles } from '@/pages/Flows/components/nodes/nodeConfig';
 
 type TriggerType = 'inbound_keyword' | 'time_based' | 'order_event' | 'manual';
 
@@ -14,12 +15,12 @@ function nextNodeId() {
 }
 
 export function useFlowEditor(initialDef?: FlowDefinition) {
-  const init = initialDef
-    ? fromFlowDefinition(initialDef)
-    : { rfNodes: [], rfEdges: [] };
-
-  const [rfNodes, setRFNodes] = useState<RFNode[]>(init.rfNodes);
-  const [rfEdges, setRFEdges] = useState<RFEdge[]>(init.rfEdges);
+  const [rfNodes, setRFNodes] = useState<RFNode[]>(() =>
+    initialDef ? fromFlowDefinition(initialDef).rfNodes : [],
+  );
+  const [rfEdges, setRFEdges] = useState<RFEdge[]>(() =>
+    initialDef ? fromFlowDefinition(initialDef).rfEdges : [],
+  );
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [triggerType, setTriggerType] = useState<TriggerType>('inbound_keyword');
 
@@ -86,12 +87,14 @@ export function useFlowEditor(initialDef?: FlowDefinition) {
 
       setRFNodes((nds) => [...nds, newNode]);
 
-      // Auto-connect from source node's single output handle
-      if (sourceNodeId) {
+      // Auto-connect from source node's first available handle
+      if (sourceNodeId && sourceNode) {
+        const handles = nodeSourceHandles(sourceNode.data.nodeType);
+        const sourceHandle = handles.length > 0 ? handles[0] : undefined;
         const edgeId = `e_${sourceNodeId}_${id}`;
         setRFEdges((eds) => [
           ...eds,
-          { id: edgeId, source: sourceNodeId, target: id, sourceHandle: 'output', type: 'deletable' },
+          { id: edgeId, source: sourceNodeId, target: id, ...(sourceHandle && { sourceHandle }), type: 'deletable' },
         ]);
       }
 

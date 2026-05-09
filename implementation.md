@@ -4,8 +4,9 @@
 > feature locations, API surface, DB schema, type system, design patterns, and operational details.
 > Synthesized from PRD v2.1, all 6 phase handoffs, checkpoint audit, and verified source files.
 >
-> **Branch:** `main`
-> **Last completed phase:** Commercial Release PRD v1.0 — async webhook durability, pgvector RAG, S3 PDF migration, tenant quotas, admin/compliance dashboard, feature gates, consent audit, subscriptions schema
+> **Branch:** `main` (UX Rehaul on `claude/laughing-turing-43c2a9`, PRs pending merge)
+> **Last completed phase:** UX Rehaul PRD v1.0 — Phases 1–5 (Onboarding Wizard, Template Gallery, Scenario Builder, React Flow editor migration, integration & cleanup)
+> **Previous completed phase:** Commercial Release PRD v1.0 — async webhook durability, pgvector RAG, S3 PDF migration, tenant quotas, admin/compliance dashboard, feature gates, consent audit, subscriptions schema
 > **Working directory:** `/Users/storytellers/Documents/Claude Home/Lynkbot`
 
 ---
@@ -73,13 +74,18 @@ LynkBot is a **WhatsApp Commerce Platform for Indonesian SMB merchants**. Mercha
 │   │       └── utils/                # crypto.ts (AES-256-GCM)
 │   ├── dashboard/                    # Vite + React SPA (dark theme, Tailwind)
 │   │   └── src/
-│   │       ├── App.tsx               # Route definitions
+│   │       ├── App.tsx               # Route definitions (includes /automations routes)
 │   │       ├── components/           # Shared UI: Sidebar, RiskScoreGauge
-│   │       ├── declarations.d.ts     # Drawflow type shim
-│   │       ├── hooks/                # useAuth, useConversations, etc.
+│   │       ├── data/
+│   │       │   └── templates.ts      # S1–S5 template catalog + getTemplatesSuggested()
+│   │       ├── hooks/                # useAuth, useConversations, useFlowEditor, useELKLayout, etc.
 │   │       ├── lib/
 │   │       │   ├── api.ts            # All API client methods (axios)
+│   │       │   ├── flowConvert.ts    # FlowDefinition ↔ React Flow RFNode/RFEdge conversion
+│   │       │   ├── scenarioBuilders.ts  # Deterministic flow builders for S1–S5
 │   │       │   └── queryClient.ts    # React Query config
+│   │       ├── types/
+│   │       │   └── flow.ts           # Local copy of FlowDefinition types (no workspace dep)
 │   │       └── pages/                # Feature pages (see §12)
 │   └── worker/                       # BullMQ background job runner (no HTTP)
 │       └── src/
@@ -199,7 +205,7 @@ Every feature cross-referenced to its file(s).
 | All types | `packages/flow-engine/src/types.ts` |
 | Flow CRUD routes | `apps/api/src/routes/v1/flows.ts` |
 | Flow list dashboard | `apps/dashboard/src/pages/Flows/FlowsListPage.tsx` |
-| Flow editor (Drawflow canvas) | `apps/dashboard/src/pages/Flows/FlowEditorPage.tsx` |
+| Flow editor (React Flow canvas) | `apps/dashboard/src/pages/Flows/FlowEditorPage.tsx` |
 | Dashboard API client | `apps/dashboard/src/lib/api.ts` → `flowsApi` |
 
 **Routes:** `GET|POST /api/v1/flows`, `GET|PUT|PATCH|DELETE /api/v1/flows/:id`, `GET /api/v1/flows/:id/executions`, `GET /api/v1/flows/:id/risk-score`, `POST /api/v1/flows/:id/test`
@@ -279,6 +285,115 @@ score = (broadcastFrequency × 0.35) + (templateQuality × 0.25) +
 Both routes are behind `requireFeature('ai_flow_generator')` preHandler.
 
 **AI response handling:** JSON parsed leniently — markdown fences stripped, parse errors surfaced as `parseError` field but response still returned. AI-generated flows are ALWAYS `status: 'draft'`; never auto-activated.
+
+### 4.11 Automations UX Rehaul (Phases 1–5)
+
+All dashboard-only work. No backend changes.
+
+#### Phase 1 — First-Time Onboarding Wizard
+
+| Component | File |
+|-----------|------|
+| Wizard UI | `pages/Flows/components/OnboardingWizard.tsx` |
+| State hook | `hooks/useOnboarding.ts` |
+| Integration | `pages/Flows/FlowsListPage.tsx` — mounts wizard if `!isComplete` |
+
+3-question wizard (business type → goal → staff approval needed) → template suggestions → navigate to ScenarioBuilderPage. Completion stored in localStorage via `useOnboarding`. Close/skip also marks complete.
+
+#### Phase 2 — Template Gallery
+
+| Component | File |
+|-----------|------|
+| Gallery page | `pages/Flows/TemplateGalleryPage.tsx` |
+| Template card | `pages/Flows/components/TemplateCard.tsx` |
+| Language toggle | `pages/Flows/components/LanguageToggle.tsx` |
+| Template data | `data/templates.ts` |
+| Hook | `hooks/useTemplateGallery.ts` |
+
+Route: `/dashboard/automations/new`. Shows all S1–S5 templates with category filter + EN/ID toggle. Select → navigate to `/dashboard/automations/new/:templateId`.
+
+**Template catalog (`data/templates.ts`):**
+```
+S1 — Book Appointment      (booking, with/without staff approval)
+S2 — Answer Questions      (questions)
+S3 — Collect Lead          (leads)
+S4 — Broadcast Announcement (promotions)
+S5 — Human Handoff         (any + staffApprovalNeeded=true)
+```
+`getTemplatesSuggested(businessType, goal, staffApprovalNeeded?)` returns ordered template IDs for onboarding.
+
+#### Phase 3 — Scenario Builder
+
+| Component | File |
+|-----------|------|
+| Builder page | `pages/Flows/ScenarioBuilderPage.tsx` |
+| Builder layout | `pages/Flows/components/ScenarioBuilderLayout.tsx` |
+| Form component | `pages/Flows/components/ScenarioForm.tsx` |
+| Flow builders | `lib/scenarioBuilders.ts` |
+| Hook | `hooks/useScenarioBuilder.ts` |
+
+Route: `/dashboard/automations/new/:templateId`. Renders a form specific to the chosen template, generates a `FlowDefinition` deterministically (no LLM), then POSTs to `flowsApi.create()` and navigates to the flow editor.
+
+**Builders:** `buildS1Flow`, `buildS2Flow`, `buildS3Flow`, `buildS4Flow`, `buildS5Flow` — pure functions `(formData) → FlowDefinition`. Dispatched via `buildScenarioFlow(templateId, formData)`.
+
+**Critical:** `START_SCHEDULING` and `ACTIVATE_PLAYBOOK` are terminal nodes (no source handles). S1 and S5 builders correctly end at these nodes — do NOT add `END_FLOW` nodes after them.
+
+#### Phase 4 — React Flow Editor Rehaul
+
+Replaced Drawflow with `@xyflow/react@12.6.4` + `elkjs@0.9.3`. Both pinned exact in `apps/dashboard/package.json`.
+
+| Component / Hook | File | Purpose |
+|-----------------|------|---------|
+| `FlowCanvas` | `pages/Flows/components/FlowCanvas.tsx` | React Flow container, MiniMap, Controls, Background |
+| `FlowNode` | `pages/Flows/components/nodes/FlowNode.tsx` | Custom node renderer for all 14 node types |
+| `nodeConfig` | `pages/Flows/components/nodes/nodeConfig.ts` | Palette, `nodeSourceHandles()`, `nodeHasTargetHandle()`, `nodePreview()` |
+| `CustomEdge` | `pages/Flows/components/CustomEdge.tsx` | Hover-reveal delete button on edges |
+| `NodeConfigEditor` | `pages/Flows/components/NodeConfigEditor.tsx` | Right-panel config form for all 14 types |
+| `NodePickerPopup` | `pages/Flows/components/NodePickerPopup.tsx` | "+ Add step" popup after clicking node button |
+| `MessageEditor` | `pages/Flows/components/MessageEditor.tsx` | Textarea + variable chip bar |
+| `VariablePicker` | `pages/Flows/components/VariablePicker.tsx` | Variable insertion chips |
+| `useFlowEditor` | `hooks/useFlowEditor.ts` | Canvas state: nodes, edges, selected node, addNode, deleteSelectedNode, getDefinition, loadDefinition |
+| `useELKLayout` | `hooks/useELKLayout.ts` | `autoLayout(nodes, edges)` → ELK layered layout, async |
+| `flowConvert` | `lib/flowConvert.ts` | `toRFNodes`, `toRFEdges`, `fromRFNodes`, `fromRFEdges`, `fromFlowDefinition`, `toFlowDefinition` |
+
+**Node handle IDs:**
+- Single-output nodes: source handle id = `'output'`
+- `IF_CONDITION`: handles `'true'` (left) and `'false'` (right)
+- `KEYWORD_ROUTER`: handles `'0'` (left) and `'1'` (right)
+- Terminal nodes (`END_FLOW`, `START_SCHEDULING`, `ACTIVATE_PLAYBOOK`): no source handles
+
+**Type system:**
+```typescript
+// RFNode = Node<RFNodeData, 'flowNode'>
+// RFNodeData.config is Record<string, unknown> (not NodeConfig union)
+// FlowNode.config is also Record<string, unknown>
+// Conversion: FlowDefinition ↔ RFNode[]/RFEdge[] via flowConvert.ts
+```
+
+**`@xyflow/react` import pattern — NAMED exports only:**
+```typescript
+import { ReactFlow, Background, Controls, MiniMap, Handle, Position, ... } from '@xyflow/react';
+// NO default import — v12 has no default export
+```
+
+**ELK layout:** `useELKLayout.autoLayout(nodes, edges)` runs `elk.layout()` async. Import from `elkjs/lib/elk.bundled.js` (no web worker). Triggered by the ⊞ auto-layout button in the FlowEditorPage toolbar.
+
+#### Phase 5 — Integration & Cleanup
+
+- Merged `feature/ux-rehaul` (Phases 1–3) into `claude/laughing-turing-43c2a9` (Phase 4)
+- Removed `drawflow@0.0.60` from `apps/dashboard/package.json`
+- Added `@xyflow/react@12.6.4` and `elkjs@0.9.3` (exact pins)
+- Deleted `apps/dashboard/src/declarations.d.ts` (Drawflow TypeScript shim, no longer needed)
+- Handoff docs in `docs/ux-rehaul/PHASE_1_HANDOFF.md` through `PHASE_5_HANDOFF.md`
+
+**Automations routes (App.tsx):**
+```
+/dashboard/automations          → FlowsListPage (automations branding)
+/dashboard/automations/new      → TemplateGalleryPage
+/dashboard/automations/new/:id  → ScenarioBuilderPage
+```
+
+---
 
 ### 4.9 Conversational AI
 
@@ -1032,6 +1147,9 @@ All features are currently enabled for all authenticated tenants. Feature flags 
 | `/dashboard/services` | ServicesPage | `pages/Services/ServicesPage.tsx` |
 | `/dashboard/appointments` | AppointmentsPage | `pages/Appointments/AppointmentsPage.tsx` |
 | `/dashboard/appointments/calendar` | AppointmentsCalendarPage | `pages/Appointments/AppointmentsCalendarPage.tsx` |
+| `/dashboard/automations` | FlowsListPage (automations) | `pages/Flows/FlowsListPage.tsx` |
+| `/dashboard/automations/new` | TemplateGalleryPage | `pages/Flows/TemplateGalleryPage.tsx` |
+| `/dashboard/automations/new/:templateId` | ScenarioBuilderPage | `pages/Flows/ScenarioBuilderPage.tsx` |
 | `/dashboard/flows` | FlowsListPage | `pages/Flows/FlowsListPage.tsx` |
 | `/dashboard/flows/new` | FlowEditorPage | `pages/Flows/FlowEditorPage.tsx` |
 | `/dashboard/flows/:id/edit` | FlowEditorPage | `pages/Flows/FlowEditorPage.tsx` |
@@ -1049,7 +1167,14 @@ All features are currently enabled for all authenticated tenants. Feature flags 
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `Sidebar` | `components/Sidebar.tsx` | Nav links: Overview, Conversations, Buyers, Orders, Products, Staff, Services, Appointments, Flows, Templates, Intent Playbooks, Settings |
+| `Sidebar` | `components/Sidebar.tsx` | Nav links: Overview, Conversations, Buyers, Orders, Products, Staff, Services, Appointments, Automations, Flows, Templates, Intent Playbooks, Settings |
+| `OnboardingWizard` | `pages/Flows/components/OnboardingWizard.tsx` | First-time setup modal; 3-question flow → template suggestions |
+| `TemplateCard` | `pages/Flows/components/TemplateCard.tsx` | Template gallery card with category badge |
+| `FlowCanvas` | `pages/Flows/components/FlowCanvas.tsx` | React Flow canvas host |
+| `FlowNode` | `pages/Flows/components/nodes/FlowNode.tsx` | Custom node renderer (all 14 types) |
+| `CustomEdge` | `pages/Flows/components/CustomEdge.tsx` | Hover-reveal delete button |
+| `NodeConfigEditor` | `pages/Flows/components/NodeConfigEditor.tsx` | Right-panel per-node config forms |
+| `NodePickerPopup` | `pages/Flows/components/NodePickerPopup.tsx` | "+ Add step" popup |
 | `RiskScoreGauge` | `components/RiskScoreGauge.tsx` | SVG half-arc gauge; fetches `/api/v1/risk-score` on mount; compact variant available |
 | `TemplatePreview` | `pages/Templates/components/TemplatePreview.tsx` | WhatsApp dark-green bubble mockup; updates live |
 
@@ -1067,14 +1192,16 @@ All features are currently enabled for all authenticated tenants. Feature flags 
 | `useAppointments(filters?)` | GET /scheduling/appointments |
 | `useUpdateAppointmentStatus()` | PATCH /scheduling/appointments/:id/status — mutation |
 
-### FlowEditorPage — Drawflow Integration
+### FlowEditorPage — React Flow (@xyflow/react)
 
-- **Library:** `drawflow@0.0.60` (pinned in `apps/dashboard/package.json`)
-- **CSS:** `import 'drawflow/dist/drawflow.min.css'` (must import this, not `src/drawflow.css`)
-- **Type shim:** `apps/dashboard/src/declarations.d.ts` (no official `@types/drawflow`)
-- **Pattern:** Initialized via `useRef + useEffect`; `editor.export()` / `editor.import()` for serialization
-- **12-node palette:** drag-to-add (SEND_TEMPLATE, SEND_TEXT, SEND_INTERACTIVE, DELAY, WAIT_FOR_REPLY, IF_CONDITION, KEYWORD_ROUTER, TAG_BUYER, UPDATE_BUYER, SEND_WINDOW, RATE_LIMIT, END_FLOW)
-- **AI panel:** inline text field + "Generate" → `POST /api/v1/ai/generate-flow` → loads `FlowDefinition` into canvas
+- **Library:** `@xyflow/react@12.6.4` + `elkjs@0.9.3` (both exact-pinned in `apps/dashboard/package.json`)
+- **CSS:** `import '@xyflow/react/dist/style.css'` (in `FlowCanvas.tsx`)
+- **Imports:** NAMED exports only — `import { ReactFlow, Handle, ... } from '@xyflow/react'`. No default export in v12.
+- **Architecture:** `FlowEditorPage` → `FlowEditorInner` wrapped in `ReactFlowProvider`; state via `useFlowEditor`; canvas via `FlowCanvas`
+- **14-node palette:** click-to-add from left sidebar (TRIGGER, SEND_TEMPLATE, SEND_TEXT, SEND_INTERACTIVE, DELAY, WAIT_FOR_REPLY, IF_CONDITION, KEYWORD_ROUTER, TAG_BUYER, UPDATE_BUYER, SEGMENT_QUALITY_GATE, END_FLOW, START_SCHEDULING, ACTIVATE_PLAYBOOK)
+- **Auto-layout:** ELK `layered` algorithm via `useELKLayout.autoLayout()`, triggered by toolbar button
+- **Config editing:** right-panel `NodeConfigEditor` (click node to select); `NodePickerPopup` for "+ Add step"
+- **AI panel:** preserved from prior implementation — inline text field + "Generate" / "Modify" → loads `FlowDefinition` into canvas
 
 ### Dashboard API Client Namespaces
 
@@ -1593,10 +1720,13 @@ If you see `"Meta inbound message received"` but conversations don't appear in t
 ### Add a new flow node type
 
 1. Add to `NodeType` union in `packages/flow-engine/src/types.ts`
-2. Add `Config` interface and add to `NodeConfig` union in `types.ts`
+2. Add `Config` interface in `types.ts` (for documentation; `FlowNode.config` is `Record<string, unknown>` at runtime)
 3. Create processor in `packages/flow-engine/src/nodeProcessors/myNode.ts`
 4. Register in `packages/flow-engine/src/nodeProcessors/index.ts`
-5. Add to palette in `apps/dashboard/src/pages/Flows/FlowEditorPage.tsx`
+5. Add entry to `PALETTE_NODES` in `apps/dashboard/src/pages/Flows/components/nodes/nodeConfig.ts`
+6. Add to `nodeSourceHandles()` in `nodeConfig.ts` if it has non-standard handle IDs
+7. Add to `NodeType` union in `apps/dashboard/src/types/flow.ts` (local dashboard copy)
+8. Add config form section in `apps/dashboard/src/pages/Flows/components/NodeConfigEditor.tsx`
 
 ### Add a new worker processor
 
