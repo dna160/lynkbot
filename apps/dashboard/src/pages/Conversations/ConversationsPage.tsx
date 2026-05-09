@@ -22,6 +22,35 @@ const STATE_COLOR: Record<string, string> = {
   CLOSED_LOST: 'bg-slate-600/20 text-slate-400 border-slate-600/30',
 };
 
+const STATE_DESCRIPTION: Record<string, string> = {
+  INIT: 'Conversation just started',
+  GREETING: 'Bot introduced itself, awaiting reply',
+  BROWSING: 'Buyer exploring products',
+  PRODUCT_INQUIRY: 'Buyer asking about a product',
+  OBJECTION_HANDLING: 'Bot handling buyer concerns',
+  CHECKOUT_INTENT: 'Buyer ready to purchase',
+  ADDRESS_COLLECTION: 'Collecting delivery address',
+  LOCATION_RECEIVED: 'Delivery location confirmed',
+  SHIPPING_CALC: 'Calculating shipping cost',
+  PAYMENT_METHOD_SELECT: 'Buyer choosing payment method',
+  INVOICE_GENERATION: 'Generating invoice',
+  AWAITING_PAYMENT: 'Waiting for payment confirmation',
+  PAYMENT_CONFIRMED: 'Payment received',
+  PAYMENT_EXPIRED: 'Payment window expired',
+  ORDER_PROCESSING: 'Order being processed',
+  OUT_OF_STOCK: 'Item out of stock',
+  SHIPPED: 'Order shipped',
+  TRACKING: 'Buyer tracking their order',
+  DELIVERED: 'Order delivered',
+  COMPLETED: 'Conversation resolved',
+  ESCALATED: 'Human agent in control',
+  CLOSED_LOST: 'Buyer did not convert',
+  SCHEDULING: 'Booking an appointment',
+  SCHEDULING_CONFIRMED: 'Appointment confirmed',
+  SCHEDULING_CANCELLED: 'Appointment cancelled',
+  SCHEDULING_RESCHEDULING_PENDING: 'Rescheduling in progress',
+};
+
 function stateColor(state: string): string { return STATE_COLOR[state] ?? 'bg-blue-600/20 text-blue-400 border-blue-600/30'; }
 function timeAgo(s: string): string {
   const secs = Math.floor((Date.now() - new Date(s).getTime()) / 1000);
@@ -139,7 +168,7 @@ export function ConversationsPage() {
                     <span className="text-white text-sm font-medium truncate">{conv.buyer?.displayName || conv.buyer?.waPhone || 'Unknown'}</span>
                     {conv.state === 'ESCALATED' && <span className="text-[10px] bg-red-600/20 text-red-400 px-1 py-0.5 rounded flex-shrink-0">Human</span>}
                   </div>
-                  <span className={`mt-1 inline-block text-[10px] px-1.5 py-0.5 rounded border ${stateColor(conv.state)}`}>{conv.state.replace(/_/g, ' ')}</span>
+                  <span className={`mt-1 inline-block text-[10px] px-1.5 py-0.5 rounded border ${stateColor(conv.state)}`} title={STATE_DESCRIPTION[conv.state] ?? conv.state}>{conv.state.replace(/_/g, ' ')}</span>
                 </div>
                 <div className="text-[10px] text-slate-500 flex-shrink-0 mt-0.5">{timeAgo(conv.lastMessageAt)}</div>
               </div>
@@ -157,7 +186,7 @@ export function ConversationsPage() {
               <div>
                 <p className="text-white font-semibold text-sm">{detail?.buyer?.displayName || detail?.buyer?.waPhone || selected?.buyer?.displayName || selected?.buyer?.waPhone || '—'}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${stateColor(detail?.state ?? selected?.state ?? 'BROWSING')}`}>{(detail?.state ?? selected?.state ?? '').replace(/_/g, ' ')}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${stateColor(detail?.state ?? selected?.state ?? 'BROWSING')}`} title={STATE_DESCRIPTION[detail?.state ?? selected?.state ?? ''] ?? (detail?.state ?? selected?.state ?? '')}>{(detail?.state ?? selected?.state ?? '').replace(/_/g, ' ')}</span>
                   {detail?.buyer?.waPhone && <span className="text-slate-500 text-[10px]">{detail.buyer.waPhone}</span>}
                 </div>
               </div>

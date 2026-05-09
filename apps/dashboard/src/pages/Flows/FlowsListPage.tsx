@@ -12,6 +12,7 @@ import { RiskScoreGauge } from '@/components/RiskScoreGauge';
 import { useToast } from '@/components/ToastProvider';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { SearchInput } from '@/components/SearchInput';
 
 interface Flow {
   id: string;
@@ -52,6 +53,7 @@ export function FlowsListPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -129,6 +131,7 @@ export function FlowsListPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil(total / 20));
+  const filteredFlows = search.trim() ? flows.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : flows;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -148,7 +151,7 @@ export function FlowsListPage() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            Setup wizard
+            Automation wizard
           </button>
           <button
             onClick={() => navigate('/dashboard/automations/new')}
@@ -167,6 +170,7 @@ export function FlowsListPage() {
 
       {/* Filters */}
       <div className="flex gap-3">
+        <SearchInput placeholder="Search flows…" value={search} onChange={setSearch} />
         <select
           value={statusFilter}
           onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
@@ -185,13 +189,13 @@ export function FlowsListPage() {
           <div className="flex items-center justify-center h-40">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : flows.length === 0 ? (
+        ) : filteredFlows.length === 0 ? (
           <div className="text-center py-16">
             <svg className="w-12 h-12 text-secondary/40 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            <p className="text-secondary font-medium">No flows yet</p>
-            <p className="text-secondary/60 text-sm mt-1">Generate with AI or build manually</p>
+            <p className="text-secondary font-medium">{search.trim() ? 'No automations match your search.' : 'No flows yet'}</p>
+            <p className="text-secondary/60 text-sm mt-1">{search.trim() ? 'Try a different search term.' : 'Use the Automation wizard or create a new flow.'}</p>
             <button
               onClick={() => navigate('/dashboard/automations/new')}
               className="mt-4 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/80 transition-colors"
@@ -211,7 +215,7 @@ export function FlowsListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {flows.map(flow => (
+              {filteredFlows.map(flow => (
                 <tr key={flow.id} className="hover:bg-white/2 transition-colors">
                   <td className="px-4 py-3">
                     <div className="font-medium text-primary">{flow.name}</div>

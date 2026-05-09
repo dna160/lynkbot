@@ -15,6 +15,13 @@ interface FlowTemplate {
   updatedAt: string;
 }
 
+function displayTemplateName(name: string): string {
+  if (!name) return 'Untitled Template';
+  if (name.includes(' ')) return name;
+  if (/^[a-z0-9_]+$/.test(name)) return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return name;
+}
+
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-slate-700 text-slate-300',
   pending_submission: 'bg-yellow-900/40 text-yellow-400',
@@ -199,7 +206,7 @@ export function TemplateListPage() {
               {templates.map(tmpl => (
                 <tr key={tmpl.id} className="hover:bg-white/2 transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-mono text-primary text-xs">{tmpl.name}</div>
+                    <div className="text-primary text-sm font-medium">{displayTemplateName(tmpl.name)}</div>
                     <div className="text-secondary/60 text-xs mt-0.5 line-clamp-1">{tmpl.bodyText}</div>
                   </td>
                   <td className="px-4 py-3">

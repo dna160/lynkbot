@@ -476,7 +476,7 @@ export function BuyersPage() {
           <p className="text-secondary text-sm mt-0.5">{total.toLocaleString()} total contacts</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowBroadcast(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm text-secondary hover:text-primary hover:border-accent/50 transition-all">
+          <button onClick={() => setShowBroadcast(true)} className="flex items-center gap-2 text-sm text-secondary hover:text-primary transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>
             Broadcast
           </button>
@@ -512,7 +512,7 @@ export function BuyersPage() {
               <tr><td colSpan={6} className="px-4 py-16 text-center text-secondary text-sm">{search ? 'No contacts match your search.' : 'No contacts yet — import a CSV or XLSX to get started.'}</td></tr>
             ) : buyers.map(buyer => (
               <tr key={buyer.id} className="border-b border-border/50 hover:bg-white/2 transition-colors cursor-pointer" onClick={() => setSelectedBuyer(buyer)}>
-                <td className="px-4 py-3"><div className="text-sm font-medium text-primary">{buyer.displayName || <span className="text-secondary italic">unnamed</span>}</div></td>
+                <td className="px-4 py-3"><div className="text-sm font-medium text-primary">{buyer.displayName || (buyer.waPhone ? <span className="text-secondary font-mono text-xs">+{buyer.waPhone}</span> : <span className="text-secondary/50 italic text-xs">unnamed</span>)}</div></td>
                 <td className="px-4 py-3"><span className="text-sm text-secondary font-mono">{formatPhone(buyer.waPhone)}</span></td>
                 <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{(buyer.tags ?? []).map(tag => <span key={tag} className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent/80 border border-accent/20">{tag}</span>)}</div></td>
                 <td className="px-4 py-3"><span className="text-sm text-secondary">{buyer.totalOrders}</span></td>

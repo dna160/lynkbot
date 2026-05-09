@@ -73,28 +73,35 @@ export function OverviewPage() {
           {[...Array(4)].map((_, i) => <div key={i} className="h-28 bg-surface rounded-xl animate-pulse" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-4 gap-4">
-          <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
-            <span className="text-sm text-secondary">Total Orders (7d)</span>
-            <div className="text-2xl font-bold text-primary">{(analytics?.totalOrders ?? 0).toLocaleString('id-ID')}</div>
-            <div className="text-xs text-secondary">From analytics period</div>
+        <>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
+              <span className="text-sm text-secondary">Total Orders (7d)</span>
+              <div className="text-2xl font-bold text-primary">{(analytics?.totalOrders ?? 0).toLocaleString('id-ID')}</div>
+              <div className="text-xs text-secondary">From analytics period</div>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
+              <span className="text-sm text-secondary">Revenue (7d)</span>
+              <div className="text-2xl font-bold text-primary">{fmtIdr(analytics?.totalRevenue ?? 0, true)}</div>
+              <div className="text-xs text-secondary">{analytics ? `${analytics.conversionRate.toFixed(1)}% conv.` : ''}</div>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
+              <span className="text-sm text-secondary">Avg. Order Value</span>
+              <div className="text-2xl font-bold text-primary">{fmtIdr(analytics?.avgOrderValue ?? 0, true)}</div>
+              <div className="text-xs text-secondary">Per transaction</div>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
+              <span className="text-sm text-secondary">Low Stock Alerts</span>
+              <div className="text-2xl font-bold text-primary">{lowStockCount}</div>
+              <div className="text-xs text-secondary">Products need attention</div>
+            </div>
           </div>
-          <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
-            <span className="text-sm text-secondary">Revenue (7d)</span>
-            <div className="text-2xl font-bold text-primary">{fmtIdr(analytics?.totalRevenue ?? 0, true)}</div>
-            <div className="text-xs text-secondary">{analytics ? `${analytics.conversionRate.toFixed(1)}% conv.` : ''}</div>
-          </div>
-          <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
-            <span className="text-sm text-secondary">Avg. Order Value</span>
-            <div className="text-2xl font-bold text-primary">{fmtIdr(analytics?.avgOrderValue ?? 0, true)}</div>
-            <div className="text-xs text-secondary">Per transaction</div>
-          </div>
-          <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-2">
-            <span className="text-sm text-secondary">Low Stock Alerts</span>
-            <div className="text-2xl font-bold text-primary">{lowStockCount}</div>
-            <div className="text-xs text-secondary">Products need attention</div>
-          </div>
-        </div>
+          {analytics && analytics.totalOrders === 0 && analytics.totalRevenue === 0 && (
+            <p className="text-xs text-secondary/60 text-center -mt-2">
+              No sales data yet — add products and connect WhatsApp to start tracking.
+            </p>
+          )}
+        </>
       )}
 
       <div className="grid grid-cols-3 gap-4">
