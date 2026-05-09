@@ -24,14 +24,24 @@ function createEdge(id: string, source: string, target: string, sourcePort?: str
 // ── S1: Book Appointment ────────────────────────────────────────────────────────
 
 export interface S1FormData {
+  triggerType?: 'button_click' | 'inbound_keyword';
+  triggerKeywords?: string[];
+  triggerButtonPayload?: string;
   serviceName?: string;
   introMessage?: string;
   consultationType?: string;
 }
 
 export function buildS1Flow(data: S1FormData): FlowDefinition {
+  const triggerType = data.triggerType ?? 'inbound_keyword';
+  const triggerConfig: Record<string, unknown> = { triggerType };
+  if (triggerType === 'inbound_keyword') {
+    triggerConfig.keywords = data.triggerKeywords?.filter(Boolean) ?? ['book', 'appointment'];
+  } else {
+    triggerConfig.buttonPayloadPrefix = data.triggerButtonPayload ?? 'book_';
+  }
   const nodes: FlowNode[] = [
-    createNode('trigger', 'TRIGGER', { triggerType: 'button_click' }, 'Start'),
+    createNode('trigger', 'TRIGGER', triggerConfig, 'Start'),
     createNode('intro', 'SEND_TEXT', { message: data.introMessage || 'Hi! Let me help you book an appointment.' }, 'Intro'),
     createNode('schedule', 'START_SCHEDULING', {
       introMessage: `Okay, let's schedule your ${data.serviceName || 'appointment'}.`,
@@ -50,13 +60,17 @@ export function buildS1Flow(data: S1FormData): FlowDefinition {
 // ── S2: Answer Product Questions ────────────────────────────────────────────────
 
 export interface S2FormData {
+  triggerKeywords?: string[];
   questionPrompt?: string;
   answerTemplate?: string;
 }
 
 export function buildS2Flow(data: S2FormData): FlowDefinition {
   const nodes: FlowNode[] = [
-    createNode('trigger', 'TRIGGER', { triggerType: 'inbound_keyword' }, 'Start'),
+    createNode('trigger', 'TRIGGER', {
+      triggerType: 'inbound_keyword',
+      keywords: data.triggerKeywords?.filter(Boolean) ?? ['info', 'product', 'price'],
+    }, 'Start'),
     createNode('ask', 'SEND_TEXT', {
       message: data.questionPrompt || 'What product are you interested in?',
     }, 'Ask Question'),
@@ -78,6 +92,7 @@ export function buildS2Flow(data: S2FormData): FlowDefinition {
 // ── S3: Collect a Lead ──────────────────────────────────────────────────────────
 
 export interface S3FormData {
+  triggerKeywords?: string[];
   qualifyingQuestions?: string[];
   followUpMessage?: string;
 }
@@ -87,7 +102,10 @@ export function buildS3Flow(data: S3FormData): FlowDefinition {
   if (questions.length === 0) questions.push("What's your name?");
 
   const nodes: FlowNode[] = [
-    createNode('trigger', 'TRIGGER', { triggerType: 'inbound_keyword' }, 'Start'),
+    createNode('trigger', 'TRIGGER', {
+      triggerType: 'inbound_keyword',
+      keywords: data.triggerKeywords?.filter(Boolean) ?? ['lead', 'interested', 'info'],
+    }, 'Start'),
   ];
   const edges: FlowEdge[] = [];
   let prevId = 'trigger';
@@ -147,13 +165,17 @@ export function buildS4Flow(data: S4FormData): FlowDefinition {
 // ── S5: Human Handoff ───────────────────────────────────────────────────────────
 
 export interface S5FormData {
+  triggerKeywords?: string[];
   handoffMessage?: string;
   consultationType?: string;
 }
 
 export function buildS5Flow(data: S5FormData): FlowDefinition {
   const nodes: FlowNode[] = [
-    createNode('trigger', 'TRIGGER', { triggerType: 'inbound_keyword' }, 'Start'),
+    createNode('trigger', 'TRIGGER', {
+      triggerType: 'inbound_keyword',
+      keywords: data.triggerKeywords?.filter(Boolean) ?? ['help', 'support', 'agent'],
+    }, 'Start'),
     createNode('notify', 'SEND_TEXT', {
       message: data.handoffMessage || 'Connecting you to our team...',
     }, 'Notify Buyer'),
