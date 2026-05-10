@@ -61,7 +61,10 @@ export async function collectInfoProcessor(
   let index = (ctx.variables[indexKey] as number | undefined) ?? 0;
   const inboundText = ctx.trigger.messageText?.trim() ?? '';
 
-  // If we have an inbound message and a current question is waiting, store the answer
+  // Only store an answer if we've already sent a question (index > 0).
+  // When index === 0 this is the FIRST entry into COLLECT_INFO — inboundText is the
+  // keyword that triggered the flow, NOT an answer.  Never treat the trigger message
+  // as an answer; always send question 0 fresh.
   if (inboundText && index > 0) {
     const prevQuestion = questions[index - 1];
     if (prevQuestion) {
@@ -81,13 +84,6 @@ export async function collectInfoProcessor(
       }
       ctx.variables[ANSWER_KEY(prevQuestion.variableName)] = answer;
     }
-  } else if (inboundText && index === 0) {
-    // First resume without having sent any question — treat as answer to question 0
-    // (edge case: engine resumed before we sent the first question, shouldn't happen in normal flow)
-    const q0 = questions[0];
-    if (q0) ctx.variables[ANSWER_KEY(q0.variableName)] = inboundText;
-    index = 1;
-    ctx.variables[indexKey] = index;
   }
 
   // Check if we've collected all answers

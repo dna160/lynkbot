@@ -107,25 +107,33 @@ export function buildFlowDefinition(state: WizardState): FlowDefinition {
   // ── 1. Trigger node ──────────────────────────────────────────────────────────
   const triggerNodeId = 'trigger_1';
 
+  // Use the canonical 'TRIGGER' node type so that:
+  //  1. The flow canvas editor can render and edit the node (it only knows 'TRIGGER')
+  //  2. The engine's trigger-node lookup handles 'TRIGGER' correctly
+  // The trigger BEHAVIOUR (keyword / order_event / time_based) is stored in:
+  //  - flowDefinitions.triggerType  (DB column — engine queries this)
+  //  - flowDefinitions.triggerConfig (DB column — engine reads keywords / orderEvent here)
+  // The node.config carries the same config as a convenience for the canvas display.
   if (state.triggerType === 'inbound_keyword') {
     nodes.push(node(
       triggerNodeId,
-      'TRIGGER_INBOUND_KEYWORD',
-      { keywords: state.keywords.filter(Boolean) },
+      'TRIGGER',
+      { triggerType: 'inbound_keyword', keywords: state.keywords.filter(Boolean) },
       'Keyword Trigger',
     ));
   } else if (state.triggerType === 'order_event') {
     nodes.push(node(
       triggerNodeId,
-      'TRIGGER_ORDER_EVENT',
-      { orderEvent: state.orderEvent ?? 'payment_confirmed' },
+      'TRIGGER',
+      { triggerType: 'order_event', orderEvent: state.orderEvent ?? 'payment_confirmed' },
       'Order Event Trigger',
     ));
   } else if (state.triggerType === 'time_since_event' && state.timeSinceEvent) {
     nodes.push(node(
       triggerNodeId,
-      'TRIGGER_TIME_SINCE_EVENT',
+      'TRIGGER',
       {
+        triggerType: 'time_based',
         event: state.timeSinceEvent.event,
         duration: state.timeSinceEvent.duration,
         unit: state.timeSinceEvent.unit,
