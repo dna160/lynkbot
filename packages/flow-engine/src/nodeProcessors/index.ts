@@ -25,6 +25,7 @@ import { startSchedulingProcessor } from './startScheduling';
 import { activatePlaybookProcessor } from './activatePlaybook';
 import { notifyStaffProcessor } from './notifyStaff';
 import { agentProcessor } from './agent';
+import { collectInfoProcessor } from './collectInfo';
 
 export const processorRegistry: Partial<Record<NodeType, NodeProcessor>> = {
   SEND_TEMPLATE: sendTemplateProcessor,
@@ -45,4 +46,5 @@ export const processorRegistry: Partial<Record<NodeType, NodeProcessor>> = {
   ACTIVATE_PLAYBOOK: activatePlaybookProcessor,
   NOTIFY_STAFF: notifyStaffProcessor,
   AGENT: agentProcessor,
+  COLLECT_INFO: collectInfoProcessor,
 };

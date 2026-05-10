@@ -4,7 +4,7 @@
  * File    : src/schema/tenants.ts
  * Role    : Drizzle ORM schema for tenants table and related enums
  * Imports : drizzle-orm/pg-core only
- * Exports : tenants, watiStatusEnum, subscriptionTierEnum
+ * Exports : tenants, watiStatusEnum, subscriptionTierEnum, BotTone
  * DO NOT  : Import from apps/* or packages except @lynkbot/shared and drizzle-orm
  */
 import {
@@ -17,6 +17,9 @@ import {
   jsonb,
   integer,
 } from 'drizzle-orm/pg-core';
+
+// Exported so buildSystemPrompt and API validation share the same type.
+export type BotTone = 'friendly' | 'formal' | 'playful';
 
 export const watiStatusEnum = pgEnum('wati_account_status', [
   'pending',
@@ -69,4 +72,20 @@ export const tenants = pgTable('tenants', {
   retentionDays: integer('retention_days').default(365),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+
+  // ── Bot Persona (migration 0028) ─────────────────────────────────────────
+  /** Display name of the bot shown to buyers. Falls back to storeName when null. */
+  botName: varchar('bot_name', { length: 100 }),
+  /** Tone/style injected into system prompt. One of: friendly | formal | playful */
+  botTone: varchar('bot_tone', { length: 20 }).default('friendly'),
+  /** Default language for new conversations: 'id' | 'en' */
+  botDefaultLanguage: varchar('bot_default_language', { length: 5 }).default('id'),
+  /** Opening line the bot uses when greeting a new buyer. Replaces generic greeting. */
+  botGreetingStyle: text('bot_greeting_style'),
+  /** Emoji or short character used as visual identity on the dashboard only — not injected into prompts. */
+  botAvatarEmoji: varchar('bot_avatar_emoji', { length: 10 }),
+  /** Freeform instructions appended to every system prompt for this tenant. */
+  botCustomInstructions: text('bot_custom_instructions'),
+  /** Default Meta template name for staff appointment confirmation requests. */
+  staffConfirmationTemplateName: varchar('staff_confirmation_template_name', { length: 100 }),
 });

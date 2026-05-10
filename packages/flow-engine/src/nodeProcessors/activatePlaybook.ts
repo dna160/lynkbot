@@ -9,6 +9,7 @@
  * Exports : activatePlaybookProcessor
  */
 import { db, conversations, eq, and } from '@lynkbot/db';
+import type { PlaybookOverrideData } from '@lynkbot/db';
 import type { FlowNode, ExecutionContext, ActivatePlaybookConfig } from '../types';
 import type { NodeResult, ProcessorDeps } from './types';
 
@@ -42,8 +43,9 @@ export async function activatePlaybookProcessor(
 
   if (conversationId && config.intentKey) {
     try {
+      const override: PlaybookOverrideData = { type: 'playbook', intentKey: config.intentKey };
       await db.update(conversations)
-        .set({ playbookOverride: config.intentKey } as any)
+        .set({ playbookOverride: override } as any)
         .where(eq(conversations.id, conversationId));
     } catch (err) {
       console.warn('[activatePlaybook] Failed to set playbookOverride:', err);

@@ -43,6 +43,7 @@ import { flowTemplateRoutes } from './routes/v1/flowTemplates';
 import { riskScoreRoutes } from './routes/v1/riskScore';
 import { intentPlaybookRoutes } from './routes/v1/intentPlaybooks';
 import { schedulingRoutes } from './routes/v1/scheduling';
+import { settingsRoutes } from './routes/v1/settings';
 import { internalWabaPoolRoutes } from './routes/internal/wabaPool';
 import { internalCronRoutes } from './routes/internal/cron';
 import { adminRoutes } from './routes/internal/admin';
@@ -135,6 +136,7 @@ async function bootstrap(): Promise<void> {
   await server.register(riskScoreRoutes, { prefix: '/api' });
   await server.register(intentPlaybookRoutes, { prefix: '/api' });
   await server.register(schedulingRoutes, { prefix: '/api' });
+  await server.register(settingsRoutes, { prefix: '/api' });
   await server.register(internalWabaPoolRoutes);
   await server.register(internalCronRoutes);
   await server.register(adminRoutes);

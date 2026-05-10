@@ -33,6 +33,10 @@ function resolveField(field: string, ctx: ExecutionContext): unknown {
         const varName = field.slice('flow.variable.'.length);
         return ctx.variables[varName];
       }
+      if (field.startsWith('answers.')) {
+        // COLLECT_INFO answers stored as ctx.variables['answers.<variableName>']
+        return ctx.variables[field];
+      }
       return undefined;
   }
 }

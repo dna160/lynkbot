@@ -28,6 +28,7 @@ export const PALETTE_NODES: NodePaletteEntry[] = [
   { type: 'ACTIVATE_PLAYBOOK',     label: 'Activate Playbook',icon: '🤖', color: '#A855F7', description: 'Use a specific AI Playbook next',    category: 'handoff'  },
   { type: 'NOTIFY_STAFF',          label: 'Notify Staff',     icon: '📣', color: '#F97316', description: 'Send a WhatsApp message to staff',   category: 'action'   },
   { type: 'AGENT',                 label: 'Agent',            icon: '🧠', color: '#6366F1', description: 'AI agent — 2 parallel action exits', category: 'action'   },
+  { type: 'COLLECT_INFO',         label: 'Collect Info',     icon: '📋', color: '#10B981', description: 'Ask a series of questions, store answers', category: 'logic' },
 ];
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -44,6 +45,7 @@ export function nodeSourceHandles(type: NodeType): string[] {
   if (type === 'IF_CONDITION') return ['true', 'false'];
   if (type === 'KEYWORD_ROUTER') return ['0', '1'];
   if (type === 'AGENT') return ['action_0', 'action_1'];
+  if (type === 'COLLECT_INFO') return ['default'];
   return ['output'];
 }
 
@@ -105,6 +107,10 @@ export function nodePreview(type: NodeType, config: Record<string, unknown>): st
     case 'AGENT': {
       const instr = String(config.instructions ?? '');
       return instr ? `"${instr.slice(0, 40)}${instr.length > 40 ? '…' : ''}"` : 'Configure instructions →';
+    }
+    case 'COLLECT_INFO': {
+      const qs = Array.isArray(config.questions) ? config.questions : [];
+      return qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}` : 'Add questions →';
     }
     default:
       return '';

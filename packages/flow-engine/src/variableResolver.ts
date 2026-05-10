@@ -56,6 +56,10 @@ export function resolveVariables(template: string, ctx: ExecutionContext): strin
       const varName = key.slice('flow.variable.'.length);
       return String(ctx.variables[varName] ?? '');
     }
+    if (key.startsWith('answers.')) {
+      // COLLECT_INFO answers stored as ctx.variables['answers.<variableName>']
+      return String(ctx.variables[key] ?? '');
+    }
 
     // Unknown variable — return empty string per spec
     return '';

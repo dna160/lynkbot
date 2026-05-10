@@ -5,13 +5,14 @@
  * Role    : Drizzle ORM schemas for the Scheduling & Booking module.
  *           Five tables: services, staff, serviceStaff (join), staffAvailability, appointments.
  *           appointment_status enum: negotiating | pending_doctor | confirmed | cancelled
- * Exports : appointmentStatusEnum, services, staff, serviceStaff, staffAvailability, appointments
+ * Exports : appointmentStatusEnum, ConfirmationModel, services, staff, serviceStaff, staffAvailability, appointments
  * DO NOT  : Import from apps/* or packages except @lynkbot/shared and drizzle-orm
  */
 import {
   pgTable,
   pgEnum,
   uuid,
+  varchar,
   text,
   boolean,
   integer,
@@ -20,6 +21,9 @@ import {
   unique,
   primaryKey,
 } from 'drizzle-orm/pg-core';
+
+// Exported so scheduling service and API validation share the same type.
+export type ConfirmationModel = 'staff_confirm' | 'instant';
 import { tenants } from './tenants';
 import { buyers } from './buyers';
 
@@ -44,6 +48,11 @@ export const services = pgTable('services', {
   isActive: boolean('is_active').notNull().default(true),
   confirmationStaffId: uuid('confirmation_staff_id').references(() => staff.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
+  // ── Confirmation model (migration 0029) ─────────────────────────────────
+  /** How appointments for this service are confirmed. Default: staff_confirm. */
+  confirmationModel: varchar('confirmation_model', { length: 20 }).default('staff_confirm'),
+  /** Meta template name for staff confirmation. Overrides tenant default. */
+  confirmationTemplateName: varchar('confirmation_template_name', { length: 100 }),
 }, (t) => ({
   tenantNameUnique: unique('services_tenant_name_unique').on(t.tenantId, t.name),
   tenantIdx: index('services_tenant_idx').on(t.tenantId),

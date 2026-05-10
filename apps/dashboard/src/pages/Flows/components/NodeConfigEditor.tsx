@@ -557,6 +557,128 @@ export function NodeConfigEditor({
           </div>
         )}
 
+        {node.type === 'COLLECT_INFO' && (
+          <div className="space-y-4">
+            <p className="text-xs text-secondary/70">
+              Asks the buyer a series of questions one at a time. Answers are stored as{' '}
+              <code className="bg-white/5 px-1 rounded">{'{{answers.variableName}}'}</code> variables
+              and can be used in IF/ELSE branches downstream.
+            </p>
+            {/* Questions list */}
+            {((node.config.questions as any[]) ?? []).map((q: any, qi: number) => (
+              <div key={q.id ?? qi} className="p-3 bg-white/5 rounded-lg border border-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-secondary">Question {qi + 1}</span>
+                  <button
+                    onClick={() => {
+                      const qs = [...((node.config.questions as any[]) ?? [])];
+                      qs.splice(qi, 1);
+                      update({ questions: qs });
+                    }}
+                    className="text-xs text-red-400 hover:text-red-300"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div>
+                  <label className="text-[10px] text-secondary/60 mb-1 block">Prompt text</label>
+                  <input
+                    value={q.promptText ?? ''}
+                    onChange={e => {
+                      const qs = [...((node.config.questions as any[]) ?? [])];
+                      qs[qi] = { ...qs[qi], promptText: e.target.value };
+                      update({ questions: qs });
+                    }}
+                    placeholder="e.g. What is your name?"
+                    className="w-full bg-[#0F172A] border border-border text-primary text-xs rounded px-2 py-1.5 focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-secondary/60 mb-1 block">Variable name (no spaces)</label>
+                  <input
+                    value={q.variableName ?? ''}
+                    onChange={e => {
+                      const qs = [...((node.config.questions as any[]) ?? [])];
+                      qs[qi] = { ...qs[qi], variableName: e.target.value.replace(/\s+/g, '_') };
+                      update({ questions: qs });
+                    }}
+                    placeholder="e.g. buyer_name"
+                    className="w-full bg-[#0F172A] border border-border text-primary text-xs font-mono rounded px-2 py-1.5 focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-secondary/60 mb-1 block">Type</label>
+                  <div className="flex gap-2">
+                    {(['text', 'choice'] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          const qs = [...((node.config.questions as any[]) ?? [])];
+                          qs[qi] = { ...qs[qi], type: t };
+                          update({ questions: qs });
+                        }}
+                        className={`flex-1 py-1 rounded border text-xs transition-all ${
+                          q.type === t ? 'border-accent text-accent' : 'border-border text-secondary'
+                        }`}
+                      >
+                        {t === 'text' ? 'Free text' : 'Choice buttons'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {q.type === 'choice' && (
+                  <div>
+                    <label className="text-[10px] text-secondary/60 mb-1 block">Choices (one per line, max 3)</label>
+                    <textarea
+                      value={Array.isArray(q.choices) ? q.choices.join('\n') : ''}
+                      onChange={e => {
+                        const choices = e.target.value.split('\n').slice(0, 3);
+                        const qs = [...((node.config.questions as any[]) ?? [])];
+                        qs[qi] = { ...qs[qi], choices };
+                        update({ questions: qs });
+                      }}
+                      rows={3}
+                      className="w-full bg-[#0F172A] border border-border text-primary text-xs rounded px-2 py-1.5 focus:outline-none focus:border-accent resize-none"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const qs = [...((node.config.questions as any[]) ?? [])];
+                qs.push({ id: `q${Date.now()}`, promptText: '', variableName: '', type: 'text', required: true });
+                update({ questions: qs });
+              }}
+              className="w-full py-1.5 border border-dashed border-border text-secondary text-xs rounded-lg hover:border-accent/60 hover:text-accent/80 transition-colors"
+            >
+              + Add question
+            </button>
+            <div>
+              <label className="text-xs text-secondary mb-1.5 block">On complete</label>
+              <div className="flex gap-2">
+                {(['continue', 'end'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => update({ onComplete: v })}
+                    className={`flex-1 py-1.5 rounded border text-xs transition-all ${
+                      (node.config.onComplete ?? 'continue') === v
+                        ? 'border-accent text-accent'
+                        : 'border-border text-secondary'
+                    }`}
+                  >
+                    {v === 'continue' ? 'Continue flow' : 'End flow'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-900/10 border border-emerald-800/30">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+              <span className="text-xs text-emerald-300 font-medium">Default exit — connect to next step</span>
+            </div>
+          </div>
+        )}
+
         {(node.validationErrors?.length ?? 0) > 0 && (
           <div className="p-3 bg-red-900/20 border border-red-800/40 rounded-lg">
             <div className="text-xs font-semibold text-red-400 mb-1">Validation errors</div>
