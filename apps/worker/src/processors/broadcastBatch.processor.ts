@@ -10,6 +10,7 @@ import type { Job } from 'bullmq';
 import { Queue } from 'bullmq';
 import { db, buyers, flowExecutions, buyerBroadcastLog, eq, and, or, not, gte } from '@lynkbot/db';
 import { QUEUES, logger } from '@lynkbot/shared';
+import { redisConnection } from '../redis';
 
 interface BroadcastBatchData {
   tenantId: string;
@@ -18,22 +19,6 @@ interface BroadcastBatchData {
   templateName?: string;
   executionContext?: Record<string, unknown>;
 }
-
-const redisConnection = (() => {
-  if (process.env.REDIS_URL) {
-    const url = new URL(process.env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: Number(url.port) || 6379,
-      password: url.password || undefined,
-    };
-  }
-  return {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
-  };
-})();
 
 const flowQueue = new Queue(QUEUES.FLOW_EXECUTION, { connection: redisConnection });
 

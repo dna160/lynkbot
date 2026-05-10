@@ -14,7 +14,7 @@ import { FlowEngine } from '@lynkbot/flow-engine';
 import { getLLMClient, query as ragQuery, formatWIBDatetime, classifyMessageIntent, buildSystemPrompt, STATE_PROMPTS, SCHEDULING_SYSTEM_PROMPT, parseSchedulingEnvelope } from '@lynkbot/ai';
 import type { MessageIntent } from '@lynkbot/ai';
 import { STAFF_CONFIRMATION_KEYWORDS, STAFF_REJECTION_KEYWORDS, BOOKING_INTENT_KEYWORDS } from '@lynkbot/shared';
-import Redis from 'ioredis';
+import { redisConnection, makeRedisClient } from '../redis';
 
 // ── AES-256-GCM decrypt (inline copy) ─────────────────────────────────────────
 const ALGORITHM = 'aes-256-gcm' as const;
@@ -46,25 +46,12 @@ async function getTenantMetaClient(tenantId: string): Promise<MetaClient> {
 }
 
 // ── Redis / FlowEngine ────────────────────────────────────────────────────────
-function getRedisConnection() {
-  if (process.env.REDIS_URL) {
-    const url = new URL(process.env.REDIS_URL);
-    return { host: url.hostname, port: Number(url.port) || 6379, password: url.password || undefined };
-  }
-  return {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
-  };
-}
-
-const redisConn = getRedisConnection();
-const redisClient = new Redis(redisConn);
+const redisClient = makeRedisClient();
 
 const flowEngine = new FlowEngine({
   getMetaClient: getTenantMetaClient,
   redisClient,
-  redisConnection: redisConn,
+  redisConnection,
 });
 
 // ── Keyword helpers ───────────────────────────────────────────────────────────

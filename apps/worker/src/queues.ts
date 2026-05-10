@@ -11,24 +11,9 @@
  */
 import { Queue } from 'bullmq';
 import type { QueueName } from '@lynkbot/shared';
+import { redisConnection } from './redis';
 
 const queues = new Map<string, Queue>();
-
-function getRedisConnection() {
-  if (process.env.REDIS_URL) {
-    const url = new URL(process.env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: Number(url.port) || 6379,
-      password: url.password || undefined,
-    };
-  }
-  return {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
-  };
-}
 
 /**
  * Returns a singleton Queue instance for the given queue name.
@@ -39,7 +24,7 @@ export function getQueue(name: QueueName): Queue {
     queues.set(
       name,
       new Queue(name, {
-        connection: getRedisConnection(),
+        connection: redisConnection,
         defaultJobOptions: {
           removeOnComplete: { count: 100 },
           removeOnFail: { count: 500 },

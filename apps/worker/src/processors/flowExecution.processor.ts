@@ -12,7 +12,7 @@ import { createDecipheriv } from 'node:crypto';
 import { FlowEngine } from '@lynkbot/flow-engine';
 import { MetaClient } from '@lynkbot/meta';
 import { db, tenants, eq } from '@lynkbot/db';
-import Redis from 'ioredis';
+import { redisConnection, makeRedisClient } from '../redis';
 
 // ── AES-256-GCM decrypt (co-located copy of apps/api/src/utils/crypto.ts decrypt) ──
 // Worker cannot import from apps/api — inline the decrypt only.
@@ -36,22 +36,7 @@ function decryptToken(bundled: string, keyHex: string): string {
 }
 
 // ── Redis connection ──────────────────────────────────────────────────────────
-
-function getRedisConnection() {
-  if (process.env.REDIS_URL) {
-    const url = new URL(process.env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: Number(url.port) || 6379,
-      password: url.password || undefined,
-    };
-  }
-  return {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
-  };
-}
+// Resolved once at module load from apps/worker/src/redis.ts
 
 // ── Per-tenant MetaClient ─────────────────────────────────────────────────────
 
@@ -78,13 +63,12 @@ async function getTenantMetaClientForWorker(tenantId: string): Promise<MetaClien
 
 // ── FlowEngine singleton ──────────────────────────────────────────────────────
 
-const redisConn = getRedisConnection();
-const redisClient = new Redis(redisConn);
+const redisClient = makeRedisClient();
 
 export const flowEngine = new FlowEngine({
   getMetaClient: getTenantMetaClientForWorker,
   redisClient,
-  redisConnection: redisConn,
+  redisConnection,
 });
 
 // ── Processor ─────────────────────────────────────────────────────────────────

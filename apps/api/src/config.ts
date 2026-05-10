@@ -94,13 +94,18 @@ export const config = parsed.data;
  * Parse REDIS_URL into ioredis-compatible { host, port, password } object.
  * BullMQ passes `connection` directly to ioredis — it does NOT accept { url: '...' }.
  * Use this everywhere a BullMQ Queue or Worker is instantiated.
+ * Handles both redis:// (plain) and rediss:// (TLS) schemes.
  */
 export function getRedisConnection() {
-  const url = new URL(config.REDIS_URL);
-  return {
+  const rawUrl = config.REDIS_URL || process.env.REDIS_PRIVATE_URL || '';
+  const url = new URL(rawUrl);
+  const isTLS = url.protocol === 'rediss:';
+  const conn = {
     host: url.hostname,
-    port: Number(url.port) || 6379,
-    password: url.password || undefined,
-    tls: url.protocol === 'rediss:' ? {} : undefined,
+    port: Number(url.port) || (isTLS ? 6380 : 6379),
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    tls: isTLS ? {} : undefined,
   };
+  console.log(`[redis] API connecting to ${conn.host}:${conn.port}${isTLS ? ' [TLS]' : ''}`);
+  return conn;
 }

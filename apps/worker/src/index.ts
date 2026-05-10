@@ -20,25 +20,7 @@ import { reminderProcessor } from './processors/reminder.processor';
 import { webhookProcessor } from './processors/webhook.processor';
 import { broadcastBatchProcessor } from './processors/broadcastBatch.processor';
 import { createServer } from 'node:http';
-
-// Parse REDIS_URL if provided (preferred over individual vars)
-function getRedisConnection() {
-  if (process.env.REDIS_URL) {
-    const url = new URL(process.env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: Number(url.port) || 6379,
-      password: url.password || undefined,
-    };
-  }
-  return {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
-  };
-}
-
-const redisConnection = getRedisConnection();
+import { redisConnection } from './redis';
 
 const workers = [
   new Worker(QUEUES.INGEST, ingestProcessor, {
