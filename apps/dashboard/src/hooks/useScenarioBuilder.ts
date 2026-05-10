@@ -33,10 +33,26 @@ export function useScenarioBuilder(templateId: string, initialData?: Partial<Sce
         setError(null);
         const definition = buildFlow();
 
-        // Derive triggerType from the TRIGGER node config so S4 broadcasts correctly
-        const triggerNode = definition.nodes.find((n) => n.type === 'TRIGGER');
-        const triggerType =
-          (triggerNode?.config as TriggerConfig | undefined)?.triggerType ?? 'button_click';
+        // Derive the API triggerType from the flow's trigger node type or config.
+        // v3 typed trigger nodes map directly to API trigger type strings.
+        // Legacy TRIGGER node falls back to config.triggerType for backward compat.
+        const triggerNode = definition.nodes.find((n) =>
+          n.type === 'TRIGGER' || n.type === 'TRIGGER_INBOUND_KEYWORD' ||
+          n.type === 'TRIGGER_ORDER_EVENT' || n.type === 'TRIGGER_TIME_SINCE_EVENT'
+        );
+        let triggerType: string;
+        if (triggerNode?.type === 'TRIGGER_INBOUND_KEYWORD') {
+          triggerType = 'inbound_keyword';
+        } else if (triggerNode?.type === 'TRIGGER_ORDER_EVENT') {
+          triggerType = 'order_event';
+        } else if (triggerNode?.type === 'TRIGGER_TIME_SINCE_EVENT') {
+          triggerType = 'time_based';
+        } else {
+          // Legacy TRIGGER node — read from config
+          const cfg = (triggerNode?.config as TriggerConfig | undefined);
+          const cfgType = cfg?.triggerType as string | undefined;
+          triggerType = cfgType === 'broadcast' ? 'time_based' : (cfgType ?? 'inbound_keyword');
+        }
 
         const { flowsApi } = await import('@/lib/api');
         const response = await flowsApi.create({

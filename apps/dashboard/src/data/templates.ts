@@ -61,6 +61,15 @@ export const TEMPLATES: Record<string, TemplateConfig> = {
     previewEn: ['Buyer: "Talk to someone"', 'Bot: "Connecting to team..."'],
     previewId: ['Pembeli: "Bicara dengan tim"', 'Bot: "Menghubungkan ke tim..."'],
   },
+  S6: {
+    id: 'S6',
+    labelEn: 'Order Follow-Up',
+    labelId: 'Follow-Up Pesanan',
+    icon: '📦',
+    category: 'Sales',
+    previewEn: ['Event: Payment confirmed', 'Bot: "Your order is on its way! 🎉"'],
+    previewId: ['Event: Pembayaran dikonfirmasi', 'Bot: "Pesananmu sedang diproses! 🎉"'],
+  },
 };
 
 export function getTemplatesSuggested(

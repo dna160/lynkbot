@@ -16,6 +16,7 @@ import { config, getRedisConnection } from '../config';
 import { InventoryService } from './inventory.service';
 import { getTenantMetaClient } from './_meta.helper';
 import type { IPaymentProvider } from '@lynkbot/payments';
+import { flowEngineSingleton } from './flowEngine.singleton';
 
 type ConvRow = typeof conversations.$inferSelect;
 type BuyerRow = { id: string; tenantId: string; waPhone: string; displayName: string | null };
@@ -280,6 +281,13 @@ export class PaymentService {
       });
     }
 
+    // Trigger order_event flows for payment_confirmed
+    if (order.buyerId) {
+      flowEngineSingleton.handleOrderEvent(tenantId, order.buyerId, 'payment_confirmed', order.id).catch(err => {
+        console.error('[PaymentService] handleOrderEvent(payment_confirmed) failed:', err);
+      });
+    }
+
     auditLog('payment_confirmed', {
       orderId: order.id,
       orderCode: order.orderCode,
@@ -325,6 +333,13 @@ export class PaymentService {
             { type: 'text', text: product.name },
           ],
         }],
+      });
+    }
+
+    // Trigger order_event flows for payment_failed
+    if (order.buyerId) {
+      flowEngineSingleton.handleOrderEvent(order.tenantId, order.buyerId, 'payment_failed', orderId).catch(err => {
+        console.error('[PaymentService] handleOrderEvent(payment_failed) failed:', err);
       });
     }
 

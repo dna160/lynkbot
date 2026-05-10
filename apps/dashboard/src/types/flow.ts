@@ -27,17 +27,20 @@ export type NodeType =
   | 'START_SCHEDULING'
   | 'ACTIVATE_PLAYBOOK'
   | 'NOTIFY_STAFF'
-  | 'AGENT';
+  | 'AGENT'
+  | 'COLLECT_INFO';
 
 // ── Trigger Types ─────────────────────────────────────────────────────────────
 
-export type TriggerType = 'button_click' | 'broadcast' | 'time_based' | 'inbound_keyword';
+export type TriggerType = 'button_click' | 'broadcast' | 'time_based' | 'inbound_keyword' | 'order_event';
 
 export interface TriggerConfig {
   triggerType: TriggerType;
   buttonPayloadPrefix?: string;
   cronExpression?: string;
   keywords?: string[];
+  /** For order_event trigger flows */
+  orderEvent?: 'payment_confirmed' | 'shipped' | 'delivered' | 'payment_failed';
   segmentFilter?: SegmentFilter;
 }
 

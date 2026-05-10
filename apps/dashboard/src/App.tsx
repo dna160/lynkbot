@@ -14,14 +14,14 @@ import { TemplateListPage } from './pages/Templates/TemplateListPage';
 import { TemplateEditorPage } from './pages/Templates/TemplateEditorPage';
 import { FlowsListPage } from './pages/Flows/FlowsListPage';
 import { FlowEditorPage } from './pages/Flows/FlowEditorPage';
-import { TemplateGalleryPage } from './pages/Flows/TemplateGalleryPage';
-import { ScenarioBuilderPage } from './pages/Flows/ScenarioBuilderPage';
+import { AutomationWizardPage } from './pages/Flows/AutomationWizardPage';
 import { IntentPlaybooksPage } from './pages/IntentPlaybooks/IntentPlaybooksPage';
 import { AppointmentsPage } from './pages/Appointments/AppointmentsPage';
 import { AppointmentsCalendarPage } from './pages/Appointments/AppointmentsCalendarPage';
 import { StaffPage } from './pages/Staff/StaffPage';
 import { ServicesPage } from './pages/Services/ServicesPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
+import { BotPersonaPage } from './pages/Settings/BotPersonaPage';
 import { AdminPage } from './pages/Admin/AdminPage';
 import { CompliancePage } from './pages/Compliance/CompliancePage';
 import { SchedulingSetupPage } from './pages/Scheduling/SchedulingSetupPage';
@@ -151,8 +151,7 @@ export default function App() {
           <Route path="templates/new" element={<TemplateEditorPage />} />
           <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="flows" element={<Navigate to="/dashboard/automations" replace />} />
-          <Route path="automations/new/:templateId" element={<ScenarioBuilderPage />} />
-          <Route path="automations/new" element={<TemplateGalleryPage />} />
+          <Route path="automations/new" element={<AutomationWizardPage />} />
           <Route path="automations" element={<FlowsListPage />} />
           <Route path="playbooks" element={<IntentPlaybooksPage />} />
           <Route path="appointments" element={<AppointmentsPage />} />
@@ -161,6 +160,7 @@ export default function App() {
           <Route path="services" element={<ServicesPage />} />
           <Route path="scheduling/setup" element={<SchedulingSetupPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings/persona" element={<BotPersonaPage />} />
           <Route path="admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           <Route path="compliance" element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
         </Route>

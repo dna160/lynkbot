@@ -15,6 +15,7 @@ import { db, orders, conversations, buyers, products, auditLogs } from '@lynkbot
 import { eq } from '@lynkbot/db';
 import { pgClient } from '@lynkbot/db';
 import { getTenantMetaClient } from '../_meta.helper';
+import { workerFlowEngine } from '../_flowEngine';
 
 export const paymentExpiryProcessor: Processor = async (job) => {
   const { orderId, tenantId, conversationId } = job.data as {
@@ -94,6 +95,13 @@ export const paymentExpiryProcessor: Processor = async (job) => {
     actorType: 'system',
     metadata: { orderId, previousStatus: 'pending_payment', newStatus: 'cancelled' },
   });
+
+  // Trigger order_event flows for payment_failed (fire-and-forget)
+  if (order.buyerId) {
+    workerFlowEngine.handleOrderEvent(tenantId, order.buyerId, 'payment_failed', orderId).catch(err => {
+      job.log(`[flowEngine] handleOrderEvent(payment_failed) error: ${String(err)}`);
+    });
+  }
 
   job.log(`✅ Payment expired for order ${orderId} — stock released, conversation updated`);
 };

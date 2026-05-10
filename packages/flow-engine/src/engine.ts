@@ -63,6 +63,7 @@ function semanticPortToDrawflow(nodeType: string, port: string): string | undefi
     if (port === 'action_0' || port === 'customer_reply') return 'output_1';
     if (port === 'action_1' || port === 'exit') return 'output_2';
   }
+  if (nodeType === 'COLLECT_INFO' && port === 'default') return 'output_1';
   if (port === 'default') return 'output_1';
   return undefined;
 }
@@ -215,7 +216,10 @@ export class FlowEngine {
 
     // 8. Find trigger node → follow edges to first real node
     const definition = flow.definition as unknown as FlowDefinition;
-    const triggerNode = definition.nodes.find(n => n.type === 'TRIGGER');
+    const triggerNode = definition.nodes.find(n =>
+      n.type === 'TRIGGER' || n.type === 'TRIGGER_INBOUND_KEYWORD' ||
+      n.type === 'TRIGGER_ORDER_EVENT' || n.type === 'TRIGGER_TIME_SINCE_EVENT'
+    );
     if (!triggerNode) {
       throw new Error(`Flow ${flowId} has no TRIGGER node`);
     }
@@ -279,9 +283,11 @@ export class FlowEngine {
       const cfg = (flow.triggerConfig ?? {}) as TriggerConfig;
       let keywords: string[] = Array.isArray(cfg.keywords) ? cfg.keywords : [];
       if (keywords.length === 0) {
-        // Fallback: read from TRIGGER node inside definition
+        // Fallback: read from TRIGGER / TRIGGER_INBOUND_KEYWORD node inside definition
         const def = flow.definition as unknown as FlowDefinition;
-        const triggerNode = def?.nodes?.find(n => n.type === 'TRIGGER');
+        const triggerNode = def?.nodes?.find(n =>
+          n.type === 'TRIGGER' || n.type === 'TRIGGER_INBOUND_KEYWORD'
+        );
         const nodeKws = (triggerNode?.config as Record<string, unknown>)?.keywords;
         if (Array.isArray(nodeKws)) keywords = nodeKws as string[];
       }
@@ -390,7 +396,10 @@ export class FlowEngine {
     };
 
     const definition = matched.definition as unknown as FlowDefinition;
-    const triggerNode = definition.nodes.find(n => n.type === 'TRIGGER');
+    const triggerNode = definition.nodes.find(n =>
+      n.type === 'TRIGGER' || n.type === 'TRIGGER_INBOUND_KEYWORD' ||
+      n.type === 'TRIGGER_ORDER_EVENT' || n.type === 'TRIGGER_TIME_SINCE_EVENT'
+    );
     if (!triggerNode) {
       // Flow is misconfigured — mark completed so it doesn't stay stuck, but still
       // return true so the LLM does NOT fire (the flow was matched — it just can't run).
@@ -642,11 +651,11 @@ export class FlowEngine {
 
     const definition = flow.definition as unknown as FlowDefinition;
 
-    // AGENT nodes own their conversation loop — re-execute the same node so
-    // the processor can process the new buyer message and decide whether to
-    // continue waiting or exit via the 'exit' port.
+    // AGENT and COLLECT_INFO nodes own their conversation loop — re-execute the
+    // same node so the processor can process the new buyer message and decide
+    // whether to continue waiting or advance to the next question/node.
     const currentNode = definition.nodes.find(n => n.id === currentNodeId);
-    if (currentNode?.type === 'AGENT') {
+    if (currentNode?.type === 'AGENT' || currentNode?.type === 'COLLECT_INFO') {
       await this.executeNode(executionId, currentNodeId, ctx);
       return;
     }
@@ -657,6 +666,166 @@ export class FlowEngine {
       return;
     }
     await this.executeNode(executionId, edges[0].target, ctx);
+  }
+
+  /**
+   * Entry point: order lifecycle event.
+   *
+   * Finds all active flows with TRIGGER_ORDER_EVENT matching this event type
+   * and starts a new execution for the given buyer. Idempotent — skips if a
+   * running/waiting execution already exists for this buyer+flow.
+   *
+   * Called from:
+   *   apps/api/src/services/payment.service.ts   — payment_confirmed, payment_failed
+   *   apps/worker/src/processors/paymentExpiry   — payment_failed
+   *   apps/worker/src/processors/tracking        — shipped, delivered
+   */
+  async handleOrderEvent(
+    tenantId: string,
+    buyerId: string,
+    event: 'payment_confirmed' | 'shipped' | 'delivered' | 'payment_failed',
+    orderId?: string,
+  ): Promise<void> {
+    const tag = `[FlowEngine][order_event] tenant=${tenantId} buyer=${buyerId} event=${event}`;
+
+    // 1. Find all active order_event flows for this tenant
+    const activeFlows = await db.query.flowDefinitions.findMany({
+      where: and(
+        eq(flowDefinitions.tenantId, tenantId),
+        eq(flowDefinitions.status, 'active'),
+        eq(flowDefinitions.triggerType, 'order_event'),
+      ),
+      columns: { id: true, name: true, triggerConfig: true, definition: true },
+    });
+
+    if (activeFlows.length === 0) {
+      console.log(`${tag} NO_FLOWS — no active order_event flows for tenant`);
+      return;
+    }
+
+    // 2. Load buyer once — shared across all matching flows
+    const buyer = await db.query.buyers.findFirst({
+      where: eq(buyers.id, buyerId),
+    });
+
+    if (!buyer) {
+      console.error(`${tag} BUYER_NOT_FOUND`);
+      return;
+    }
+    if (buyer.doNotContact) {
+      console.warn(`${tag} DO_NOT_CONTACT — suppressing`);
+      return;
+    }
+
+    const buyerCtx: BuyerContext = {
+      id: buyer.id,
+      waPhone: buyer.waPhone,
+      name: buyer.displayName ?? buyer.waPhone,
+      totalOrders: buyer.totalOrders,
+      tags: (buyer.tags as string[]) ?? [],
+      lastOrderAt: buyer.lastOrderAt,
+      doNotContact: buyer.doNotContact,
+      preferredLanguage: buyer.preferredLanguage ?? 'id',
+      notes: buyer.notes,
+      displayName: buyer.displayName,
+      activeFlowCount: buyer.activeFlowCount,
+    };
+
+    for (const flow of activeFlows) {
+      try {
+        // 3. Check triggerConfig.orderEvent (or triggerConfig.event) matches
+        const cfg = (flow.triggerConfig ?? {}) as Record<string, unknown>;
+        const cfgEvent = (cfg.orderEvent ?? cfg.event) as string | undefined;
+        if (cfgEvent && cfgEvent !== event) {
+          console.log(`${tag} SKIP flow="${flow.name}" id=${flow.id} (event mismatch: ${cfgEvent})`);
+          continue;
+        }
+
+        // 4. Idempotency: skip if already running/waiting for this buyer+flow
+        const existing = await db.query.flowExecutions.findFirst({
+          where: and(
+            eq(flowExecutions.flowId, flow.id),
+            eq(flowExecutions.buyerId, buyerId),
+            or(
+              eq(flowExecutions.status, 'running'),
+              eq(flowExecutions.status, 'waiting_reply'),
+            ),
+          ),
+          columns: { id: true },
+        });
+
+        if (existing) {
+          console.log(`${tag} ALREADY_RUNNING execution=${existing.id} for flow="${flow.name}" — skipping`);
+          continue;
+        }
+
+        // 5. Build trigger context (includes orderId for downstream nodes)
+        const triggerCtx: TriggerContext = {
+          type: 'order_event',
+          orderId,
+        };
+
+        // 6. Insert execution record
+        const [execution] = await db
+          .insert(flowExecutions)
+          .values({
+            flowId: flow.id,
+            tenantId,
+            buyerId,
+            status: 'running',
+            context: { buyer: buyerCtx, trigger: triggerCtx, variables: {} },
+            startedAt: new Date(),
+            lastStepAt: new Date(),
+          })
+          .returning({ id: flowExecutions.id });
+
+        await db
+          .update(buyers)
+          .set({ activeFlowCount: sql`${buyers.activeFlowCount} + 1` })
+          .where(eq(buyers.id, buyerId));
+
+        const ctx: ExecutionContext = {
+          executionId: execution.id,
+          flowId: flow.id,
+          tenantId,
+          buyerId,
+          buyer: buyerCtx,
+          trigger: triggerCtx,
+          variables: {},
+          executionLog: [],
+        };
+
+        // 7. Find trigger node → follow first edge to start execution
+        const definition = flow.definition as unknown as FlowDefinition;
+        const triggerNode = definition.nodes.find(n =>
+          n.type === 'TRIGGER' || n.type === 'TRIGGER_INBOUND_KEYWORD' ||
+          n.type === 'TRIGGER_ORDER_EVENT' || n.type === 'TRIGGER_TIME_SINCE_EVENT'
+        );
+
+        if (!triggerNode) {
+          console.error(`${tag} flow "${flow.name}" id=${flow.id} has no trigger node — marking completed`);
+          await this._markCompleted(ctx);
+          continue;
+        }
+
+        const firstEdge = (definition.edges ?? []).find(
+          e => e.source === triggerNode.id && (!e.sourcePort || e.sourcePort === 'default' || e.sourcePort === 'output_1'),
+        );
+
+        if (!firstEdge) {
+          console.error(`${tag} flow "${flow.name}" id=${flow.id} trigger node has no outgoing edge`);
+          await this._markCompleted(ctx);
+          continue;
+        }
+
+        console.log(`${tag} STARTING flow="${flow.name}" id=${flow.id} execution=${execution.id}`);
+        this.executeNode(execution.id, firstEdge.target, ctx).catch(err => {
+          console.error(`${tag} executeNode failed for execution=${execution.id}:`, err);
+        });
+      } catch (err) {
+        console.error(`${tag} error processing flow id=${flow.id}:`, err);
+      }
+    }
   }
 
   /**

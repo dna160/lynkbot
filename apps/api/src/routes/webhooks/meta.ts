@@ -20,13 +20,11 @@ import { verifyMetaSignature } from '../../middleware/metaSignature';
 import { extractFirstMessage, isStatusUpdate } from '@lynkbot/meta';
 import { config } from '../../config';
 import { db, buyers, flowExecutions, staff, webhookIngestLog, eq, and, sql } from '@lynkbot/db';
-import { FlowEngine } from '@lynkbot/flow-engine';
-import { getTenantMetaClient } from '../../services/_meta.helper';
-import { getRedisConnection } from '../../config';
-import Redis from 'ioredis';
 import { TemplateStudioService } from '../../services/templateStudio.service';
 import { RiskScoreService } from '../../services/riskScore.service';
 import { SchedulingService } from '../../services/scheduling.service';
+import { flowEngineSingleton as flowEngine } from '../../services/flowEngine.singleton';
+import { getRedisConnection } from '../../config';
 import { Queue } from 'bullmq';
 import { QUEUES } from '@lynkbot/shared';
 
@@ -34,16 +32,8 @@ const templateStudioService = new TemplateStudioService();
 const riskScoreService = new RiskScoreService();
 const schedulingService = new SchedulingService();
 
-// ── Flow Engine singleton ────────────────────────────────────────────────────
-const redisConn = getRedisConnection();
-const redisClientForFlowEngine = new Redis(redisConn);
-const flowEngine = new FlowEngine({
-  getMetaClient: getTenantMetaClient,
-  redisClient: redisClientForFlowEngine,
-  redisConnection: redisConn,
-});
-
 // ── Webhook durability queue ─────────────────────────────────────────────────
+const redisConn = getRedisConnection();
 const webhookQueue = new Queue(QUEUES.WEBHOOK_PROCESS, { connection: redisConn });
 
 function extractMetaMessageId(body: unknown): string | null {

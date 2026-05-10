@@ -17,6 +17,7 @@ import { db, shipments, orders, conversations, buyers } from '@lynkbot/db';
 import { eq, sql } from '@lynkbot/db';
 import { ShipmentStatus } from '@lynkbot/shared';
 import { getTenantMetaClient } from '../_meta.helper';
+import { workerFlowEngine } from '../_flowEngine';
 
 export interface TrackingJobData {
   shipmentId: string;
@@ -241,7 +242,21 @@ export const trackingProcessor: Processor = async (job) => {
     }
   }
 
-  // 10. Terminate repeatable job if delivered
+  // 10. Fire order_event flows for shipped / delivered
+  const orderRow = await db.query.orders.findFirst({ where: eq(orders.id, shipment.orderId) });
+  if (orderRow?.buyerId) {
+    const flowEvent = newStatus === ShipmentStatus.DELIVERED ? 'delivered'
+      : (newStatus === ShipmentStatus.IN_TRANSIT || newStatus === ShipmentStatus.OUT_FOR_DELIVERY) ? 'shipped'
+      : null;
+
+    if (flowEvent) {
+      workerFlowEngine.handleOrderEvent(tenantId, orderRow.buyerId, flowEvent, orderRow.id).catch(err => {
+        job.log(`[flowEngine] handleOrderEvent(${flowEvent}) error: ${String(err)}`);
+      });
+    }
+  }
+
+  // 11. Terminate repeatable job if delivered
   if (newStatus === ShipmentStatus.DELIVERED) {
     job.log(`Shipment ${shipmentId} delivered — terminating repeatable job`);
     return { terminate: true, status: newStatus };

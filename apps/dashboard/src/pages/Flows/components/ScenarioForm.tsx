@@ -240,6 +240,42 @@ export function ScenarioForm({
           </div>
         </div>
       )}
+
+      {templateId === 'S6' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-primary">Order Follow-Up</h3>
+          <TriggerSection>
+            <div className="space-y-2">
+              <label className="text-xs text-secondary">Order event that triggers this automation</label>
+              <select
+                value={getFieldValue('orderEvent') || 'payment_confirmed'}
+                onChange={(e) => onFieldChange('orderEvent', e.target.value)}
+                disabled={isLoading}
+                className={inputCls}
+              >
+                <option value="payment_confirmed">💳 Payment confirmed</option>
+                <option value="shipped">📦 Order shipped</option>
+                <option value="delivered">✅ Order delivered</option>
+                <option value="payment_failed">⚠️ Payment failed / expired</option>
+              </select>
+              <p className="text-[10px] text-secondary/50">Fires automatically when this event occurs for any buyer.</p>
+            </div>
+          </TriggerSection>
+          <div>
+            <label className="text-xs text-secondary">Follow-up Message *</label>
+            <textarea
+              value={getFieldValue('followUpMessage')}
+              onChange={(e) => onFieldChange('followUpMessage', e.target.value)}
+              placeholder="e.g. ✅ Pembayaran diterima! Pesananmu sedang diproses 🎉"
+              disabled={isLoading}
+              required
+              className={textareaCls}
+              rows={3}
+            />
+            <p className="text-[10px] text-secondary/50 mt-1">Leave blank to use the default message for the selected event.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
