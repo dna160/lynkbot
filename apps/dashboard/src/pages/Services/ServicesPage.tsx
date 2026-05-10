@@ -25,6 +25,7 @@ interface ServiceFormState {
   staffIds: string[];
   confirmationStaffId?: string | null;
   confirmationModel: 'staff_confirm' | 'instant';
+  confirmationTemplateName?: string;
   isActive: boolean;
 }
 
@@ -166,6 +167,18 @@ function ServiceModal({
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Staff Confirmation Template Name (Optional)</label>
+            <p className="text-xs text-slate-500 mb-2">WATI template sent to staff when a booking is pending approval. Leave blank to use the default template.</p>
+            <input
+              type="text"
+              value={form.confirmationTemplateName ?? ''}
+              onChange={e => setForm(p => ({ ...p, confirmationTemplateName: e.target.value }))}
+              placeholder="e.g. appointment_staff_confirm_v2"
+              className="w-full bg-[#0F172A] border border-[#334155] rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
+
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -198,7 +211,7 @@ function ServiceModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM: ServiceFormState = { name: '', durationMinutes: 60, staffIds: [], confirmationStaffId: null, confirmationModel: 'staff_confirm', isActive: true };
+const EMPTY_FORM: ServiceFormState = { name: '', durationMinutes: 60, staffIds: [], confirmationStaffId: null, confirmationModel: 'staff_confirm', confirmationTemplateName: '', isActive: true };
 
 export function ServicesPage() {
   const { addToast } = useToast();
@@ -215,6 +228,7 @@ export function ServicesPage() {
         ...data,
         confirmationStaffId: data.confirmationStaffId || undefined,
         confirmationModel: data.confirmationModel,
+        confirmationTemplateName: data.confirmationTemplateName || undefined,
       });
       addToast('Service created', 'success');
       setShowCreate(false);
@@ -231,6 +245,7 @@ export function ServicesPage() {
         ...data,
         confirmationStaffId: data.confirmationStaffId || null,
         confirmationModel: data.confirmationModel,
+        confirmationTemplateName: data.confirmationTemplateName || undefined,
       });
       addToast('Service updated', 'success');
       setEditTarget(null);
@@ -358,6 +373,7 @@ export function ServicesPage() {
             staffIds: editTarget.staff?.map(s => s.id) ?? [],
             confirmationStaffId: editTarget.confirmationStaffId ?? null,
             confirmationModel: editTarget.confirmationModel ?? 'staff_confirm',
+            confirmationTemplateName: editTarget.confirmationTemplateName ?? '',
             isActive: editTarget.isActive,
           }}
           onSubmit={handleUpdate}

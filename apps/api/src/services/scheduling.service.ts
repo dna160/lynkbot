@@ -580,7 +580,7 @@ export class SchedulingService {
         ).catch(err => console.error('[scheduling] Staff confirmation template failed:', err));
       }
 
-      return `Baik, permintaan appointment *${serviceRow?.name ?? ''}* sudah kami kirim ke ${notifyStaff?.name ?? 'dokter'}. Tunggu konfirmasinya ya, Kak 🙏\n\nKamu akan dapat notifikasi begitu dikonfirmasi.`;
+      return `Oke, kami sedang mengecek ketersediaan jadwal dengan tim kami 🔍\n\nKamu akan mendapat konfirmasi secepatnya ya, Kak. Mohon tunggu sebentar 🙏`;
     }
 
     if (envelope.action === 'reschedule_booking') {
