@@ -33,9 +33,11 @@ function resolveTriggerConfig(
     return triggerConfig; // Already has keywords — nothing to sync
   }
 
-  // Pull keywords from TRIGGER node inside definition
+  // Pull keywords from TRIGGER / TRIGGER_INBOUND_KEYWORD node inside definition
   const nodes = (definition as { nodes?: Array<{ type: string; config?: Record<string, unknown> }> }).nodes;
-  const triggerNode = Array.isArray(nodes) ? nodes.find(n => n.type === 'TRIGGER') : undefined;
+  const triggerNode = Array.isArray(nodes)
+    ? nodes.find(n => n.type === 'TRIGGER' || n.type === 'TRIGGER_INBOUND_KEYWORD')
+    : undefined;
   const nodeKws = triggerNode?.config?.keywords;
   if (Array.isArray(nodeKws) && nodeKws.filter(Boolean).length > 0) {
     return { ...triggerConfig, keywords: nodeKws };
