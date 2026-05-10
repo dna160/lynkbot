@@ -24,6 +24,7 @@ interface ServiceFormState {
   durationMinutes: number;
   staffIds: string[];
   confirmationStaffId?: string | null;
+  confirmationModel: 'staff_confirm' | 'instant';
   isActive: boolean;
 }
 
@@ -113,8 +114,44 @@ function ServiceModal({
           </div>
 
           <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Confirmation Model</label>
+            <p className="text-xs text-slate-500 mb-2">How appointments for this service are confirmed</p>
+            <div className="space-y-2">
+              {(
+                [
+                  { value: 'staff_confirm', label: 'Staff Approval', desc: 'Staff must confirm each booking before it is finalised' },
+                  { value: 'instant', label: 'Instant Confirm', desc: 'Bookings are auto-confirmed immediately after the buyer picks a slot' },
+                ] as const
+              ).map(opt => (
+                <label key={opt.value} className="flex items-start gap-3 cursor-pointer group">
+                  <div
+                    onClick={() => setForm(p => ({ ...p, confirmationModel: opt.value }))}
+                    className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 transition-colors ${
+                      form.confirmationModel === opt.value ? 'border-indigo-500 bg-indigo-500' : 'border-[#334155] bg-[#0F172A] group-hover:border-indigo-400'
+                    }`}
+                  >
+                    {form.confirmationModel === opt.value && (
+                      <div className="w-full h-full rounded-full flex items-center justify-center">
+                        <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                      </div>
+                    )}
+                  </div>
+                  <div onClick={() => setForm(p => ({ ...p, confirmationModel: opt.value }))}>
+                    <p className="text-sm text-slate-200 select-none">{opt.label}</p>
+                    <p className="text-xs text-slate-500 select-none">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">Confirmation Staff (Optional)</label>
-            <p className="text-xs text-slate-500 mb-2">Staff member who approves appointment requests for this service</p>
+            <p className="text-xs text-slate-500 mb-2">
+              {form.confirmationModel === 'instant'
+                ? 'Not used for instant confirmation — notifications still sent if set'
+                : 'Staff member who approves appointment requests for this service'}
+            </p>
             <select
               value={form.confirmationStaffId || ''}
               onChange={e => setForm(p => ({ ...p, confirmationStaffId: e.target.value || null }))}
@@ -161,7 +198,7 @@ function ServiceModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM: ServiceFormState = { name: '', durationMinutes: 60, staffIds: [], confirmationStaffId: null, isActive: true };
+const EMPTY_FORM: ServiceFormState = { name: '', durationMinutes: 60, staffIds: [], confirmationStaffId: null, confirmationModel: 'staff_confirm', isActive: true };
 
 export function ServicesPage() {
   const { addToast } = useToast();
@@ -177,6 +214,7 @@ export function ServicesPage() {
       await createService.mutateAsync({
         ...data,
         confirmationStaffId: data.confirmationStaffId || undefined,
+        confirmationModel: data.confirmationModel,
       });
       addToast('Service created', 'success');
       setShowCreate(false);
@@ -192,6 +230,7 @@ export function ServicesPage() {
         id: editTarget.id,
         ...data,
         confirmationStaffId: data.confirmationStaffId || null,
+        confirmationModel: data.confirmationModel,
       });
       addToast('Service updated', 'success');
       setEditTarget(null);
@@ -274,14 +313,20 @@ export function ServicesPage() {
                 </div>
               )}
 
-              {svc.confirmationStaffId && (
-                <div className="pt-2 border-t border-[#334155]">
-                  <p className="text-xs text-slate-500 mb-1">Confirms appointments:</p>
-                  <span className="px-2 py-0.5 bg-amber-600/10 text-amber-400 rounded-full text-xs border border-amber-600/20 inline-block">
+              <div className="pt-2 border-t border-[#334155] flex flex-wrap items-center gap-2">
+                <span className={`px-2 py-0.5 rounded-full text-xs border ${
+                  svc.confirmationModel === 'instant'
+                    ? 'bg-emerald-600/10 text-emerald-400 border-emerald-600/20'
+                    : 'bg-indigo-600/10 text-indigo-400 border-indigo-600/20'
+                }`}>
+                  {svc.confirmationModel === 'instant' ? '⚡ Instant' : '✋ Staff Approval'}
+                </span>
+                {svc.confirmationStaffId && svc.confirmationModel !== 'instant' && (
+                  <span className="px-2 py-0.5 bg-amber-600/10 text-amber-400 rounded-full text-xs border border-amber-600/20">
                     {svc.staff?.find(s => s.id === svc.confirmationStaffId)?.name || 'Unknown'}
                   </span>
-                </div>
-              )}
+                )}
+              </div>
 
               <button
                 onClick={() => setEditTarget(svc)}
@@ -312,6 +357,7 @@ export function ServicesPage() {
             durationMinutes: editTarget.durationMinutes,
             staffIds: editTarget.staff?.map(s => s.id) ?? [],
             confirmationStaffId: editTarget.confirmationStaffId ?? null,
+            confirmationModel: editTarget.confirmationModel ?? 'staff_confirm',
             isActive: editTarget.isActive,
           }}
           onSubmit={handleUpdate}

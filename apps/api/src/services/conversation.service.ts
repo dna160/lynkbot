@@ -13,6 +13,7 @@
  */
 import { eq, and, gt } from '@lynkbot/db';
 import { db, conversations, messages, buyers, tenants, products, waitlist, buyerGenomes, consentAudit } from '@lynkbot/db';
+import type { PlaybookOverrideData } from '@lynkbot/db';
 import {
   BUY_INTENT_KEYWORDS,
   OBJECTION_KEYWORDS,
@@ -606,11 +607,14 @@ export class ConversationService {
       history.push({ role: 'user', content: text });
     }
 
-    // Resolve confirmation staff — priority: flow START_SCHEDULING node > AI Playbook config
-    // Flow sets playbookOverride = 'staff:<uuid>' when START_SCHEDULING has assignedStaffId
+    // Resolve confirmation staff — priority: flow START_SCHEDULING node > AI Playbook config.
+    // playbookOverride is now JSONB (migration 0030); read as PlaybookOverrideData.
     let assignedStaffId: string | undefined;
-    if (conv.playbookOverride?.startsWith('staff:')) {
-      assignedStaffId = conv.playbookOverride.slice('staff:'.length);
+    let overrideConfirmationModel: string | undefined;
+    const schedOverride = conv.playbookOverride as PlaybookOverrideData | null;
+    if (schedOverride?.type === 'staff') {
+      assignedStaffId = schedOverride.staffId;
+      overrideConfirmationModel = schedOverride.confirmationModel;
     } else {
       const intentSvc = new IntentPlaybookService();
       const schedulingPlaybook = await intentSvc.getPlaybookBlock(conv.tenantId, 'SCHEDULING').catch(() => ({ nextStepConfig: null }));
@@ -648,6 +652,7 @@ export class ConversationService {
           { id: buyer.id, displayName: buyer.displayName, waPhone: buyer.waPhone },
           envelope,
           assignedStaffId,
+          overrideConfirmationModel as 'instant' | 'staff_confirm' | undefined,
         );
 
         // Send the human-readable result to the buyer
@@ -771,21 +776,24 @@ export class ConversationService {
       ? await db.query.products.findFirst({ where: eq(products.id, conv.productId) })
       : null;
 
-    // Load intent playbook — priority: flow ACTIVATE_PLAYBOOK node > LLM-classified intent > conv state
+    // Load intent playbook — priority: flow ACTIVATE_PLAYBOOK node > LLM-classified intent > conv state.
+    // playbookOverride is JSONB (migration 0030); only 'playbook' type entries carry intentKey.
     const intentSvc = new IntentPlaybookService();
-    // playbookOverride starting with 'staff:' is reserved for scheduling staff routing; skip it here
-    const flowPlaybookKey = conv.playbookOverride && !conv.playbookOverride.startsWith('staff:')
-      ? conv.playbookOverride
-      : undefined;
+    const aiOverride = conv.playbookOverride as PlaybookOverrideData | null;
+    const flowPlaybookKey = aiOverride?.type === 'playbook' ? aiOverride.intentKey : undefined;
     const playbookLookupKey = flowPlaybookKey ?? intentOverride ?? conv.state;
     const playbookResult = await intentSvc.getPlaybookBlock(conv.tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
 
     const systemPrompt = buildSystemPrompt({
-      storeName: tenant?.storeName ?? 'LynkBot Store',
+      storeName: tenant?.storeName ?? '',
       productName: product?.name,
       bookPersonaPrompt: product?.bookPersonaPrompt,
       language: (conv.language as 'id' | 'en') ?? 'id',
       playbookContext: playbookResult.block || undefined,
+      botName: tenant?.botName,
+      botTone: tenant?.botTone as import('@lynkbot/db').BotTone | null | undefined,
+      botGreetingStyle: tenant?.botGreetingStyle,
+      botCustomInstructions: tenant?.botCustomInstructions,
     });
 
     const stateOverlay = STATE_PROMPTS[conv.state as ConversationStateValue] ?? '';

@@ -8,6 +8,7 @@
  */
 import { createDecipheriv } from 'node:crypto';
 import { db, buyers, conversations, messages, tenants, flowExecutions, staff, appointments, products, intentPlaybooks, services, serviceStaff, staffAvailability, eq, and, or, not, sql } from '@lynkbot/db';
+import type { PlaybookOverrideData } from '@lynkbot/db';
 import { MetaClient, extractFirstMessage, isStatusUpdate, extractText, extractMessageId } from '@lynkbot/meta';
 import { FlowEngine } from '@lynkbot/flow-engine';
 import { getLLMClient, query as ragQuery, formatWIBDatetime, classifyMessageIntent, buildSystemPrompt, STATE_PROMPTS, SCHEDULING_SYSTEM_PROMPT, parseSchedulingEnvelope } from '@lynkbot/ai';
@@ -445,11 +446,12 @@ export async function processWebhookPayload(payload: Record<string, unknown>): P
         ),
       });
 
-      console.log(`[webhookProcessor] post-resume conv=${postFlowConv?.id} playbookOverride=${postFlowConv?.playbookOverride ?? 'none'}`);
+      const postOverride = postFlowConv?.playbookOverride as PlaybookOverrideData | null;
+      console.log(`[webhookProcessor] post-resume conv=${postFlowConv?.id} playbookOverride=${JSON.stringify(postOverride ?? null)}`);
 
-      if (postFlowConv?.playbookOverride && !postFlowConv.playbookOverride.startsWith('staff:')) {
-        activatedPlaybookKey = postFlowConv.playbookOverride;
-        postFlowConvId = postFlowConv.id;
+      if (postOverride?.type === 'playbook') {
+        activatedPlaybookKey = postOverride.intentKey;
+        postFlowConvId = postFlowConv!.id;
       }
     }
   } catch (err) {
@@ -714,12 +716,41 @@ async function handleStaffButtonReply(tenantId: string, appointmentId: string, i
       isWithin24hrWindow: true,
     }).catch(() => null);
   } else {
+    // Cancel the declined appointment
     await db.update(appointments).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(appointments.id, appointmentId));
-    await meta.sendText({
-      to: buyer.waPhone,
-      message: '😔 Maaf, dokter tidak dapat menerima appointment ini. Ingin coba jadwal lain? Balas dengan kata kunci booking untuk mulai ulang.',
-      isWithin24hrWindow: true,
-    }).catch(() => null);
+
+    // Reset conversation state back to SCHEDULING so the buyer can pick a new slot
+    // without having to restart the flow with a booking keyword.
+    const buyerConv = await db.query.conversations.findFirst({
+      where: and(eq(conversations.tenantId, tenantId), eq(conversations.buyerId, appt.buyerId), eq(conversations.isActive, true)),
+      columns: { id: true },
+    });
+    if (buyerConv) {
+      await db.update(conversations)
+        .set({ state: 'SCHEDULING', lastMessageAt: new Date() })
+        .where(eq(conversations.id, buyerConv.id));
+    }
+
+    // Re-present available slots for the same service
+    let declineMsg: string;
+    try {
+      const serviceRow = await db.query.services.findFirst({ where: eq(services.id, appt.serviceId) });
+      const slots = serviceRow ? await getAvailableSlots(tenantId, serviceRow.name, undefined, 3) : [];
+
+      if (slots.length > 0) {
+        const lines = slots.map((s, i) => {
+          const label = ['1️⃣', '2️⃣', '3️⃣'][i] ?? `${i + 1}.`;
+          return `${label} *${formatWIBDatetime(s.start, s.end)}* — ${s.staffName}`;
+        });
+        declineMsg = `😔 Maaf, jadwal yang dipilih tidak bisa dikonfirmasi.\n\nBerikut jadwal lain yang tersedia:\n\n${lines.join('\n')}\n\nPilih nomor berapa, Kak? 😊`;
+      } else {
+        declineMsg = `😔 Maaf, jadwal yang dipilih tidak bisa dikonfirmasi dan saat ini tidak ada jadwal lain yang tersedia. Silakan hubungi kami langsung.`;
+      }
+    } catch {
+      declineMsg = `😔 Maaf, jadwal tidak bisa dikonfirmasi. Balas *booking* untuk mencoba jadwal lain.`;
+    }
+
+    await meta.sendText({ to: buyer.waPhone, message: declineMsg, isWithin24hrWindow: true }).catch(() => null);
   }
 }
 
@@ -824,11 +855,11 @@ async function executeSchedulingEnvelope(
     const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, envelope.staff_id) });
     let notifyStaff = slotStaff;
 
-    // playbookOverride 'staff:<uuid>' routes confirmation to a different staff member
-    if (conv.playbookOverride?.startsWith('staff:')) {
-      const overrideId = conv.playbookOverride.slice('staff:'.length);
+    // playbookOverride JSONB { type:'staff', staffId } routes confirmation to configured staff member.
+    const bookingOverride = conv.playbookOverride as PlaybookOverrideData | null;
+    if (bookingOverride?.type === 'staff') {
       const overrideStaff = await db.query.staff.findFirst({
-        where: and(eq(staff.id, overrideId), eq(staff.tenantId, tenantId)),
+        where: and(eq(staff.id, bookingOverride.staffId), eq(staff.tenantId, tenantId)),
       });
       if (overrideStaff) notifyStaff = overrideStaff;
     }
@@ -876,10 +907,10 @@ async function executeSchedulingEnvelope(
 
     const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, oldAppt.staffId) });
     let notifyStaff = slotStaff;
-    if (conv.playbookOverride?.startsWith('staff:')) {
-      const overrideId = conv.playbookOverride.slice('staff:'.length);
+    const reschedOverride = conv.playbookOverride as PlaybookOverrideData | null;
+    if (reschedOverride?.type === 'staff') {
       const overrideStaff = await db.query.staff.findFirst({
-        where: and(eq(staff.id, overrideId), eq(staff.tenantId, tenantId)),
+        where: and(eq(staff.id, reschedOverride.staffId), eq(staff.tenantId, tenantId)),
       });
       if (overrideStaff) notifyStaff = overrideStaff;
     }
@@ -1024,18 +1055,22 @@ async function sendAiResponse(
 
   // Load intent playbook — use LLM-classified intent when available so the right
   // playbook fires even if conv.state hasn't transitioned yet.
-  const flowPlaybookKey = conv.playbookOverride && !conv.playbookOverride.startsWith('staff:')
-    ? conv.playbookOverride as MessageIntent : undefined;
+  const aiOverride = conv.playbookOverride as PlaybookOverrideData | null;
+  const flowPlaybookKey = aiOverride?.type === 'playbook' ? aiOverride.intentKey as MessageIntent : undefined;
   const playbookLookupKey = flowPlaybookKey ?? intentOverride ?? conv.state;
   const playbookResult = await getPlaybookBlock(tenantId, playbookLookupKey).catch(() => ({ block: '', nextStepType: 'continue_conversation' as const, nextStepConfig: null, fallbackMessage: null }));
   console.log(`[webhookProcessor] buyer=${buyer.id} playbookLookup=${playbookLookupKey} blockLen=${playbookResult.block.length} nextStep=${playbookResult.nextStepType}`);
 
   const systemPrompt = buildSystemPrompt({
-    storeName: tenant?.storeName ?? 'LynkBot Store',
+    storeName: tenant?.storeName ?? '',
     productName: product?.name,
     bookPersonaPrompt: product?.bookPersonaPrompt,
     language: (conv.language as 'id' | 'en') ?? 'id',
     playbookContext: playbookResult.block || undefined,
+    botName: tenant?.botName,
+    botTone: tenant?.botTone as import('@lynkbot/db').BotTone | null | undefined,
+    botGreetingStyle: tenant?.botGreetingStyle,
+    botCustomInstructions: tenant?.botCustomInstructions,
   });
 
   const stateOverlay = (STATE_PROMPTS as Record<string, string>)[conv.state] ?? '';

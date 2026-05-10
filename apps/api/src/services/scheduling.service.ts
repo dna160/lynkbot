@@ -12,7 +12,7 @@
 import { Queue } from 'bullmq';
 import {
   db,
-  appointments, staff, services, serviceStaff, staffAvailability, buyers,
+  appointments, staff, services, serviceStaff, staffAvailability, buyers, tenants, conversations,
   eq, and, or, sql,
 } from '@lynkbot/db';
 import { QUEUES, STAFF_CONFIRMATION_KEYWORDS, STAFF_REJECTION_KEYWORDS } from '@lynkbot/shared';
@@ -57,6 +57,19 @@ interface AvailableSlot {
   staffName: string;
   serviceId: string;
   durationMinutes: number;
+}
+
+/**
+ * Returns the WhatsApp template name to use for staff confirmation messages.
+ * Priority: service-level override → tenant-level override → system default.
+ */
+async function resolveStaffConfirmationTemplate(tenantId: string, serviceId: string | null): Promise<string> {
+  if (serviceId) {
+    const svc = await db.query.services.findFirst({ where: eq(services.id, serviceId) });
+    if (svc?.confirmationTemplateName) return svc.confirmationTemplateName;
+  }
+  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+  return tenant?.staffConfirmationTemplateName ?? 'appointment_confirmation';
 }
 
 export class SchedulingService {
@@ -342,13 +355,15 @@ export class SchedulingService {
     staffPhone: string,
     serviceName: string,
     tenantId: string,
+    serviceId?: string | null,
   ) {
     const meta = await getTenantMetaClient(tenantId);
     const timeDisplay = formatWIBDatetime(appt.startTime, appt.endTime);
+    const templateName = await resolveStaffConfirmationTemplate(tenantId, serviceId ?? null);
 
     await meta.sendTemplate({
       to: staffPhone,
-      templateName: 'aria_appointment_confirmation',
+      templateName,
       languageCode: 'id',
       components: [
         {
@@ -411,10 +426,47 @@ export class SchedulingService {
       );
       log.info({ appointmentId }, '[scheduling] Appointment confirmed by staff');
     } else {
+      // Cancel the declined appointment
       await this.updateAppointmentStatus(appointmentId, tenantId, 'cancelled');
-      const cancelMsg = `😔 Maaf, dokter tidak dapat menerima appointment ini. Ingin coba jadwal lain? Balas dengan kata kunci booking untuk mulai ulang.`;
-      await meta.sendText({ to: buyer.waPhone, message: cancelMsg, isWithin24hrWindow: true }).catch(() => null);
-      log.info({ appointmentId }, '[scheduling] Appointment declined by staff');
+
+      // Reset conversation state back to SCHEDULING so the buyer can pick a new slot
+      // without having to restart the whole flow with a keyword.
+      const buyerConv = await db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.tenantId, tenantId),
+          eq(conversations.buyerId, appt.buyerId),
+          eq(conversations.isActive, true),
+        ),
+        columns: { id: true },
+      });
+      if (buyerConv) {
+        await db.update(conversations)
+          .set({ state: 'SCHEDULING', lastMessageAt: new Date() })
+          .where(eq(conversations.id, buyerConv.id));
+      }
+
+      // Re-present available slots for the same service
+      let declineMsg: string;
+      try {
+        const serviceRow = await db.query.services.findFirst({ where: eq(services.id, appt.serviceId) });
+        const slots = serviceRow ? await this.getAvailableSlots(tenantId, serviceRow.name, undefined, 3) : [];
+
+        if (slots.length > 0) {
+          const lines = slots.map((s, i) => {
+            const label = ['1️⃣', '2️⃣', '3️⃣'][i] ?? `${i + 1}.`;
+            return `${label} *${formatWIBDatetime(s.start, s.end)}* — ${s.staffName}`;
+          });
+          declineMsg = `😔 Maaf, jadwal yang dipilih tidak bisa dikonfirmasi.\n\nBerikut jadwal lain yang tersedia:\n\n${lines.join('\n')}\n\nPilih nomor berapa, Kak? 😊`;
+        } else {
+          declineMsg = `😔 Maaf, jadwal yang dipilih tidak bisa dikonfirmasi dan saat ini tidak ada jadwal lain yang tersedia. Silakan hubungi kami langsung.`;
+        }
+      } catch (err) {
+        log.warn({ appointmentId, err }, '[scheduling] Failed to fetch slots for decline message');
+        declineMsg = `😔 Maaf, jadwal tidak bisa dikonfirmasi. Balas *booking* untuk mencoba jadwal lain.`;
+      }
+
+      await meta.sendText({ to: buyer.waPhone, message: declineMsg, isWithin24hrWindow: true }).catch(() => null);
+      log.info({ appointmentId }, '[scheduling] Appointment declined — slots re-presented to buyer');
     }
   }
 
@@ -470,6 +522,7 @@ export class SchedulingService {
     buyer: { id: string; displayName?: string | null; waPhone: string },
     envelope: { action: string; service_name?: string; requested_datetime?: string; staff_id?: string; service_id?: string; start_time?: string; previous_appointment_id?: string },
     overrideConfirmationStaffId?: string,
+    confirmationModel?: 'instant' | 'staff_confirm',
   ): Promise<string> {
     if (envelope.action === 'check_availability') {
       const slots = await this.getAvailableSlots(
@@ -498,20 +551,32 @@ export class SchedulingService {
       const appt = await this.createAppointment(
         tenantId, buyer.id, envelope.staff_id, envelope.service_id, startTime,
       );
-      await this.updateAppointmentStatus(appt.id, tenantId, 'pending_doctor');
 
-      // Fetch slot staff + service; optionally override which staff gets the confirmation
       const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, envelope.staff_id) });
       const serviceRow = await db.query.services.findFirst({ where: eq(services.id, envelope.service_id) });
+      const timeDisplay = formatWIBDatetime(startTime, new Date(startTime.getTime() + (serviceRow?.durationMinutes ?? 60) * 60 * 1000));
 
-      // Playbook assignedStaffId overrides the slot staff for the confirmation notification
-      const notifyStaff = overrideConfirmationStaffId
-        ? (await db.query.staff.findFirst({ where: and(eq(staff.id, overrideConfirmationStaffId), eq(staff.tenantId, tenantId)) }) ?? slotStaff)
-        : slotStaff;
+      // ── Instant confirmation — auto-confirm, skip staff notification ──────────
+      if (confirmationModel === 'instant') {
+        await this.updateAppointmentStatus(appt.id, tenantId, 'confirmed');
+        return `✅ Appointment kamu *dikonfirmasi*!\n\n📅 ${timeDisplay}\n🏥 ${serviceRow?.name ?? 'Konsultasi'}\n\nSampai jumpa! Hubungi kami jika ada perubahan.`;
+      }
+
+      // ── Staff-confirm (default) — pending_doctor + notify staff ───────────────
+      await this.updateAppointmentStatus(appt.id, tenantId, 'pending_doctor');
+
+      // Confirmation staff priority: explicit override → service.confirmationStaffId → slot staff
+      let notifyStaff = slotStaff;
+      if (overrideConfirmationStaffId) {
+        notifyStaff = (await db.query.staff.findFirst({ where: and(eq(staff.id, overrideConfirmationStaffId), eq(staff.tenantId, tenantId)) })) ?? slotStaff;
+      } else {
+        const svcConfirmStaff = await this.getConfirmationStaff(envelope.service_id, tenantId);
+        if (svcConfirmStaff) notifyStaff = svcConfirmStaff;
+      }
 
       if (notifyStaff && serviceRow) {
         await this.sendStaffConfirmationTemplate(
-          appt, buyer.displayName ?? 'Pelanggan', notifyStaff.name, notifyStaff.phoneNumber, serviceRow.name, tenantId,
+          appt, buyer.displayName ?? 'Pelanggan', notifyStaff.name, notifyStaff.phoneNumber, serviceRow.name, tenantId, envelope.service_id,
         ).catch(err => console.error('[scheduling] Staff confirmation template failed:', err));
       }
 

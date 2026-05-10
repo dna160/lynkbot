@@ -40,6 +40,7 @@ export interface ServiceRow {
   durationMinutes: number;
   isActive: boolean;
   confirmationStaffId?: string | null;
+  confirmationModel?: 'staff_confirm' | 'instant';
   staff?: StaffRow[];
   createdAt: string;
   updatedAt: string;
@@ -140,7 +141,7 @@ export function useService(id: string | undefined) {
 
 export function useCreateService() {
   const qc = useQueryClient();
-  return useMutation<ServiceRow, Error, { name: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string; isActive?: boolean }>({
+  return useMutation<ServiceRow, Error, { name: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string; confirmationModel?: 'staff_confirm' | 'instant'; isActive?: boolean }>({
     mutationFn: (body) => api.post('/scheduling/services', body).then((d) => d.data.service),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.services }),
   });
@@ -148,7 +149,7 @@ export function useCreateService() {
 
 export function useUpdateService() {
   const qc = useQueryClient();
-  return useMutation<ServiceRow, Error, { id: string; name?: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string | null; isActive?: boolean }>({
+  return useMutation<ServiceRow, Error, { id: string; name?: string; durationMinutes?: number; staffIds?: string[]; confirmationStaffId?: string | null; confirmationModel?: 'staff_confirm' | 'instant'; isActive?: boolean }>({
     mutationFn: ({ id, ...body }) => api.put(`/scheduling/services/${id}`, body).then((d) => d.data.service),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.services });
