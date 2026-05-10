@@ -857,7 +857,7 @@ async function executeSchedulingEnvelope(
 
     // playbookOverride JSONB { type:'staff', staffId } routes confirmation to configured staff member.
     const bookingOverride = conv.playbookOverride as PlaybookOverrideData | null;
-    if (bookingOverride?.type === 'staff') {
+    if (bookingOverride?.type === 'staff' && bookingOverride.staffId) {
       const overrideStaff = await db.query.staff.findFirst({
         where: and(eq(staff.id, bookingOverride.staffId), eq(staff.tenantId, tenantId)),
       });
@@ -908,7 +908,7 @@ async function executeSchedulingEnvelope(
     const slotStaff = await db.query.staff.findFirst({ where: eq(staff.id, oldAppt.staffId) });
     let notifyStaff = slotStaff;
     const reschedOverride = conv.playbookOverride as PlaybookOverrideData | null;
-    if (reschedOverride?.type === 'staff') {
+    if (reschedOverride?.type === 'staff' && reschedOverride.staffId) {
       const overrideStaff = await db.query.staff.findFirst({
         where: and(eq(staff.id, reschedOverride.staffId), eq(staff.tenantId, tenantId)),
       });
