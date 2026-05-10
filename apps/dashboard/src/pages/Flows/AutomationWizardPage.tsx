@@ -737,7 +737,7 @@ export function AutomationWizardPage() {
           </h2>
         </div>
 
-        {CurrentStep && <CurrentStep />}
+        {CurrentStep?.()}
 
         {/* Footer nav */}
         <div className="flex items-center justify-between mt-6 pt-4 border-t border-[#1E293B]">
