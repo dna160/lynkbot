@@ -17,20 +17,23 @@ import { stockReleaseProcessor } from './processors/stockRelease.processor';
 import { restockProcessor } from './processors/restock.processor';
 import { watiStatusProcessor } from './processors/watiStatus.processor';
 
-// Parse REDIS_URL if provided (preferred over individual vars)
 function getRedisConnection() {
   if (process.env.REDIS_URL) {
     const url = new URL(process.env.REDIS_URL);
     return {
       host: url.hostname,
       port: Number(url.port) || 6379,
+      username: url.username || undefined,
       password: url.password || undefined,
+      maxRetriesPerRequest: null,
     };
   }
   return {
     host: process.env.REDIS_HOST ?? 'localhost',
     port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
+    username: process.env.REDIS_USER || undefined,
+    password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null,
   };
 }
 
