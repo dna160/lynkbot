@@ -10,23 +10,14 @@
  *           standalone so the worker has no import dependency on apps/api.
  * Exports : workerFlowEngine
  */
-import Redis from 'ioredis';
 import { FlowEngine } from '@lynkbot/flow-engine';
 import { getTenantMetaClient } from './_meta.helper';
+import { redisConnection, makeRedisClient } from './redis';
 
-function getRedisConnection() {
-  return {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-    password: process.env.REDIS_PASSWORD,
-  };
-}
-
-const redisConn = getRedisConnection();
-const redisClient = new Redis(redisConn);
+const redisClient = makeRedisClient();
 
 export const workerFlowEngine = new FlowEngine({
   getMetaClient: getTenantMetaClient,
   redisClient,
-  redisConnection: redisConn,
+  redisConnection,
 });
