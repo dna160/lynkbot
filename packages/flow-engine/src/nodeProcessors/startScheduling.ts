@@ -15,6 +15,7 @@ import { db, conversations, eq, and } from '@lynkbot/db';
 import type { PlaybookOverrideData } from '@lynkbot/db';
 import type { FlowNode, ExecutionContext, StartSchedulingConfig } from '../types';
 import type { NodeResult, ProcessorDeps } from './types';
+import { saveOutboundMessage } from '../saveOutboundMessage';
 
 export async function startSchedulingProcessor(
   node: FlowNode,
@@ -28,6 +29,7 @@ export async function startSchedulingProcessor(
     try {
       const meta = await deps.getMetaClient(ctx.tenantId);
       await meta.sendText({ to: ctx.buyer.waPhone, message: config.introMessage, isWithin24hrWindow: true });
+      saveOutboundMessage(ctx.tenantId, ctx.buyerId, config.introMessage, 'text').catch(() => null);
     } catch (err) {
       console.warn('[startScheduling] Failed to send intro message:', err);
     }

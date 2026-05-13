@@ -30,6 +30,7 @@ import {
   parseSchedulingEnvelope,
   formatWIBDatetime,
 } from '@lynkbot/ai';
+import { saveOutboundMessage } from '../saveOutboundMessage';
 import type { FlowNode, ExecutionContext, AgentConfig } from '../types';
 import type { NodeResult, ProcessorDeps } from './types';
 
@@ -360,6 +361,7 @@ export async function agentProcessor(
   if (isFirstEntry && config.introMessage?.trim() && !userMessage) {
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: config.introMessage, isWithin24hrWindow: true }).catch(() => null);
+    saveOutboundMessage(ctx.tenantId, ctx.buyerId, config.introMessage, 'text').catch(() => null);
 
     if (config.memoryEnabled) {
       history.push({ role: 'assistant', content: config.introMessage });
@@ -382,7 +384,9 @@ export async function agentProcessor(
 
   if (activeServices.length === 0) {
     const meta = await deps.getMetaClient(ctx.tenantId);
-    await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung. 🙏', isWithin24hrWindow: true }).catch(() => null);
+    const noSvcMsg = 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung. 🙏';
+    await meta.sendText({ to: ctx.buyer.waPhone, message: noSvcMsg, isWithin24hrWindow: true }).catch(() => null);
+    saveOutboundMessage(ctx.tenantId, ctx.buyerId, noSvcMsg, 'text').catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'no_active_services' });
     return { parallelNextNodeIds: ['action_0', 'action_1'] };
   }
@@ -438,7 +442,9 @@ ${actionLines}`;
   } catch (err) {
     console.error('[agentProcessor] LLM call failed:', err);
     const meta = await deps.getMetaClient(ctx.tenantId);
-    await meta.sendText({ to: ctx.buyer.waPhone, message: 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.', isWithin24hrWindow: true }).catch(() => null);
+    const errMsg = 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.';
+    await meta.sendText({ to: ctx.buyer.waPhone, message: errMsg, isWithin24hrWindow: true }).catch(() => null);
+    saveOutboundMessage(ctx.tenantId, ctx.buyerId, errMsg, 'text').catch(() => null);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'llm_failed' });
     return { parallelNextNodeIds: ['action_0', 'action_1'] };
   }
@@ -454,6 +460,7 @@ ${actionLines}`;
     const meta = await deps.getMetaClient(ctx.tenantId);
     if (exitAction.message) {
       await meta.sendText({ to: ctx.buyer.waPhone, message: exitAction.message, isWithin24hrWindow: true }).catch(() => null);
+      saveOutboundMessage(ctx.tenantId, ctx.buyerId, exitAction.message, 'text').catch(() => null);
       history.push({ role: 'assistant', content: exitAction.message });
       if (config.memoryEnabled) ctx.variables[memoryKey] = history;
     }
@@ -482,10 +489,11 @@ ${actionLines}`;
     shouldExit = false;
   }
 
-  // Send reply to buyer
+  // Send reply to buyer and persist to dashboard conversation thread
   try {
     const meta = await deps.getMetaClient(ctx.tenantId);
     await meta.sendText({ to: ctx.buyer.waPhone, message: replyText, isWithin24hrWindow: true });
+    saveOutboundMessage(ctx.tenantId, ctx.buyerId, replyText, 'text').catch(() => null);
   } catch (err) {
     console.error('[agentProcessor] Failed to send reply to buyer:', err);
     ctx.executionLog.push({ nodeId: node.id, nodeType: node.type, timestamp: new Date().toISOString(), status: 'error', error: 'send_failed' });

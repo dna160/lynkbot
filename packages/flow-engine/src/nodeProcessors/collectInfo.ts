@@ -21,6 +21,7 @@
  */
 import type { FlowNode, ExecutionContext, CollectInfoConfig, CollectInfoQuestion } from '../types';
 import type { NodeResult, ProcessorDeps } from './types';
+import { saveOutboundMessage } from '../saveOutboundMessage';
 
 const INDEX_KEY = (nodeId: string) => `collectInfo_${nodeId}_index`;
 const ANSWER_KEY = (variableName: string) => `answers.${variableName}`;
@@ -36,8 +37,10 @@ async function sendQuestion(
     // MetaClient doesn't have sendInteractive — send numbered choice list as plain text.
     const message = `${question.promptText}\n\n${question.choices.slice(0, 3).map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
     await meta.sendText({ to: ctx.buyer.waPhone, message, isWithin24hrWindow: true }).catch(() => null);
+    saveOutboundMessage(ctx.tenantId, ctx.buyerId, message, 'text').catch(() => null);
   } else {
     await meta.sendText({ to: ctx.buyer.waPhone, message: question.promptText, isWithin24hrWindow: true }).catch(() => null);
+    saveOutboundMessage(ctx.tenantId, ctx.buyerId, question.promptText, 'text').catch(() => null);
   }
 }
 
