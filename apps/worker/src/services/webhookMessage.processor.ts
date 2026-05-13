@@ -610,7 +610,7 @@ async function handleInboundConversation(
     await db.update(buyers).set({ doNotContact: true, updatedAt: new Date() }).where(eq(buyers.id, buyer.id));
     await db.update(conversations).set({ state: 'CLOSED_LOST', isActive: false, resolvedAt: new Date(), lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
     if (isWithin24HourWindow(conv.lastMessageAt)) {
-      await sendText(tenantId, buyer.waPhone, 'Kamu telah berhenti. Untuk mulai lagi, chat kami kapan saja.');
+      await sendText(tenantId, buyer.waPhone, 'Kamu telah berhenti. Untuk mulai lagi, chat kami kapan saja.', conv.id);
     }
     return;
   }
@@ -618,7 +618,7 @@ async function handleInboundConversation(
   if (containsAny(text, AGENT_KEYWORDS)) {
     await db.update(conversations).set({ state: 'ESCALATED', lastMessageAt: new Date() }).where(eq(conversations.id, conv.id));
     if (isWithin24HourWindow(conv.lastMessageAt)) {
-      await sendText(tenantId, buyer.waPhone, 'Menghubungkan ke tim kami... ⏳');
+      await sendText(tenantId, buyer.waPhone, 'Menghubungkan ke tim kami... ⏳', conv.id);
     }
     return;
   }
@@ -952,7 +952,7 @@ async function handleSchedulingBuyerMessage(
   });
 
   if (activeServices.length === 0) {
-    await sendText(tenantId, buyer.waPhone, 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung untuk membuat janji. 🙏');
+    await sendText(tenantId, buyer.waPhone, 'Maaf, saat ini sistem booking belum tersedia. Silakan hubungi kami langsung untuk membuat janji. 🙏', conv.id);
     return;
   }
 
@@ -968,7 +968,7 @@ async function handleSchedulingBuyerMessage(
     responseText = llmResponse.content.trim();
   } catch (err) {
     console.error('[webhookProcessor] Scheduling LLM call failed:', err);
-    await sendText(tenantId, buyer.waPhone, 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.');
+    await sendText(tenantId, buyer.waPhone, 'Maaf, ada gangguan teknis. Silakan coba lagi atau hubungi kami langsung.', conv.id);
     return;
   }
 
@@ -1007,10 +1007,23 @@ async function handleSchedulingBuyerMessage(
   }
 }
 
-async function sendText(tenantId: string, to: string, message: string): Promise<void> {
+async function sendText(tenantId: string, to: string, message: string, convId?: string): Promise<void> {
   try {
     const meta = await getTenantMetaClient(tenantId);
     await meta.sendText({ to, message, isWithin24hrWindow: true });
+
+    // Persist outbound message to dashboard conversation thread when convId is provided
+    if (convId) {
+      await db.insert(messages).values({
+        conversationId: convId,
+        tenantId,
+        direction: 'outbound',
+        messageType: 'text',
+        textContent: message,
+        createdAt: new Date(),
+      }).onConflictDoNothing().catch(() => null);
+      await db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, convId)).catch(() => null);
+    }
   } catch (err) {
     console.error(`[webhookProcessor] sendText failed:`, err);
   }
